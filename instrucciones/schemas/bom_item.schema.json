@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "bom_item.schema.json",
+  "title": "BOM Item (Exploded o High-Level)",
+  "description": "Estructura de un ítem dentro de un BOM (high-level o exploded). Para HL, los accesorios se describen dentro de descripcion_completa; para exploded, cada accesorio es su propio ítem con parent_id.",
+  "type": "object",
+  "required": ["id", "grupo", "tipo", "descripcion", "referencia_eett", "requisitos_en_contexto"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "ID consecutivo: HL-001, IT-0001, etc.",
+      "pattern": "^(HL|IT)-[0-9]{3,4}$"
+    },
+    "parent_id": {
+      "type": "string",
+      "description": "ID del ítem padre (vacío si independiente)"
+    },
+    "grupo": {
+      "type": "string",
+      "description": "Clasificación inferida (Comunicaciones, Energía, Servicios, etc.)"
+    },
+    "tipo": {
+      "type": "string",
+      "enum": ["BIEN", "SERVICIO"]
+    },
+    "major_unit": {
+      "type": "string",
+      "description": "Solo para BOM HL: nombre corto del major unit"
+    },
+    "descripcion": {
+      "type": "string"
+    },
+    "descripcion_completa": {
+      "type": "string",
+      "description": "Solo para BOM HL: incluye accesorios en la descripción"
+    },
+    "cantidad": { "type": "string" },
+    "unidad": { "type": "string" },
+    "referencia_eett": { "type": "string" },
+    "requisitos_en_contexto": {
+      "type": "array",
+      "description": "Requisitos extraídos verbatim de la sección donde el ítem se menciona. Esto preserva la correlación ítem ↔ requisitos.",
+      "items": {
+        "type": "object",
+        "required": ["texto_verbatim", "referencia"],
+        "properties": {
+          "texto_verbatim": { "type": "string" },
+          "referencia": { "type": "string" }
+        }
+      }
+    },
+    "marcadores": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["inferido", "tbd", "asociacion_inferida"]
+      }
+    },
+    "notas_bom": { "type": "string" }
+  }
+}

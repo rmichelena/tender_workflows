@@ -1,0 +1,139 @@
+## Entregable 3 — `params.yaml` (versión final)
+
+```yaml
+# params.yaml — Parámetros operativos del workflow de procurement
+version: 1.0
+
+# --- Batching y límites ---
+batching:
+  batch_size_items_step6: 3           # ítems simultáneos en paso 6 (= 3 subagentes-item)
+  search_workers_per_item: 2          # workers de búsqueda por ítem
+
+limits:
+  max_relanzamientos_item: 2          # reintentos adicionales al intento inicial
+  min_candidatos_validos_por_item: 1  # mínimo para considerar ítem resuelto
+  objetivo_candidatos_por_item: 3     # ideal (shortlist)
+
+# --- Timeouts (segundos) ---
+timeouts:
+  default: 300                        # 5 min — pasos estándar (OCR, merge, BOM, specs, QA)
+  search_worker: 600                  # 10 min — búsqueda web por worker
+  item_manager: 1500                  # 25 min — ciclo completo del subagente-item (incluye reintentos)
+
+# --- Reintentos por tool ---
+retries:
+  tool_call_default: 2
+  per_tool:
+    brave: 1
+    perplexity: 1
+    tinyfish: 1
+    firecrawl: 2                      # parsing puede fallar por timeout de sitio
+
+# --- Política de diversidad ---
+diversity:
+  no_repetir_modelo_en_subagentes_paralelos: true
+  no_repetir_tool_en_subagentes_paralelos: true
+  rotar_modelo_y_tool_en_relanzamientos: true
+  revisor_debe_usar_modelo_distinto_al_productor: true
+
+# --- Combos sugeridos para paso 6 (rotación) ---
+step6_combos:
+  intento_1:
+    worker_a: {model: Kimi-K2.6, tool: brave}
+    worker_b: {model: GLM-5.1, tool: perplexity}
+  intento_2:
+    worker_a: {model: Gemini-2.5-Pro, tool: tinyfish}
+    worker_b: {model: GPT-5.4-Mini, tool: brave}
+  intento_3:
+    worker_a: {model: DeepSeek-V4-Pro, tool: perplexity}
+    worker_b: {model: Qwen-3.6-Plus, tool: tinyfish}
+```
+
+---
+
+## Entregable 4 — `catalog_modelos.md` (versión final)
+
+```md
+# Catálogo de modelos disponibles
+
+> El orquestador selecciona modelos desde este catálogo según la función requerida por cada paso.
+> Reglas: diversidad en paralelo, rotación en reintentos, revisor ≠ productor.
+
+## Tabla de capacidades
+
+| Modelo | Visión | Razonamiento | Contexto | Fortalezas principales |
+|--------|--------|-------------|----------|----------------------|
+| GPT-5.5 | Sí | Muy fuerte | ~400K–1M | Planificación, orchestration, autonomía, tool use |
+| GPT-5.4 | Sí | Fuerte | ~400K+ | Reasoning sólido, merge/consolidación |
+| GPT-5.4 Mini | Sí | Medio | ~200K+ | Velocidad, throughput alto, costo bajo |
+| GPT-5.3 Codex | Parcial | Fuerte (coding) | ~200K+ | Edición multiarchivo, scripts, validadores |
+| GLM-5.1 | No | Fuerte | ~203K | Workflows autónomos, tool use, razonamiento estructurado |
+| GLM-5V Turbo | Sí | Fuerte | ~203K | Visión documental, extracción de tablas/figuras |
+| GLM-5 Turbo | No | Medio | ~203K | Throughput rápido, tareas repetitivas |
+| Gemini 2.5 Pro | Sí | Muy fuerte | ~1M | Docs largos, multimodalidad, auditoría, contexto masivo |
+| Gemini 3.1 Pro | Sí | Muy fuerte | ~1M+ | Contexto extremo, tool calling nativo |
+| Kimi K2.6 | Sí | Muy fuerte | ~256K | Agentes, tool orchestration, búsqueda exploratoria |
+| Kimi K2.5 Turbo | Sí | Moderado | ~256K | Eficiente, workflows largos, buen tool use |
+| DeepSeek V4 Pro | No | Muy fuerte | ~256K | Razonamiento técnico avanzado, coding |
+| Qwen 3.6 Plus | Limitado | Fuerte | ~256K | Reasoning, tool use, diversidad |
+
+## Funciones permitidas por modelo
+| Función | Modelos aptos |
+|---------|--------------|
+| Orquestador | GPT-5.5, Gemini 3.1 Pro, Kimi K2.6 |
+| OCR / Visión documental | Gemini 2.5 Pro, GPT-5.5, GLM-5V Turbo, Kimi K2.6 |
+| BOM / Extracción (variantes) | Kimi K2.6, GLM-5.1, Gemini 2.5 Pro, DeepSeek V4 Pro, Qwen 3.6 Plus, GPT-5.4 Mini |
+| Specs / Herencia (reasoning largo) | GPT-5.5, Gemini 2.5 Pro, GLM-5.1, Kimi K2.6 |
+| Auditor / Revisor | GPT-5.4, Gemini 2.5 Pro, Kimi K2.6, GLM-5.1 |
+| Subagente-Item (paso 6) | GPT-5.5, GLM-5.1, Kimi K2.6 |
+| Search Worker (paso 6) | Kimi K2.5 Turbo, GPT-5.4 Mini, GLM-5 Turbo, Qwen 3.6 Plus |
+| Throughput / Transformaciones | GPT-5.4 Mini, GLM-5 Turbo, Kimi K2.5 Turbo |
+
+## Anti-patterns (no usar para)
+
+| Modelo | No recomendado para |
+|--------|-------------------|
+| GPT-5.4 Mini | Auditoría crítica, decisiones de escalamiento |
+| GLM-5.1, DeepSeek V4 Pro | OCR/visión (no tienen capacidad visual) |
+| GLM-5 Turbo | Auditoría, decisiones complejas |
+| GPT-5.3 Codex | Búsqueda web, OCR |
+| Gemini 2.5/3.1 Pro | Workers repetitivos de alto throughput (sobredimensionado) |
+```
+
+---
+
+## Entregable 5 — `catalog_tools.md` (versión final)
+
+```md
+# Catálogo de tools (search / fetch)
+
+> El orquestador y subagentes-item seleccionan tools desde este catálogo.
+> Reglas: diversidad entre workers paralelos, rotación en reintentos.
+
+## Tools disponibles
+
+| Tool | Tipo | Descripción | Fortalezas | Limitaciones |
+|------|------|-------------|-----------|-------------|
+| Brave | Search web | Motor de búsqueda general | Buen recall, rápido, cobertura amplia de fabricantes y distribuidores | Puede traer ruido; requiere buenos keywords |
+| Perplexity | Search + síntesis | Búsqueda con respuesta sintetizada y citas | Acelera shortlist inicial, provee URLs de evidencia directamente | Puede citar fuentes secundarias; verificar siempre contra fabricante |
+| Tinyfish | Search web | Motor alternativo con índice diferente a Brave | Diversidad de resultados, cobertura de nicho/B2B | Cobertura variable según dominio |
+| Firecrawl | Fetch / parse | Extrae contenido limpio de URLs (HTML, PDF) | Parsing de datasheets, manuales, fichas técnicas | No es motor de búsqueda; necesita URL como input |
+
+## Cuándo usar cada tool
+
+| Situación | Tool recomendado |
+|-----------|-----------------|
+| Búsqueda inicial de candidatos (worker A) | Brave o Perplexity |
+| Búsqueda inicial de candidatos (worker B, diversidad) | Tinyfish o el que no se usó en A |
+| Relanzamiento (rotación) | Tool no usada en intento anterior |
+| Validación de evidencia (descargar datasheet/manual) | Firecrawl |
+| Confirmar página de fabricante activa (no EOL) | Brave o Firecrawl |
+
+## Reglas operativas
+
+1. Workers paralelos del mismo ítem: tools distintas obligatoriamente.
+2. Relanzamientos: rotar a tool no usada en intentos previos.
+3. Validación de specs hard: el subagente-item usa Firecrawl para parsear el datasheet del fabricante y confirmar valores.
+4. Evidencia de producto vigente: verificar que la página del fabricante está activa y sin mención de EOL/discontinuado. Brave para encontrar la URL, Firecrawl para parsear el contenido si es necesario.
+```
+

@@ -1,0 +1,83 @@
+# Carpeta `instrucciones/` — Workflow de Procurement para Licitación
+
+Esta carpeta contiene el conjunto completo de prompts, parámetros y catálogos que un agente orquestador debe cargar para ejecutar de extremo a extremo un proceso de procurement: desde EETT/aclaraciones hasta un shortlist consolidado con matrices de cumplimiento.
+
+## Cómo se usa
+
+1. Apuntá un agente orquestador (modelo recomendado: GPT-5.5, Gemini 3.1 Pro o Kimi K2.6) a esta carpeta.
+2. Indicale dónde está la carpeta del proyecto (con `inputs/`, donde viven EETT, anexos y aclaraciones).
+3. El orquestador leerá `00_prompt_orquestador.md` y desde ahí descubrirá todo el resto.
+
+## Mapa de archivos
+
+```
+instrucciones/
+├── README.md                              ← este archivo
+├── 00_prompt_orquestador.md               ← punto de entrada del orquestador
+├── 01_workflow.md                         ← runbook operativo (pasos 1→7)
+├── params.yaml                            ← timeouts, reintentos, batch, combos
+├── catalog_modelos.md                     ← modelos disponibles + funciones permitidas
+├── catalog_tools.md                       ← search/fetch providers + reglas de uso
+├── formato_matriz_cumplimiento.md         ← formato obligatorio de matriz por candidato
+├── prompts/                               ← plantillas para subagentes
+│   ├── prompt_ocr_vision.md
+│   ├── prompt_merge_aclaraciones_ejecutor.md
+│   ├── prompt_merge_aclaraciones_auditor.md
+│   ├── prompt_bom_highlevel.md
+│   ├── prompt_bom_exploded.md
+│   ├── prompt_item_pack_from_bom.md
+│   ├── prompt_specs_verificacion_herencia.md
+│   ├── prompt_specs_revisor.md
+│   ├── prompt_bom_para_busqueda.md
+│   ├── prompt_item_manager.md
+│   ├── prompt_search_worker.md
+│   ├── prompt_consolidacion_paso7.md
+│   └── prompt_QA_final.md
+└── schemas/                               ← contratos JSON (canónicos máquina)
+    ├── bom_item.schema.json
+    ├── item_specs.schema.json
+    ├── candidato_cumplimiento.schema.json
+    └── consolidado_row.schema.json
+```
+
+## Convenciones de formato
+
+| Tipo de artefacto | Formato canónico (que produce el agente) | Derivados (auto, para humano) |
+|---|---|---|
+| EETT y aclarados (paso 1) | Markdown | — |
+| BOM (HL, exploded, búsqueda) | JSON | TSV + MD |
+| Item pack (paso 2.5) | JSON por ítem | MD por ítem |
+| Specs por ítem (paso 3) | JSON por ítem | MD por ítem |
+| Resultados de búsqueda (paso 6) | JSON por ítem | MD por ítem |
+| Matrices de cumplimiento | JSON por candidato | MD por candidato |
+| Consolidado final (paso 7) | JSON | TSV + MD + XLSX |
+| Reportes (auditoría, QA, log) | Markdown | — |
+| Configuración (overlay, params) | YAML | — |
+
+Regla: cuando un subagente produce JSON, el orquestador genera los derivados automáticamente (la conversión es trivial y determinista).
+
+## Estructura esperada de la carpeta de proyecto
+
+```
+proyecto/
+├── inputs/                          (EETT, anexos, aclaraciones — read-only)
+├── overlay_usuario.yaml             (preferencias capturadas en Gate 0)
+├── artifacts/
+│   ├── step_1_normalizados/         (markdowns de docs fuente)
+│   ├── step_1_aclaradas/            (docs aclarados + auditoría)
+│   ├── step_2_bom/                  (variantes + consolidados HL y exploded, con specs en contexto)
+│   ├── step_2_5_items/              (1 JSON+MD por ítem, base estructurada)
+│   ├── step_3_specs/                (ítems verificados, con herencia resuelta + revisión)
+│   ├── step_4_busqueda/             (BOM búsqueda — solo bienes, sin cantidades)
+│   └── step_6_resultados/
+│       ├── items/                   (resultado por ítem en JSON+MD)
+│       └── matrices/ITEM-XXX/       (matrices por candidato en JSON+MD)
+├── outputs/
+│   ├── consolidado.json             (canónico)
+│   ├── consolidado.tsv              (derivado tabular)
+│   ├── consolidado.md               (derivado legible)
+│   ├── consolidado.xlsx             (derivado Excel)
+│   └── QA_report.md
+└── logs/
+    └── decision_log.md              (modelos usados, reintentos, escalamientos)
+```

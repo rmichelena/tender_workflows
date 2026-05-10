@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "item_specs.schema.json",
+  "title": "Item con specs verificadas (paso 3)",
+  "type": "object",
+  "required": ["item_id", "nombre", "tipo", "estado_specs", "requerimientos"],
+  "properties": {
+    "item_id": { "type": "string" },
+    "nombre": { "type": "string" },
+    "tipo": { "type": "string", "enum": ["BIEN", "SERVICIO"] },
+    "grupo": { "type": "string" },
+    "parent_id": { "type": "string" },
+    "cantidad": { "type": "string" },
+    "unidad": { "type": "string" },
+    "referencia_eett": { "type": "string" },
+    "estado_specs": {
+      "type": "string",
+      "enum": ["PENDIENTE_VERIFICACION", "VERIFICADO", "REVISADO"]
+    },
+    "fuentes_consultadas": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "requisitos_en_contexto": {
+      "type": "array",
+      "description": "Solo presente en estado PENDIENTE_VERIFICACION (paso 2.5)",
+      "items": {
+        "type": "object",
+        "required": ["texto_verbatim", "referencia"],
+        "properties": {
+          "texto_verbatim": { "type": "string" },
+          "referencia": { "type": "string" }
+        }
+      }
+    },
+    "requerimientos": {
+      "type": "array",
+      "description": "Lista normalizada y clasificada (paso 3+)",
+      "items": {
+        "type": "object",
+        "required": ["req_id", "texto_verbatim", "hard_soft", "origen", "referencias"],
+        "properties": {
+          "req_id": {
+            "type": "string",
+            "pattern": "^R-[0-9]{3}$"
+          },
+          "texto_verbatim": { "type": "string" },
+          "hard_soft": { "type": "string", "enum": ["Hard", "Soft"] },
+          "origen": { "type": "string", "enum": ["DIRECTO", "HEREDADO"] },
+          "origen_extraccion": {
+            "type": "string",
+            "enum": ["PASO_2", "ANADIDO_EN_VERIFICACION"],
+            "description": "Solo para origen DIRECTO"
+          },
+          "origen_padre": {
+            "type": ["string", "null"],
+            "description": "Solo para origen HEREDADO: item_id del padre"
+          },
+          "referencias": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "notas": { "type": "string" },
+          "notas_herencia": { "type": "string" }
+        }
+      }
+    },
+    "tbd": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "descripcion": { "type": "string" },
+          "referencia": { "type": "string" },
+          "falta": { "type": "string" }
+        }
+      }
+    }
+  }
+}

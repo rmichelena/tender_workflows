@@ -1,0 +1,146 @@
+# Formato obligatorio — Matriz de cumplimiento por candidato
+
+> Se produce un par de archivos (JSON canónico + MD derivado) por cada candidato clasificado como **Válido** o **Condicionado**.
+> Cada matriz evalúa el candidato contra **TODOS** los requisitos del ítem, sin excepción.
+> Los candidatos **Descartados** no requieren matriz; basta con documentar el motivo de descarte en el archivo de resultado del ítem.
+
+## Nombres de archivo
+
+- Canónico (consumido por consolidación): `ITEM-{id}_candidato_{n}_{marca}_{modelo}.json`
+- Derivado (lectura humana): `ITEM-{id}_candidato_{n}_{marca}_{modelo}.md`
+
+Ejemplo:
+- `ITEM-IT-0007_candidato_1_CEIA_HI-PE-Plus.json`
+- `ITEM-IT-0007_candidato_1_CEIA_HI-PE-Plus.md`
+
+## Estructura de columnas (vista MD)
+
+| Columna | Contenido |
+|---------|-----------|
+| Requerimiento | Texto completo del requisito, copiado **verbatim** desde `ITEM-{id}_specs.json`. No omitir ninguno, no parafrasear. |
+| Cumplimiento | Emoji + texto breve: ✅ Cumple/Supera · ⚠️ Parcial/Sin información/Inconsistente · ❌ No cumple |
+| Especificación del equipo | El dato concreto encontrado en las fuentes que acredita cumplimiento o incumplimiento (con unidades) |
+| Referencias | Fuente(s): nombre del documento o URL, página/sección. Si múltiples fuentes, citar todas. Si inconsistencia entre fuentes, indicarlo. |
+
+## Reglas
+
+1. **Todos los requisitos**: incluir cada requisito del ítem sin excepción, por más obvio o trivial que parezca.
+2. **Verbatim**: el texto del requerimiento se copia tal cual de `ITEM-{id}_specs.json`, no se resume ni parafrasea.
+3. **Emojis**:
+   - ✅ = cumple o supera el requisito
+   - ⚠️ = cumplimiento parcial, información insuficiente, información inconsistente entre fuentes, o cumple solo con accesorio/condición adicional
+   - ❌ = no cumple el requisito
+4. **Inconsistencias**: si el mismo dato aparece con valores diferentes en distintas fuentes, usar ⚠️ e indicar la inconsistencia en ambas columnas (Especificación y Referencias).
+5. **Sin información**: si no se encontró evidencia para un requisito, usar ⚠️ con texto "No se encontró información en fuentes disponibles".
+6. **Un par de archivos por candidato**: nunca mezclar candidatos en el mismo archivo.
+
+## Plantilla del archivo MD (vista derivada)
+
+```markdown
+# Matriz de cumplimiento — ITEM-{id}
+
+## Candidato: {Marca} {Modelo} — {Part Number}
+
+**Clasificación**: Válido / Condicionado
+**Fuentes principales consultadas**:
+- {nombre documento / URL 1}
+- {nombre documento / URL 2}
+
+## Tabla de cumplimiento
+
+| Requerimiento | Cumplimiento | Especificación del equipo | Referencias |
+|---------------|--------------|---------------------------|-------------|
+| {req verbatim 1} | {emoji + texto} | {dato encontrado} | {fuente(s)} |
+| {req verbatim 2} | {emoji + texto} | {dato encontrado} | {fuente(s)} |
+| ... | ... | ... | ... |
+
+## Resumen
+
+- ✅ Cumple: {n}
+- ⚠️ Parcial/Sin info: {n}
+- ❌ No cumple: {n}
+
+## Notas
+
+{Observaciones relevantes: condiciones para cumplimiento, accesorios requeridos, riesgos identificados, etc.}
+```
+
+## Plantilla del archivo JSON (canónico)
+
+Conforme a `schemas/candidato_cumplimiento.schema.json`.
+
+```json
+{
+  "item_id": "IT-0007",
+  "candidato_num": 1,
+  "marca": "CEIA",
+  "modelo": "HI-PE Plus",
+  "part_number": "HI-PE-PLUS-STD",
+  "estado": "VALIDO",
+  "url_fabricante": "https://www.ceia.net/security/product/HI-PE-Plus",
+  "url_datasheet": "https://www.ceia.net/.../HIPEPlusbrochureE.pdf",
+  "fuentes_consultadas": [
+    "HIPEPlusbrochureE_Optimized.pdf",
+    "https://www.ceia.net/security/product/HI-PE-Plus"
+  ],
+  "cumplimiento": [
+    {
+      "req_id": "R-001",
+      "texto_verbatim": "Dimensiones de pasaje interior: Ancho: un mínimo de 0.76 m. (30 pulgadas) Alto: un mínimo de 2.03 m. (80 pulgadas) Profundidad: un mínimo de 0.58 m. (23 pulgadas)",
+      "resultado": "OK",
+      "valor_encontrado": "Ancho: 720 mm, Alto: 2050 mm, Profundidad: 590 mm",
+      "referencias": ["HIPEPlusbrochureE_Optimized.pdf — Diagrama dimensional, página 4"]
+    },
+    {
+      "req_id": "R-004",
+      "texto_verbatim": "Garantía: 24 meses (02 años), para repuestos y mano de obra.",
+      "resultado": "PARCIAL",
+      "valor_encontrado": "No se especifica en el brochure",
+      "referencias": []
+    }
+  ],
+  "resumen": { "cumple": 4, "parcial": 1, "incumple": 0 },
+  "notas": "Garantía no especificada en documentación pública del fabricante; se recomienda confirmar directamente con representante comercial."
+}
+```
+
+> Mapeo emoji ↔ valor JSON: `✅` → `"OK"`, `⚠️` → `"PARCIAL"`, `❌` → `"NO_CUMPLE"`.
+
+## Ejemplo completo (vista MD derivada)
+
+```markdown
+# Matriz de cumplimiento — ITEM-IT-0007
+
+## Candidato: CEIA HI-PE Plus — PN: HI-PE-PLUS-STD
+
+**Clasificación**: Válido
+**Fuentes principales consultadas**:
+- HIPEPlusbrochureE_Optimized.pdf
+- https://www.ceia.net/security/product/HI-PE-Plus
+
+## Tabla de cumplimiento
+
+| Requerimiento | Cumplimiento | Especificación del equipo | Referencias |
+|---------------|--------------|---------------------------|-------------|
+| Dimensiones de pasaje interior: Ancho: un mínimo de 0.76 m. (30 pulgadas) Alto: un mínimo de 2.03 m. (80 pulgadas) Profundidad: un mínimo de 0.58 m. (23 pulgadas) | ✅ Cumple | Ancho: 720 mm, Alto: 2050 mm, Profundidad: 590 mm | "HIPEPlusbrochureE_Optimized.pdf" — Diagrama dimensional, página 4 |
+| Ancho del arco.- entre 90 a 1.10 cm de ancho. | ✅ Cumple | 976 mm | "HIPEPlusbrochureE_Optimized.pdf" — Diagrama dimensional, página 4 |
+| Alto del arco.- Entre 2.21 a 230 cm de alto. | ✅ Cumple | 2255 mm | "HIPEPlusbrochureE_Optimized.pdf" — Diagrama dimensional, página 4 |
+| Garantía: 24 meses (02 años), para repuestos y mano de obra. | ⚠️ Sin información | No se especifica en el brochure | N/A |
+| Innocuo en mujeres embarazadas y otros | ✅ Cumple | Cumple normas de exposición humana y seguridad de marcapasos | "HIPEPlusbrochureE_Optimized.pdf" — "Conforme con las normas aplicables en materia de compatibilidad electromagnética con la exposición humana y la seguridad de los marcapasos" |
+
+## Resumen
+
+- ✅ Cumple: 4
+- ⚠️ Parcial/Sin info: 1
+- ❌ No cumple: 0
+
+## Notas
+
+Garantía no especificada en documentación pública del fabricante; se recomienda confirmar directamente con representante comercial.
+```
+
+## Criterio de clasificación final del candidato
+
+- **VALIDO**: 0 ❌ y los ⚠️ son solo por falta de información (no por incumplimiento demostrado).
+- **CONDICIONADO**: 0 ❌ pero tiene ⚠️ por cumplimiento parcial o requiere accesorio/condición verificable.
+- **DESCARTADO**: ≥1 ❌ en requisito hard → no se produce matriz; se documenta el motivo de descarte en el archivo de resultado del ítem.

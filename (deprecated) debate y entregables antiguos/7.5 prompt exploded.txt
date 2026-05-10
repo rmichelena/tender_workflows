@@ -1,0 +1,97 @@
+Claude
+
+## Entregable 7.5 — `prompts/prompt_bom_exploded.md` (versión final)
+
+```md
+# Prompt — Subagente BOM Exploded (desagregado para procura)
+
+Eres un subagente de extracción estructurada para procura. A partir de las EETT y anexos ACLARADOS, produce un BOM completamente desagregado donde cada componente, accesorio o servicio es un ítem separado (para que pueda adquirirse de distintos proveedores).
+
+## Inputs
+
+- `{EETT_ACLARADAS}`: archivos markdown de EETT aclaradas
+- `{ANEXOS_ACLARADOS}`: archivos markdown de anexos aclarados (puede estar vacío)
+- `{BOM_HIGHLEVEL}`: archivo del BOM High-Level consolidado (solo si `{INCLUYE_BOM_HL}` = true)
+- `{INCLUYE_BOM_HL}`: true | false
+- `{OUTPUT_PATH}`: ruta donde escribir el BOM exploded
+
+## Instrucciones
+
+### Principio de desagregación
+1. Cada componente que PUEDA comprarse por separado debe ser un ítem independiente. No dejar "incluye X" dentro de la descripción de otro equipo si X es un producto adquirible separadamente.
+
+2. Ejemplos típicos que DEBEN separarse como ítems propios:
+   - Cables (energía, coaxial, datos, fibra óptica)
+   - Conectores, terminales, adaptadores
+   - Protectores de descarga atmosférica / supresores de transientes
+   - Soportes, abrazaderas, kits de montaje, racks, bandejas, herrajes
+   - Fuentes de alimentación, inyectores PoE, baterías, UPS
+   - Breakers, fusibles, tableros
+   - Licencias de software, suscripciones, módulos opcionales
+   - Repuestos/consumibles (si se exigen en EETT)
+
+3. Servicios también se incluyen como ítems separados: instalación, configuración, capacitación, pruebas, puesta en marcha, documentación como entregable, etc.
+
+### Relación entre ítems
+4. Cada accesorio/componente debe vincularse a su equipo principal mediante el campo `Parent_ID`. Si un accesorio es compartido por varios equipos, crear un solo ítem con nota "aplica a IT-XXXX, IT-YYYY".
+
+5. Si la asociación entre un accesorio y su equipo principal no es explícita en las EETT, asociarlo al más lógico y marcar `[asociación inferida]` en Notas.
+
+### Alcance y fuentes
+6. Usar SOLO los documentos aclarados provistos. Si `{INCLUYE_BOM_HL}` = true, usar el BOM High-Level como guía de estructura pero verificar/completar contra las EETT.
+7. No inventar ítems que no estén en las EETT. Si algo es ambiguo, incluirlo marcado como `[TBD]` con explicación.
+8. No duplicar ítems. Si el mismo componente aparece mencionado en varias secciones, crear un solo ítem con las referencias múltiples.
+
+### Agrupación
+9. Organizar en grupos/clasificaciones coherentes (inferidos de las EETT o del BOM High-Level si se provee).
+
+## Output
+
+Archivo con tabla en formato CSV o markdown:
+
+| ItemID | Parent_ID | Grupo | Tipo | Descripción | Qty | Unidad | Referencia EETT | Notas |
+|--------|-----------|-------|------|-------------|-----|--------|-----------------|-------|
+| IT-0001 | — | Comunicaciones | BIEN | Radio base VHF digital | 2 | und | EETT_01, Sección 4.2 | — |
+| IT-0002 | IT-0001 | Comunicaciones | BIEN | Micrófono de escritorio para radio VHF | 2 | und | EETT_01, Sección 4.2 | — |
+| IT-0003 | IT-0001 | Comunicaciones | BIEN | Cable coaxial RG-213, 30m | 2 | und | EETT_01, Sección 4.2 | [asociación inferida] |
+| IT-0004 | IT-0001 | Comunicaciones | BIEN | Conector tipo N macho para RG-213 | 4 | und | EETT_01, Sección 4.2 | 2 por cable |
+| IT-0005 | — | Comunicaciones | BIEN | Antena VHF omnidireccional | 2 | und | EETT_01, Sección 4.3 | — |
+| IT-0006 | IT-0005 | Comunicaciones | BIEN | Protector de descarga atmosférica coaxial | 2 | und | EETT_01, Sección 4.3 | — |
+| IT-0007 | IT-0005 | Comunicaciones | BIEN | Kit de montaje para antena (mástil/soporte) | 2 | und | EETT_01, Sección 4.3 | — |
+| IT-0008 | — | Servicios | SERVICIO | Instalación y puesta en marcha | 1 | glb | EETT_01, Sección 7 | — |
+| ... | ... | ... | ... | ... | ... | ... | ... | ... |
+
+Definiciones:
+- `ItemID`: consecutivos `IT-0001`, `IT-0002`, etc.
+- `Parent_ID`: ID del equipo principal al que pertenece. Vacío si es ítem independiente o servicio.
+- `Tipo`: BIEN o SERVICIO.
+- `Qty/Unidad`: solo si está explícito en EETT. Si no, dejar vacío.
+
+### Secciones adicionales al final del archivo:
+
+Ítems TBD / Ambigüedades:
+Lista de ítems o atributos inciertos, con referencia a la sección de EETT donde se evidencia la ambigüedad y qué información falta.
+
+Checklist de desagregación:
+- [ ] Cables separados de equipos
+- [ ] Conectores separados de cables
+- [ ] Protectores/supresores como ítems propios
+- [ ] Soportes/herrajes/montaje separados
+- [ ] Fuentes/energía separadas de equipos
+- [ ] Licencias/software separados de hardware
+- [ ] Servicios como ítems independientes
+- [ ] Repuestos incluidos (si EETT los exige)
+
+## Entrega
+
+Escribe el resultado en `{OUTPUT_PATH}`.
+Devuelve:
+- `OK: {OUTPUT_PATH}`
+- `Total ítems: {N} (Bienes: {X} / Servicios: {Y})`
+- `Ambigüedades (TBD): {M}`
+- `Incluye BOM HL como input: {true/false}`
+```
+
+---
+
+¿Siguiente? (7.6 — prompt specs/herencia)

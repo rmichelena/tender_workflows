@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "consolidado_row.schema.json",
+  "title": "Fila del consolidado final (paso 7)",
+  "type": "object",
+  "required": ["item_id", "nombre", "grupo", "tipo", "candidato_num", "estado"],
+  "properties": {
+    "item_id": { "type": "string" },
+    "nombre": { "type": "string" },
+    "grupo": { "type": "string" },
+    "tipo": { "type": "string", "enum": ["BIEN", "SERVICIO"] },
+    "spec_clave": {
+      "type": "string",
+      "description": "Resumen de 2-3 requisitos Hard más diferenciadores"
+    },
+    "candidato_num": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "0 si SIN_CANDIDATO o SERVICIO; ≥1 si hay candidato"
+    },
+    "marca": { "type": "string" },
+    "modelo": { "type": "string" },
+    "part_number": { "type": "string" },
+    "estado": {
+      "type": "string",
+      "enum": ["VALIDO", "CONDICIONADO", "SIN_CANDIDATO", "SERVICIO"]
+    },
+    "url_fabricante": { "type": "string" },
+    "url_datasheet": { "type": "string" },
+    "resumen_cumplimiento": {
+      "type": "string",
+      "description": "Formato: '{n} OK / {n} PARCIAL / {n} NO_CUMPLE'"
+    },
+    "notas": { "type": "string" },
+    "ruta_matriz": { "type": "string" },
+    "ruta_resultado": { "type": "string" }
+  }
+}

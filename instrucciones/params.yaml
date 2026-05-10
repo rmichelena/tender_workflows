@@ -1,0 +1,81 @@
+# params.yaml — Parámetros operativos del workflow de procurement
+# Versión 1.0 — formato YAML, leído por el orquestador en arranque.
+
+version: 1.0
+
+# --- Batching y límites ---
+batching:
+  batch_size_items_step6: 3            # ítems simultáneos en paso 6 (= 3 subagentes-item activos)
+  search_workers_per_item: 2           # workers de búsqueda por ítem (debe ser 2)
+
+limits:
+  max_relanzamientos_item: 2           # reintentos adicionales al intento inicial
+  min_candidatos_validos_por_item: 1   # mínimo para considerar el ítem resuelto
+  objetivo_candidatos_por_item: 3      # ideal (shortlist)
+
+# --- Timeouts (segundos) ---
+# default = 5 min para tareas estándar (OCR, merge, BOM, specs, QA, etc.)
+# search_worker = 10 min (definido por el usuario)
+# item_manager = 25 min (incluye reintentos completos del ciclo de búsqueda)
+timeouts:
+  default: 300
+  search_worker: 600
+  item_manager: 1500
+
+# --- Reintentos por tool ---
+retries:
+  tool_call_default: 2
+  per_tool:
+    brave: 1
+    perplexity: 1
+    tinyfish: 1
+    firecrawl: 2                       # parsing puede fallar por timeout del sitio destino
+
+# --- Política de diversidad ---
+diversity:
+  no_repetir_modelo_en_subagentes_paralelos: true
+  no_repetir_tool_en_subagentes_paralelos: true
+  rotar_modelo_y_tool_en_relanzamientos: true
+  revisor_debe_usar_modelo_distinto_al_productor: true
+
+# --- Combos sugeridos para paso 6 (rotación entre intentos) ---
+# Cada intento define la combinación modelo+tool para los dos workers paralelos.
+# El orquestador respeta diversidad y rotación. Si el modelo/tool no está disponible,
+# debe sustituirlo por otro del mismo "function pool" (ver catalog_modelos.md).
+step6_combos:
+  intento_1:
+    worker_a: { model: "Kimi-K2.6", tool: "brave" }
+    worker_b: { model: "GLM-5.1", tool: "perplexity" }
+  intento_2:
+    worker_a: { model: "Gemini-2.5-Pro", tool: "tinyfish" }
+    worker_b: { model: "GPT-5.4-Mini", tool: "brave" }
+  intento_3:
+    worker_a: { model: "DeepSeek-V4-Pro", tool: "perplexity" }
+    worker_b: { model: "Qwen-3.6-Plus", tool: "tinyfish" }
+
+# --- Pools de modelos por función (referenciados desde catalog_modelos.md) ---
+# El orquestador elige libremente dentro del pool, respetando diversidad/rotación.
+model_pools:
+  orchestrator: ["GPT-5.5", "Gemini-3.1-Pro", "Kimi-K2.6"]
+  vision_ocr: ["Gemini-2.5-Pro", "GPT-5.5", "GLM-5V-Turbo", "Kimi-K2.6"]
+  reasoning_long: ["GPT-5.5", "Gemini-2.5-Pro", "GLM-5.1", "Kimi-K2.6"]
+  bom_extraction: ["Kimi-K2.6", "GLM-5.1", "Gemini-2.5-Pro", "DeepSeek-V4-Pro", "Qwen-3.6-Plus", "GPT-5.4-Mini"]
+  auditor_revisor: ["GPT-5.4", "Gemini-2.5-Pro", "Kimi-K2.6", "GLM-5.1"]
+  item_manager: ["GPT-5.5", "GLM-5.1", "Kimi-K2.6"]
+  search_worker: ["Kimi-K2.5-Turbo", "GPT-5.4-Mini", "GLM-5-Turbo", "Qwen-3.6-Plus"]
+  fast_throughput: ["GPT-5.4-Mini", "GLM-5-Turbo", "Kimi-K2.5-Turbo"]
+
+# --- Pools de tools ---
+tool_pools:
+  search: ["brave", "perplexity", "tinyfish"]
+  fetch_parse: ["firecrawl"]
+
+# --- Política de derivados ---
+# Cuando un subagente entrega JSON, el orquestador genera estos derivados:
+auto_derivatives:
+  bom_json_to: ["tsv", "md"]
+  item_json_to: ["md"]
+  specs_json_to: ["md"]
+  result_json_to: ["md"]
+  matriz_json_to: ["md"]
+  consolidado_json_to: ["tsv", "md", "xlsx"]

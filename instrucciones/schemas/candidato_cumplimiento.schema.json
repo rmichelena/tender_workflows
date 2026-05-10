@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "candidato_cumplimiento.schema.json",
+  "title": "Matriz de cumplimiento por candidato",
+  "type": "object",
+  "required": ["item_id", "candidato_num", "marca", "modelo", "estado", "cumplimiento", "resumen"],
+  "properties": {
+    "item_id": { "type": "string" },
+    "candidato_num": { "type": "integer", "minimum": 1 },
+    "marca": { "type": "string" },
+    "modelo": { "type": "string" },
+    "part_number": { "type": "string" },
+    "estado": { "type": "string", "enum": ["VALIDO", "CONDICIONADO"] },
+    "url_fabricante": { "type": "string", "format": "uri" },
+    "url_datasheet": { "type": "string" },
+    "fuentes_consultadas": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "cumplimiento": {
+      "type": "array",
+      "description": "Una entrada por cada requerimiento del ítem (sin omitir ninguno)",
+      "items": {
+        "type": "object",
+        "required": ["req_id", "texto_verbatim", "resultado", "valor_encontrado", "referencias"],
+        "properties": {
+          "req_id": { "type": "string" },
+          "texto_verbatim": { "type": "string" },
+          "resultado": {
+            "type": "string",
+            "enum": ["OK", "PARCIAL", "NO_CUMPLE"],
+            "description": "Mapeo emoji: OK=✅, PARCIAL=⚠️, NO_CUMPLE=❌"
+          },
+          "valor_encontrado": { "type": "string" },
+          "referencias": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "resumen": {
+      "type": "object",
+      "required": ["cumple", "parcial", "incumple"],
+      "properties": {
+        "cumple": { "type": "integer", "minimum": 0 },
+        "parcial": { "type": "integer", "minimum": 0 },
+        "incumple": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "notas": { "type": "string" }
+  }
+}

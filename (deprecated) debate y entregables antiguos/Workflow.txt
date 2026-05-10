@@ -1,0 +1,313 @@
+Claude
+
+## Entregable 2 — `01_workflow.md` (versión final)
+
+```md
+# 01_workflow.md — Runbook operativo de procurement
+
+> Regla general: Para cada subpaso, ejecutar exactamente lo indicado: Owner, Prompt, Inputs, Modelo/Tools, Outputs, QA/Gate, Criterio Done.
+> Selección de modelo/tool: desde `catalog_modelos.md` y `catalog_tools.md`, cumpliendo diversidad (no repetir mismo modelo en subagentes paralelos del mismo paso) y rotación (no repetir modelo+tool en reintentos). Parámetros operativos desde `params.yaml`.
+
+---
+
+## Gate 0 — Inputs humanos iniciales (obligatorio antes de ejecutar)
+
+Owner: Orquestador (diálogo con humano)
+Acción: Solicitar y registrar:
+- `origen_fabricacion`: países permitidos | vetados | sin preferencia
+- `marcas`: preferidas | vetadas | sin preferencia
+- `docs_modo`: SIMPLE | COMPLEJO (para pasos 1.1–1.3)
+
+Output: `/proyecto/overlay_usuario.yaml`
+Done: overlay guardado, confirmado por humano.
+
+---
+
+## Paso 1 — Normalización documental
+
+### 1.1–1.3 Convertir documentos fuente a Markdown
+
+Owner: Orquestador → lanza Subagente(s) OCR
+Prompt: `prompts/prompt_ocr_vision.md`
+Inputs: Cada archivo de `/proyecto/inputs/` (EETT, anexos, aclaraciones). Una invocación por archivo.
+Modelo: Seleccionar del catálogo → función "visión+OCR" (ej. Gemini 2.5 Pro, GPT-5.5, GLM-5V Turbo)
+Tools: N/A (procesamiento de documento, no búsqueda web)
+Timeout: `params.yaml → timeout_default`
+
+Modo SIMPLE (según `overlay_usuario.yaml`):
+- Lanzar 1 subagente por documento.
+
+Modo COMPLEJO:
+- Lanzar 2 subagentes por documento (modelos distintos, ambos con función "visión+OCR").
+- Post-proceso: orquestador hace diff entre ambas versiones y produce versión consolidada resolviendo discrepancias.
+
+Outputs: `/proyecto/artifacts/step_1_normalizados/{nombre_doc}.md`
+Gate 1: Pausar. Presentar markdowns al humano para spot-check. Si hay errores graves, relanzar con otro modelo.
+Done: Todos los documentos de inputs tienen su `.md` validado por humano.
+
+---
+
+### 1.4 Incorporar aclaraciones → documentos "aclarados"
+
+Owner: Orquestador → lanza 2 subagentes (ejecutor + auditor)
+
+Subagente Ejecutor:
+- Prompt: `prompts/prompt_merge_aclaraciones_ejecutor.md`
+- Modelo: Seleccionar del catálogo → función "reasoning" (ej. GPT-5.4, GLM-5.1)
+- Inputs: EETT/anexos en markdown (de step_1) + aclaraciones en markdown (de step_1)
+- Output: `/proyecto/artifacts/step_1_aclaradas/{nombre_doc}_aclarada_v1.md`
+- Timeout: `params.yaml → timeout_default`
+
+Subagente Auditor (modelo DISTINTO al ejecutor):
+- Prompt: `prompts/prompt_merge_aclaraciones_auditor.md`
+- Modelo: Seleccionar del catálogo → función "reasoning" o "contexto largo" (distinto al ejecutor)
+- Inputs: Documento aclarado (output del ejecutor) + aclaraciones originales en markdown
+- Output: `/proyecto/artifacts/step_1_aclaradas/auditoria_aclaraciones.md`
+- Timeout: `params.yaml → timeout_default`
+
+Post-proceso: Si el auditor detecta gaps (aclaraciones no incorporadas), orquestador corrige el documento aclarado y re-lanza auditor hasta cobertura 1:1.
+Gate 2: Presentar reporte de auditoría al humano. Esperar aprobación.
+Done: Auditoría OK (cobertura 1:1) + aprobación humana.
+
+Regla post-1.4: A partir de aquí, SOLO se usan los documentos "aclarados". Los documentos de aclaración originales ya no se pasan como input a ningún paso posterior.
+
+---
+
+## Paso 2 — Extracción de BOM (bienes + servicios)
+
+### 2.1 BOM High-Level (3 variantes)
+Owner: Orquestador → lanza 3 subagentes
+Prompt: `prompts/prompt_bom_highlevel.md`
+Inputs: EETT aclaradas + anexos aclarados (todos)
+Modelos: 3 modelos distintos del catálogo → función "reasoning" (ej. Kimi K2.6, GLM-5.1, Gemini 2.5 Pro)
+Tools: N/A
+Timeout: `params.yaml → timeout_default`
+Outputs: `/proyecto/artifacts/step_2_bom/BOM_highlevel_var{1,2,3}.md`
+Done: 3 variantes generadas.
+
+### 2.2 Consolidar BOM High-Level
+
+Owner: Orquestador (ejecución directa, sin subagentes)
+Tarea: Contrastar las 3 variantes entre sí y contra las EETT aclaradas. Verificar que no falte ni sobre nada. Producir consolidado con agrupaciones/clasificaciones.
+Inputs: 3 variantes de BOM high-level + EETT aclaradas
+Output: `/proyecto/artifacts/step_2_bom/BOM_highlevel_consolidado.md`
+Done: Consolidado completo, sin omisiones ni duplicados respecto a EETT.
+
+### 2.3 BOM Exploded (4 variantes)
+
+Owner: Orquestador → lanza 4 subagentes
+Prompt: `prompts/prompt_bom_exploded.md`
+Inputs:
+- Subagentes 1 y 2: EETT aclaradas + BOM High-Level consolidado
+- Subagentes 3 y 4: EETT aclaradas solamente (sin BOM High-Level)
+Modelos: 4 modelos distintos del catálogo → función "reasoning" (ej. GPT-5.4 Mini, Kimi K2.5 Turbo, GLM-5 Turbo, DeepSeek V4 Pro)
+Variable en prompt: indicar si recibe BOM HL o no (`{incluye_bom_hl: true|false}`)
+Timeout: `params.yaml → timeout_default`
+Outputs: `/proyecto/artifacts/step_2_bom/BOM_exploded_var{1,2,3,4}.md`
+Done: 4 variantes generadas.
+
+### 2.4 Consolidar BOM Exploded
+
+Owner: Orquestador (ejecución directa)
+Tarea: Contrastar las 4 variantes entre sí y contra EETT aclaradas. Desagregar todo accesorio como item separado. Verificar completitud.
+Inputs: 4 variantes + EETT aclaradas
+Output: `/proyecto/artifacts/step_2_bom/BOM_exploded_consolidado.csv`
+Done: BOM exploded final, desagregado, sin omisiones.
+
+### 2.5 Item Pack — Generar un markdown por ítem (determinista)
+
+Owner: Orquestador (ejecución directa, 1 pasada)
+Prompt: `prompts/prompt_item_pack_from_bom.md` (referencia de estructura)
+Inputs: `BOM_exploded_consolidado.csv`
+Tarea: Por cada ítem del BOM exploded, generar un archivo markdown individual con:
+- ItemID, nombre, descripción
+- Campo `hereda_de: ITEM-XXX` (si aplica, se completará en paso 3)
+- Placeholder para especificaciones (se llenarán en paso 3)
+Outputs: `/proyecto/artifacts/step_2_5_items/ITEM-{id}.md` (un archivo por ítem)
+Done: Existe un `.md` por cada ítem del BOM exploded.
+
+---
+
+## Paso 3 — Consolidar especificaciones + herencia
+
+### 3.1 Completar specs por ítem (pasada 1)
+
+Owner: Orquestador → lanza Subagente Specs
+Prompt: `prompts/prompt_specs_herencia.md`
+Modelo: Seleccionar del catálogo → función "reasoning" + "contexto largo" (ej. GPT-5.5, Gemini 2.5 Pro)
+Inputs: Archivos `ITEM-{id}.md` (del paso 2.5) + EETT aclaradas completas
+Tarea del subagente: Para cada ítem:
+- Extraer TODOS los requisitos de las EETT que aplican (hard y soft)
+- Resolver herencia: si un accesorio no tiene spec propia pero se asocia a un equipo principal, hereda specs relevantes (frecuencia, conectores, etc.)
+- Marcar cada requisito como hard ("deberá/obligatorio/valor cuantitativo explícito") o soft ("preferentemente/deseable")
+- Incluir cita textual de la EETT (sección/página)
+Outputs: `/proyecto/artifacts/step_3_specs/ITEM-{id}_specs.md` (ítems enriquecidos)
+Timeout: `params.yaml → timeout_default`
+Done: Todos los ítems tienen specs completas con citas.
+
+### 3.2 Revisión "ojos frescos" (pasada 2)
+Owner: Orquestador → lanza Subagente Revisor
+Prompt: `prompts/prompt_specs_revisor.md`
+Modelo: Distinto al de 3.1 (ej. si 3.1 fue GPT-5.5, usar Gemini 2.5 Pro o Kimi K2.6)
+Inputs: Ítems con specs (output de 3.1) + EETT aclaradas
+Tarea: Verificar que no falten requisitos, que la herencia sea correcta, que las citas sean precisas. Reportar gaps o errores.
+Outputs: `/proyecto/artifacts/step_3_specs/revision_specs.md` + correcciones a ítems si aplica
+Timeout: `params.yaml → timeout_default`
+Post-proceso: Si hay correcciones, orquestador las aplica a los `ITEM-{id}_specs.md`.
+Done: Revisión OK, sin gaps.
+
+---
+
+## Paso 4 — BOM "para búsqueda" (solo bienes, sin cantidades)
+
+Owner: Orquestador (ejecución directa + QA)
+Prompt: `prompts/prompt_bom_para_busqueda.md` (opcional, puede ser tarea interna)
+Inputs: `BOM_exploded_consolidado.csv` + ítems con specs finales (paso 3)
+Tarea:
+- Filtrar: solo bienes (quitar servicios: instalación, configuración, capacitación, etc.)
+- Quitar cantidades
+- Limpiar referencias no-buscables (ej. "según autorización MTC", "conectar a Redap Corpac") y reemplazar por especificaciones técnicas equivalentes que un agente de búsqueda pueda usar
+- Mantener specs como parámetros técnicos buscables
+Output: `/proyecto/artifacts/step_4_busqueda/BOM_busqueda.csv`
+QA: Verificar que no quedaron servicios, cantidades, ni referencias no-buscables. Verificar que todos los bienes del BOM exploded están presentes.
+Done: BOM búsqueda limpio y verificado.
+
+---
+
+## Paso 5 — Confirmar/actualizar preferencias del usuario
+
+Owner: Orquestador (diálogo con humano)
+Tarea: Presentar el BOM búsqueda al humano. Preguntar si hay cambios o adiciones a las preferencias de origen/marca (capturadas en Gate 0). Actualizar `overlay_usuario.yaml` si corresponde.
+Done: Overlay confirmado/actualizado.
+
+---
+
+## Paso 6 — Búsqueda de equipamiento (3 niveles, por ítem)
+
+### Arquitectura:
+```
+Orquestador
+  → Subagente-Item (1 por ítem, en batches de {batch_size} ítems simultáneos)
+      → Search-Worker A (modelo X + tool Y)
+      → Search-Worker B (modelo Z + tool W)
+```
+
+### 6.1 Lanzar Subagentes-Item (en batches)
+
+Owner: Orquestador → lanza Subagentes-Item
+Prompt: `prompts/prompt_item_manager.md`
+Modelo para Subagente-Item: Seleccionar del catálogo → función "orchestration/reasoning" (ej. GLM-5.1, Kimi K2.6, GPT-5.5)
+Inputs por subagente-item:
+- `ITEM-{id}_specs.md` (con todos los requisitos hard/soft)
+- `overlay_usuario.yaml` (restricciones origen/marca)
+- `formato_matriz_cumplimiento.md` (formato obligatorio)
+- `catalog_modelos.md` y `catalog_tools.md` (para seleccionar workers)
+- `params.yaml` (timeouts, reintentos)
+Timeout subagente-item: `params.yaml → timeout_item_manager` (1500s)
+Batch size: `params.yaml → batch_size` (3 ítems simultáneos = 3 subagentes-item activos)
+
+### 6.2 Lógica interna del Subagente-Item
+
+El subagente-item ejecuta por su cuenta (definido en `prompt_item_manager.md`):
+
+1. Lanzar 2 Search-Workers con modelos y tools distintos:
+   - Worker A: modelo + search provider (ej. Kimi K2.5 Turbo + Brave)
+   - Worker B: modelo diferente + search provider diferente (ej. GPT-5.4 Mini + Perplexity)
+   - Prompt workers: `prompts/prompt_search_worker.md`
+   - Timeout workers: `params.yaml → timeout_search` (600s)
+
+2. Recibir candidatos de ambos workers.
+3. Validar cada candidato (con su propia búsqueda/verificación):
+   - Confirmar que el modelo/referencia existe (página de fabricante activa, sin mención EOL)
+   - Verificar cumplimiento de CADA requisito hard contra fuente primaria (datasheet/manual fabricante)
+   - Clasificar: ✅ Válido | ⚠️ Condicionado | ❌ Descartado
+
+4. Si no hay ≥1 candidato válido: relanzar con prompt modificado:
+   - Excluir explícitamente modelos que fallaron
+   - Rotar a modelo+tool no usados previamente
+   - Máximo `params.yaml → max_relanzamientos_item` reintentos (2)
+
+5. Producir output: `ITEM-{id}_resultado.md` con:
+   - Resumen del ítem y specs clave
+   - Candidatos válidos (shortlist ideal: 3, mínimo: 1)
+   - Candidatos condicionados (si aplica)
+   - Matriz de cumplimiento por cada candidato (formato según `formato_matriz_cumplimiento.md`)
+   - Log de búsqueda (modelos/tools usados, reintentos, exclusiones)
+
+6. Si tras todos los reintentos no hay candidato válido: reportar "sin candidato" + diagnóstico (qué requisito es demasiado restrictivo o combinación inusual).
+
+### 6.3 Recepción y Gate
+
+Owner: Orquestador
+Outputs: `/proyecto/artifacts/step_6_resultados/ITEM-{id}_resultado.md` (uno por ítem)
+Gate 4: Para ítems "sin candidato": pausar, presentar diagnóstico al humano, esperar decisión (relajar requisito / aceptar condicionado / buscar manualmente).
+Done: Todos los ítems tienen ≥1 candidato válido, o decisión humana documentada.
+
+---
+
+## Paso 7 — Consolidación final
+
+### 7.1 Producir consolidado
+
+Owner: Orquestador (ejecución directa)
+Prompt: `prompts/prompt_consolidacion_paso7.md`
+Inputs: `BOM_busqueda.csv` + todos los `ITEM-{id}_resultado.md` del paso 6
+Tarea: Producir tabla consolidada en formato "long" (una fila por candidato):
+
+Columnas:
+- `ItemID`
+- `Nombre`
+- `Especificación clave (hard)`
+- `Candidato_num` (1, 2, 3…)
+- `Marca / Modelo / PN`
+- `Estado` (Válido / Condicionado)
+- `Evidencia_URL` (datasheet fabricante)
+- `Notas` (incumplimientos leves, condiciones, observaciones)
+
+Outputs:
+- `/proyecto/outputs/consolidado_long.csv` (canónico)
+- `/proyecto/outputs/consolidado.md` (derivado, tabla markdown)
+- `/proyecto/outputs/consolidado.xlsx` (derivado, con filtros)
+
+### 7.2 QA Final
+
+Owner: Orquestador → lanza Subagente QA (opcional) o ejecuta directamente
+Prompt: `prompts/prompt_QA_final.md`
+Checks:
+- Conteo de ítems = total de bienes en BOM búsqueda
+- Cada ítem tiene ≥1 candidato (o decisión humana documentada)
+- Todos los campos obligatorios están llenos
+- URLs de evidencia presentes y formateadas
+- Notas presentes para candidatos condicionados
+- Consistencia entre `ITEM-{id}_resultado.md` y tabla consolidada
+
+Output: `/proyecto/outputs/QA_report.md`
+Done: QA OK. Entregable final listo.
+
+---
+
+## Resumen de artefactos preservados
+
+```
+/proyecto/
+├── inputs/                          (fuentes originales, read-only)
+├── overlay_usuario.yaml             (preferencias)
+├── artifacts/
+│   ├── step_1_normalizados/         (markdowns de docs fuente)
+│   ├── step_1_aclaradas/            (docs aclarados + auditoría)
+│   ├── step_2_bom/                  (variantes + consolidados HL y exploded)
+│   ├── step_2_5_items/              (1 md por ítem, estructura base)
+│   ├── step_3_specs/                (ítems con specs + revisión)
+│   ├── step_4_busqueda/             (BOM búsqueda limpio)
+│   └── step_6_resultados/           (resultado + matriz por ítem)
+├── outputs/
+│   ├── consolidado_long.csv
+│   ├── consolidado.md
+│   ├── consolidado.xlsx
+│   └── QA_report.md
+└── logs/
+└── decision_log.md              (modelos usados, reintentos, escalamientos)
+```
+```
+
+---

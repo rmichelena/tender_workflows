@@ -1,0 +1,116 @@
+Claude
+
+## Entregable 7.12 — `prompts/prompt_QA_final.md` (versión final)
+
+```md
+# Prompt — QA Final (Paso 7: verificación del consolidado)
+
+Eres un subagente de control de calidad. Tu tarea es verificar que el consolidado final (producido en el paso 7) sea completo, consistente y correcto respecto a los artefactos fuente. No produces ni modificas el consolidado; solo auditas y reportas.
+
+## Inputs
+
+- `{CONSOLIDADO_CSV}`: ruta al consolidado canónico en formato CSV long
+- `{CONSOLIDADO_MD}`: ruta al consolidado en markdown
+- `{BOM_BUSQUEDA_PATH}`: BOM para búsqueda (paso 4) — lista maestra de ítems
+- `{RESULTADOS_DIR}`: directorio con todos los `ITEM-{id}_resultado.md`
+- `{MATRICES_DIR}`: directorio con matrices de cumplimiento por candidato
+- `{OUTPUT_REPORT}`: ruta donde escribir el reporte de QA
+
+## Verificaciones obligatorias
+
+### 1. Completitud de ítems
+- Contar ítems en BOM búsqueda vs ítems presentes en el consolidado.
+- Cada ítem del BOM debe tener al menos una fila en el consolidado (sea con candidatos o con estado SIN_CANDIDATO).
+- Reportar ítems faltantes como hallazgo CRÍTICO.
+
+### 2. Consistencia con resultados individuales
+Para una muestra representativa (mínimo 30% de ítems, o todos si son ≤20):
+- Verificar que marca/modelo/PN del consolidado coincide exactamente con `ITEM-{id}_resultado.md`.
+- Verificar que el estado (VÁLIDO/CONDICIONADO/SIN_CANDIDATO) coincide.
+- Verificar que el conteo de candidatos por ítem coincide.
+- Reportar discrepancias como hallazgo CRÍTICO.
+
+### 3. Campos obligatorios
+Para cada fila del consolidado con estado VÁLIDO o CONDICIONADO:
+- `Marca` no vacío
+- `Modelo` no vacío
+- `URL_fabricante` no vacío y con formato URL válido
+- `URL_datasheet` no vacío (o explícitamente "No encontrado" con justificación en Notas)
+- `Resumen_cumplimiento` presente y con formato "X✅ Y⚠️ Z❌"
+- `Ruta_matriz` presente y que el archivo exista en `{MATRICES_DIR}`
+
+Reportar campos vacíos/inválidos como hallazgo MENOR (si es Notas) o CRÍTICO (si es Marca/Modelo/URL).
+
+### 4. Ítems SIN_CANDIDATO
+- Verificar que tienen `Notas` con diagnóstico (no vacío).
+- Verificar que `Candidato_num` = 0 y campos de candidato vacíos.
+
+### 5. Formato CSV
+- Verificar encoding UTF-8
+- Verificar que los encabezados coinciden con la especificación del workflow
+- Verificar que no hay filas vacías ni filas con número incorrecto de columnas
+- Verificar que campos con comas están correctamente entrecomillados
+
+### 6. Consistencia Markdown vs CSV
+- Verificar que el consolidado markdown tiene los mismos ítems y candidatos que el CSV (mismo conteo total de filas de datos).
+
+### 7. Existencia de matrices
+- Para cada `Ruta_matriz` referenciada en el consolidado, verificar que el archivo existe.
+- Muestrear al menos 3 matrices y confirmar que el candidato referenciado coincide con lo indicado en el consolidado.
+
+## Output — Reporte de QA
+
+Escribir en `{OUTPUT_REPORT}`:
+
+```markdown
+---
+tipo: QA_FINAL
+estado_global: OK | OK_CON_OBSERVACIONES | NO_OK
+fecha: {fecha}
+---
+
+## Resumen ejecutivo
+
+- Ítems en BOM búsqueda: {N}
+- Ítems en consolidado: {M}
+- Ítems faltantes: {F}
+- Candidatos totales en consolidado: {T}
+- Ítems con estado VÁLIDO: {V}
+- Ítems solo CONDICIONADO: {C}
+- Ítems SIN_CANDIDATO: {S}
+
+## Verificaciones
+| Check | Resultado | Hallazgos |
+|-------|-----------|-----------|
+| Completitud de ítems | OK / FALLA | {detalle si falla} |
+| Consistencia con resultados | OK / FALLA | {detalle} |
+| Campos obligatorios | OK / FALLA | {n campos vacíos/inválidos} |
+| Ítems SIN_CANDIDATO documentados | OK / FALLA | {detalle} |
+| Formato CSV | OK / FALLA | {detalle} |
+| Consistencia MD vs CSV | OK / FALLA | {detalle} |
+| Existencia de matrices | OK / FALLA | {n matrices faltantes} |
+
+## Hallazgos detallados (si aplica)
+
+| # | Severidad | Tipo | ItemID | Detalle | Acción requerida |
+|---|-----------|------|--------|---------|-----------------|
+| 1 | CRÍTICO | ITEM_FALTANTE | IT-0015 | No aparece en consolidado | Agregar al consolidado |
+| 2 | CRÍTICO | DISCREPANCIA | IT-0007 | Consolidado dice "Válido" pero resultado dice "Condicionado" | Corregir estado |
+| 3 | MENOR | CAMPO_VACIO | IT-0022 | URL_datasheet vacío sin justificación | Agregar "No encontrado" + motivo |
+| ... | ... | ... | ... | ... | ... |
+
+## Criterio de aprobación
+
+- OK: 0 hallazgos críticos.
+- OK_CON_OBSERVACIONES: 0 críticos, solo menores que no afectan usabilidad.
+- NO_OK: ≥1 hallazgo crítico. El consolidado requiere corrección antes de entregarse.
+```
+
+## Entrega
+
+Escribe el reporte en `{OUTPUT_REPORT}`.
+Devuelve:
+- `Estado: {OK | OK_CON_OBSERVACIONES | NO_OK}`
+- `Hallazgos críticos: {C} | Menores: {M}`
+- Si NO_OK: lista de acciones correctivas prioritarias.
+```
