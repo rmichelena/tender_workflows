@@ -203,12 +203,52 @@ Tras el paso 7, generar `executive_summary.md` (1-2 páginas, en castellano peru
 
 ---
 
+## 9. OCR/normalización: arquitectura híbrida en lugar de LLM-vision puro
+
+**Problema**: el paso 1.1–1.3 actual usa un único subagente con un LLM de visión (Gemini 2.5 Pro / GPT-5.5 / Kimi K2.6) y, en modo "complejo", duplica con diff. Esto tiene un defecto sistémico que no se detecta con el diff actual: los VLMs **alucinan con alta confianza en valores numéricos de tablas técnicas** (subsampling visual + bias del prior lingüístico + drift en tablas largas), y dos pasadas con el mismo modelo (o familia) comparten esos sesgos.
+
+En un EETT con 80 filas de specs, accuracy típica de VLM ronda 95% — implica ~4 errores por tabla. Para procurement, donde un "3.5W" leído como "8.5W" mata la búsqueda downstream del ítem, esto es inaceptable.
+
+El estado del arte 2024–2025 mejoró: aparecieron servicios dedicados con accuracy de tabla del 96–98%, salida nativa en Markdown, y precios competitivos. Conviene migrar a **arquitectura híbrida en 3 capas** ejecutadas por subagentes especializados:
+
+**Capa A — Extracción primaria (determinística)**
+Un servicio dedicado convierte cada PDF a Markdown con tablas extraídas correctamente y placeholders para imágenes. Opciones:
+- **Mistral OCR 3** (cloud, ~$1–2 por 200 páginas, 96.6% en tablas, multilingüe robusto, MD nativo).
+- **Reducto** (premium accuracy, líder en RD-TableBench, ~$0.015/página).
+- **Docling** (IBM, open-source on-prem, 97.9% en tablas complejas) — opción para datos sensibles o evitar vendor lock.
+- **Marker / Unstructured / LlamaParse** como alternativas open-source.
+- Hyperscalers (Google Document AI, Azure Document Intelligence, AWS Textract) siguen líderes en tablas estructuradas pero más caros y sin MD nativo.
+
+**Capa B — Enriquecimiento visual selectivo (LLM-vision)**
+Sobre el MD de la capa A, un subagente con Gemini 2.5 Pro (o equivalente) recorre **solo las páginas que contienen diagramas/figuras** (detectadas en capa A) y reemplaza los placeholders por descripciones técnicas con dimensiones, tolerancias y valores visibles. Aquí los VLMs son insustituibles. Reduce el consumo de tokens del LLM 80–90% respecto al pipeline actual.
+
+**Capa C — QA cruzado sobre tablas críticas**
+Un segundo subagente con un modelo de **familia distinta** a la capa A re-extrae solo las tablas con valores numéricos críticos directamente desde la imagen de página, y se comparan **celda a celda** contra la capa A. Discrepancias se marcan `[VERIFICAR: A=3.5W, B=8.5W]` para revisión humana en lugar de elegir silenciosamente. Este patrón "cross-engine table verification" es el único que detecta alucinaciones de alta confianza, porque dos arquitecturas distintas raramente alucinan el mismo error.
+
+**Costo estimado por proyecto de 200 páginas**: ~$0.90 con híbrido vs ~$2–4 con doble-pase LLM actual, con accuracy significativamente mayor en tablas y mecanismo real de detección de errores.
+
+**Cuándo NO migrar**:
+- Volumen muy bajo (1–2 proyectos/mes): el costo de orquestar 3 capas no justifica el esfuerzo.
+- EETT mayoritariamente escaneados sin diagramas (caso raro): un VLM solo puede alcanzar.
+- Si OpenClaw/Hermes no permiten tools HTTP a APIs externas: queda Docling on-prem o seguir con VLM mejorado (segundo modelo de familia distinta para el diff).
+
+**Esfuerzo de implementación**: medio-alto. Requiere:
+- Reemplazar `prompt_ocr_vision.md` por tres prompts: `prompt_ocr_extraccion_primaria.md`, `prompt_ocr_enriquecimiento_visual.md`, `prompt_ocr_qa_tablas.md`.
+- Ajustar `catalog_tools.md` para incluir Mistral OCR / Docling / Reducto como tools nuevas.
+- Modificar paso 1.1–1.3 del `01_workflow.md` para reflejar las 3 capas.
+- Actualizar `params.yaml` con timeouts y selección de servicio por capa.
+
+**Mitigación intermedia (sin migrar)**: si no se migra ya, el mínimo cambio que reduce el riesgo es asegurar que cuando se ejecute en modo COMPLEJO, los dos subagentes usen modelos de **familias distintas** (ej. Gemini + Claude o Gemini + GPT, no dos Gemini), para que el diff capture al menos errores no-sistémicos. Esto debería estar enforced en el workflow, no opcional.
+
+---
+
 ## Priorización sugerida
 
 Si tuvieras que implementar solo unas pocas, sugeriría este orden:
 
-1. **`state.json` para reanudación** (1.1) — el dolor de perder progreso es real.
-2. **Cross-check de compatibilidad parent-child** (2.1) — agrega valor visible, alinea con la realidad de armar bundles.
-3. **Score numérico de candidatos** (2.2) — barato y muy útil al revisar el consolidado.
-4. **Resumen ejecutivo automático** (8.3) — multiplica el valor del entregable para stakeholders.
-5. **Test-suite con proyecto sintético** (5.4) — la inversión se paga sola en cuanto cambien los prompts.
+1. **OCR híbrido** (9) — el problema es sistémico y afecta a todo lo downstream; la base de datos de input no puede tener errores silenciosos en valores numéricos.
+2. **`state.json` para reanudación** (1.1) — el dolor de perder progreso es real.
+3. **Cross-check de compatibilidad parent-child** (2.1) — agrega valor visible, alinea con la realidad de armar bundles.
+4. **Score numérico de candidatos** (2.2) — barato y muy útil al revisar el consolidado.
+5. **Resumen ejecutivo automático** (8.3) — multiplica el valor del entregable para stakeholders.
+6. **Test-suite con proyecto sintético** (5.4) — la inversión se paga sola en cuanto cambien los prompts.

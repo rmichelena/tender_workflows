@@ -39,12 +39,13 @@ El approach es razonable para el problema. La separación de canónico (JSON) vs
 - **Reproducibilidad**: sin pin de versiones de modelos ni seeds, dos ejecuciones del mismo proyecto pueden dar shortlists distintos. Para procurement esto es problemático para auditoría.
 - **Firecrawl como única opción de fetch** subestima la realidad de datasheets B2B detrás de logins, formularios "contact us" o PDFs mal formados — exactamente el dominio del usuario (telecom industrial, instrumentación).
 - **XLSX final** descrito como derivado "automático" no es trivial sin código. Hay que generarlo con openpyxl o similar; quién lo ejecuta no está dicho.
+- **OCR puro con LLM-vision para tablas técnicas**: el approach actual (un solo subagente VLM, opcionalmente doble pasada con diff) tiene un problema sistémico que el review original no detectó. Los VLMs (Gemini 2.5 Pro, GPT-4o, Claude Opus 4) **alucinan con alta confianza en valores numéricos de tablas** ("3.5W" leído como "8.5W") por subsampling visual, bias del prior lingüístico y drift en tablas largas. El doble-pase no lo detecta porque ambas pasadas comparten sesgos. En un EETT con 80 filas de specs, accuracy típica de VLM ~95% = ~4 errores por tabla, inaceptable cuando alimenta búsqueda downstream. Estado del arte 2024-2025: servicios dedicados como Mistral OCR 3 (96.6% en tablas), Reducto (líder en RD-TableBench) o Docling (open-source, 97.9%) producen Markdown nativo con accuracy mucho mayor en tablas, a menor costo. Recomendación: arquitectura híbrida en 3 capas (extracción primaria determinística + enriquecimiento visual con LLM solo para diagramas + QA cruzado celda-a-celda con modelo de familia distinta). Detalle en `MEJORAS_PROPUESTAS.md` mejora #8.
 
 ### 5. Probabilidad de éxito a la primera (estimación cualitativa, licitación típica de 50 ítems)
 
 | Paso | % éxito sin reproceso |
 |---|---|
-| 1.1–1.3 OCR | 70–80% |
+| 1.1–1.3 OCR (LLM-vision puro actual) | 50–70% en tablas críticas / 70–80% en texto general |
 | 1.4 merge aclaraciones | 50–60% |
 | 2.1–2.4 BOM HL + exploded | 40–60% |
 | 2.5 + 3.1 + 3.2 specs | 30–50% |
