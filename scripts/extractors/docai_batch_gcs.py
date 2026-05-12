@@ -24,7 +24,7 @@ Uso:
   python3 docai_batch_gcs.py <input.pdf> [output_dir]
 
 Dependencias:
-  pip install requests PyMuPDF google-auth-oauthlib
+  pip install requests google-auth-oauthlib
 
 Setup requerido (una vez):
   1. Crear bucket GCS (ej: gs://hermoberto)
