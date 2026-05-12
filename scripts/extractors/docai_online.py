@@ -123,6 +123,15 @@ def main():
     print(f"Processing: {input_file}")
     t0 = time.time()
     creds = get_creds(cfg["token_path"])
+
+    # creds_getter for token refresh mid-chunking (same pattern as docai_batch_gcs)
+    _creds = [creds]
+    def creds_getter(force_refresh=False):
+        if force_refresh or not _creds[0].valid:
+            from google.auth.transport.requests import Request
+            _creds[0].refresh(Request(timeout=30))
+        return _creds[0]
+
     pages = count_pdf_pages(input_file)
     print(f"Pages: {pages}")
 
@@ -133,28 +142,47 @@ def main():
         print(f"Mode: ONLINE")
         with open(input_file, "rb") as f:
             pdf_bytes = f.read()
-        result = process_single_chunk(pdf_bytes, creds)
+        result = process_single_chunk(pdf_bytes, creds_getter())
         chunks, blocks = extract_from_response(result)
         all_chunks.extend(chunks)
         all_blocks.extend(blocks)
     else:
         print(f"Mode: CHUNKED ({pages} pages in chunks of {page_limit})")
         pdf_chunks = split_pdf(input_file, page_limit)
-        for i, (chunk_path, start_pg, end_pg) in enumerate(pdf_chunks):
-            print(f"  Chunk {i+1}/{len(pdf_chunks)}: pages {start_pg+1}-{end_pg}...", end=" ", flush=True)
-            with open(chunk_path, "rb") as f:
-                chunk_bytes = f.read()
-            try:
-                result = process_single_chunk(chunk_bytes, creds)
-                chunks, blocks = extract_from_response(result, page_offset=start_pg)
-                all_chunks.extend(chunks)
-                all_blocks.extend(blocks)
-                print(f"OK ({len(chunks)} chunks)")
-            except Exception as e:
-                failed_chunks.append({"pages": f"{start_pg+1}-{end_pg}", "error": str(e)})
-                print(f"ERROR: {e}")
-            finally:
-                os.unlink(chunk_path)
+        try:
+            for i, (chunk_path, start_pg, end_pg) in enumerate(pdf_chunks):
+                print(f"  Chunk {i+1}/{len(pdf_chunks)}: pages {start_pg+1}-{end_pg}...", end=" ", flush=True)
+                with open(chunk_path, "rb") as f:
+                    chunk_bytes = f.read()
+                try:
+                    result = process_single_chunk(chunk_bytes, creds_getter())
+                    chunks, blocks = extract_from_response(result, page_offset=start_pg)
+                    all_chunks.extend(chunks)
+                    all_blocks.extend(blocks)
+                    print(f"OK ({len(chunks)} chunks)")
+                except Exception as e:
+                    # On 401, force refresh and retry once
+                    if "401" in str(e):
+                        try:
+                            result = process_single_chunk(chunk_bytes, creds_getter(force_refresh=True))
+                            chunks, blocks = extract_from_response(result, page_offset=start_pg)
+                            all_chunks.extend(chunks)
+                            all_blocks.extend(blocks)
+                            print(f"OK after refresh ({len(chunks)} chunks)")
+                        except Exception as e2:
+                            failed_chunks.append({"pages": f"{start_pg+1}-{end_pg}", "error": str(e2)})
+                            print(f"ERROR after retry: {e2}")
+                    else:
+                        failed_chunks.append({"pages": f"{start_pg+1}-{end_pg}", "error": str(e)})
+                        print(f"ERROR: {e}")
+                finally:
+                    if os.path.exists(chunk_path):
+                        os.unlink(chunk_path)
+        finally:
+            # Ensure ALL temp files are cleaned up (covers split_pdf partial failure)
+            for chunk_path, _, _ in pdf_chunks:
+                if os.path.exists(chunk_path):
+                    os.unlink(chunk_path)
 
     md = build_markdown(all_chunks)
     elapsed = time.time() - t0

@@ -100,17 +100,40 @@ def gcs_delete(gcs_path, creds):
 
 
 def gcs_cleanup(gcs_input_path, gcs_output_prefix, output_files, creds):
-    """Clean up GCS input and output files. Safe to call multiple times."""
+    """Clean up GCS input and output files. Safe to call multiple times.
+    
+    If output_files is empty (e.g. gcs_list failed), enumerates by prefix
+    to avoid orphaning output objects in GCS.
+    """
     errors = []
+    # Always delete input
     try:
         gcs_delete(gcs_input_path, creds)
     except Exception as e:
         errors.append(f"input: {e}")
-    for obj in output_files:
+    
+    # Delete output files: use provided list, or enumerate by prefix if empty
+    if output_files:
+        for obj in output_files:
+            try:
+                gcs_delete(obj["name"], creds)
+            except Exception as e:
+                errors.append(f"output/{obj['name']}: {e}")
+    elif gcs_output_prefix:
+        # gcs_list failed earlier — enumerate outputs now to prevent orphans
         try:
-            gcs_delete(obj["name"], creds)
+            found = gcs_list(gcs_output_prefix, creds)
+            for obj in found:
+                try:
+                    gcs_delete(obj["name"], creds)
+                except Exception as e:
+                    errors.append(f"output/{obj['name']}: {e}")
+            if found:
+                print(f"  Cleaned {len(found)} orphaned output objects via prefix enumeration")
         except Exception as e:
-            errors.append(f"output/{obj['name']}: {e}")
+            errors.append(f"output-prefix-enumeration: {e}")
+            print(f"  WARNING: Could not enumerate outputs for cleanup: {e}")
+    
     if errors:
         print(f"  Cleanup warnings: {errors}")
 
@@ -159,8 +182,16 @@ def poll_operation(operation_name, creds_getter):
         creds = creds_getter()
         r = requests.get(url, headers={"Authorization": f"Bearer {creds.token}"}, timeout=30)
         if r.status_code == 401:
-            # Token expired mid-poll — force refresh
-            creds = creds_getter(force_refresh=True)
+            # Token expired mid-poll — force refresh with retry
+            for attempt in range(3):
+                try:
+                    creds = creds_getter(force_refresh=True)
+                    break
+                except Exception as refresh_err:
+                    if attempt < 2:
+                        time.sleep(2 ** attempt)
+                    else:
+                        raise Exception(f"Token refresh failed after 3 attempts: {refresh_err}")
             r = requests.get(url, headers={"Authorization": f"Bearer {creds.token}"}, timeout=30)
         if r.status_code != 200:
             raise Exception(f"Poll error {r.status_code}: {r.text[:300]}")

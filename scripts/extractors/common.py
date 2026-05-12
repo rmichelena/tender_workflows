@@ -8,10 +8,11 @@ Usage in extractors:
     from common import load_config, get_creds, sanitize_filename, fix_ligatures, ...
 """
 
-import os, re, json, configparser
+import os, re, json, configparser, unicodedata
 
 # Config file search order: extractors.conf, ../extractors.conf, ../../extractors.conf
 _CONF_CACHE = None
+_CONF_PATH = None  # Resolved path of the loaded config
 
 CONF_SEARCH_PATHS = [
     os.path.join(os.path.dirname(__file__), "extractors.conf"),
@@ -21,24 +22,23 @@ CONF_SEARCH_PATHS = [
 
 def load_config():
     """Load extractors.conf. Results are cached. Returns configparser.ConfigParser."""
-    global _CONF_CACHE
+    global _CONF_CACHE, _CONF_PATH
     if _CONF_CACHE is not None:
         return _CONF_CACHE
 
-    conf_path = None
     for p in CONF_SEARCH_PATHS:
         if os.path.exists(p):
-            conf_path = p
+            _CONF_PATH = p
             break
 
-    if conf_path is None:
+    if _CONF_PATH is None:
         raise FileNotFoundError(
             f"extractors.conf not found. Searched: {CONF_SEARCH_PATHS}\n"
             "Copy extractors.conf.example to extractors.conf and customize."
         )
 
     cfg = configparser.ConfigParser()
-    cfg.read(conf_path)
+    cfg.read(_CONF_PATH)
     _CONF_CACHE = cfg
     return cfg
 
@@ -60,11 +60,11 @@ def get_docai_config():
 
 
 def _resolve_token_path(raw_path):
-    """Resolve token path: absolute as-is, relative to conf file directory."""
+    """Resolve token path: absolute as-is, relative to actual conf file directory."""
     if os.path.isabs(raw_path):
         return raw_path
-    # Relative to conf file location
-    cfg_dir = os.path.dirname(os.path.abspath(CONF_SEARCH_PATHS[0]))
+    # Relative to the config file that was actually loaded
+    cfg_dir = os.path.dirname(os.path.abspath(_CONF_PATH)) if _CONF_PATH else os.path.dirname(__file__)
     return os.path.join(cfg_dir, raw_path)
 
 
@@ -82,7 +82,7 @@ def get_creds(token_path):
     except json.JSONDecodeError as e:
         raise SystemExit(f"Invalid token file {token_path}: {e}")
 
-    if creds.expired:
+    if not creds.valid:
         try:
             creds.refresh(Request(timeout=30))
         except Exception as e:
@@ -92,9 +92,11 @@ def get_creds(token_path):
 
 
 def sanitize_filename(filepath):
-    """Sanitize a filename for output: ASCII-safe, consistent across all extractors."""
+    """Sanitize a filename for output: ASCII-safe with NFKD normalization, consistent across all extractors."""
     base = os.path.basename(filepath).rsplit(".", 1)[0]
-    return re.sub(r'[^a-zA-Z0-9._-]', '_', base)
+    # NFKD decomposes accented chars (é→e+́) then encode strips combining marks
+    ascii_base = unicodedata.normalize('NFKD', base).encode('ascii', 'ignore').decode('ascii')
+    return re.sub(r'[^a-zA-Z0-9._-]', '_', ascii_base)
 
 
 def fix_ligatures(text):

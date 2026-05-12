@@ -23,7 +23,7 @@ Dependencias:
   Ver cada extractor individual.
 """
 
-import sys, os, time, json, glob, argparse, subprocess, re
+import sys, os, time, json, glob, argparse, subprocess, re, tempfile
 
 from common import sanitize_filename
 
@@ -44,7 +44,7 @@ EXTRACTORS = {
 
 
 def append_result(summary_path, result):
-    """Append a single result to the summary JSON file (incremental writes)."""
+    """Append a single result to the summary JSON file (atomic write)."""
     results = []
     if os.path.exists(summary_path):
         with open(summary_path) as f:
@@ -53,8 +53,17 @@ def append_result(summary_path, result):
             except json.JSONDecodeError:
                 results = []
     results.append(result)
-    with open(summary_path, "w") as f:
-        json.dump(results, f, indent=2)
+    # Atomic write: write to temp file then os.replace (no corrupt state on crash)
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(summary_path), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(results, f, indent=2)
+        os.replace(tmp_path, summary_path)
+    except Exception:
+        # Clean up temp file on error
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
 
 
 def main():
@@ -100,9 +109,16 @@ def main():
             cmd = [sys.executable, script, pdf_path, args.output_dir]
             print(f"  [{ext_name}] Running...", end=" ", flush=True)
 
+            # Use extractor's max_wait + buffer as timeout (avoids wrapper killing legit long jobs)
+            try:
+                from common import get_docai_config
+                extractor_timeout = get_docai_config()["max_wait"] + 300  # 5min buffer
+            except Exception:
+                extractor_timeout = 3900  # fallback: 65min
+
             t0 = time.time()
             try:
-                r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=extractor_timeout)
                 elapsed = time.time() - t0
 
                 if r.returncode == 0:
@@ -119,7 +135,7 @@ def main():
                     result = {"file": name, "extractor": ext_name, "status": "error",
                               "error": r.stderr[:200]}
             except subprocess.TimeoutExpired:
-                print(f"TIMEOUT (30min)")
+                print(f"TIMEOUT ({extractor_timeout//60}min)")
                 result = {"file": name, "extractor": ext_name, "status": "timeout"}
             except Exception as e:
                 print(f"ERROR: {e}")
