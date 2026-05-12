@@ -135,12 +135,21 @@ def fix_ligatures(text):
     text = (text.replace("\ufb01", "fi").replace("\ufb02", "fl")
                 .replace("\ufb00", "ff").replace("\ufb03", "ffi")
                 .replace("\ufb04", "ffl"))
-    # LaTeX ^{\circ} -> ° (DocAI renders ° as superscript-circle LaTeX)
-    # v1.6 wraps in \(...\), v1.0 doesn't
-    text = re.sub(r'\\\(\s*N\^\{\\circ\}\s*\\\)', 'N°', text)  # v1.6: \(N^{\circ}\)
-    text = re.sub(r'N\^\{\\circ\}', 'N°', text)                # v1.0: N^{\circ}
-    text = re.sub(r'\^\{\\circ\}', '°', text)                   # standalone ^{\circ}
-    text = re.sub(r'\\\(\s*\^\{\\circ\}\s*\\\)', '°', text)     # wrapped: \(\circ\)
+    # LaTeX \times -> × (dimensions like 1250 × 700)
+    text = text.replace("\\times", "×")
+    # LaTeX superscripts: ^{N} -> ^N (must run before \(\) unwrap)
+    text = re.sub(r'\^{(\d+)}', r'^\1', text)
+    # LaTeX \(\) wrappers: \(content\) -> content
+    # Must run AFTER specific patterns above so they don't need double-escaping
+    # Matches literal backslash-paren ... backslash-paren
+    text = re.sub(r'\\\(\s*([^)]+?)\s*\\\)', r'\1', text)
+    # Remaining ^{\circ} -> ° (after \(\) unwrap, these may be bare)
+    text = text.replace('^{\\circ}', '°')
+    # N^{\\circ} without wrap -> N° (v1.0 style)
+    text = text.replace('N^{\\circ}', 'N°')
+    # N^{\circ} with curly braces still present
+    text = re.sub(r'N\^{circ}', 'N°', text)
+    text = re.sub(r'\^{circ}', '°', text)
     return text
 
 
