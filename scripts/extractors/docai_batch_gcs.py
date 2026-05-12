@@ -35,12 +35,13 @@ import sys, os, time, json, re, urllib.parse, uuid
 from common import (
     get_docai_config, get_creds, sanitize_filename,
     parse_chunks, parse_layout_blocks, build_markdown,
+    get_processor_endpoint,
 )
 import requests
 
 cfg = get_docai_config()
 GCS_BUCKET = cfg["gcs_bucket"]
-PROJECT_NAME = f"projects/{cfg['project_id']}/locations/{cfg['location']}/processors/{cfg['processor_id']}"
+BATCH_ENDPOINT = get_processor_endpoint(cfg).replace(":process", ":batchProcess")
 API_BASE = f"https://{cfg['location']}-documentai.googleapis.com"
 
 
@@ -159,7 +160,7 @@ def start_batch_process(gcs_input_uri, gcs_output_uri, creds):
             }
         }
     }
-    url = f"{API_BASE}/v1/{PROJECT_NAME}:batchProcess"
+    url = f"{API_BASE}{BATCH_ENDPOINT}"
     r = requests.post(url,
         headers={"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"},
         json=body, timeout=60)
@@ -257,7 +258,7 @@ def main():
     def creds_getter(force_refresh=False):
         if force_refresh or _creds[0].expired:
             from google.auth.transport.requests import Request
-            _creds[0].refresh(Request(timeout=30))
+            _creds[0].refresh(Request())
         return _creds[0]
 
     try:

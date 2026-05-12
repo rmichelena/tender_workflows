@@ -31,11 +31,12 @@ import sys, os, time, json, base64, tempfile
 from common import (
     get_docai_config, get_creds, sanitize_filename,
     parse_chunks, parse_layout_blocks, build_markdown,
+    get_processor_endpoint,
 )
 import requests
 
 cfg = get_docai_config()
-PROJECT_NAME = f"projects/{cfg['project_id']}/locations/{cfg['location']}/processors/{cfg['processor_id']}"
+PROCESS_ENDPOINT = get_processor_endpoint(cfg)
 API_BASE = f"https://{cfg['location']}-documentai.googleapis.com"
 
 
@@ -87,10 +88,10 @@ def process_single_chunk(pdf_bytes, creds):
             }
         }
     }
-    url = f"{API_BASE}/v1/{PROJECT_NAME}:process"
+    url = f"{API_BASE}{PROCESS_ENDPOINT}"
     r = requests.post(url,
         headers={"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"},
-        json=body, timeout=300)
+        json=body, timeout=600)
     if r.status_code != 200:
         raise Exception(f"DocAI error {r.status_code}: {r.text[:500]}")
     return r.json()
@@ -129,7 +130,7 @@ def main():
     def creds_getter(force_refresh=False):
         if force_refresh or not _creds[0].valid:
             from google.auth.transport.requests import Request
-            _creds[0].refresh(Request(timeout=30))
+            _creds[0].refresh(Request())
         return _creds[0]
 
     pages = count_pdf_pages(input_file)

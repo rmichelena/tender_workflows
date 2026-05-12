@@ -50,6 +50,7 @@ def get_docai_config():
         "project_id": cfg.get("docai", "project_id"),
         "location": cfg.get("docai", "location", fallback="us"),
         "processor_id": cfg.get("docai", "processor_id"),
+        "processor_version": cfg.get("docai", "processor_version", fallback=""),
         "gcs_bucket": cfg.get("docai", "gcs_bucket", fallback=""),
         "token_path": _resolve_token_path(cfg.get("docai", "token_path")),
         "online_page_limit": cfg.getint("docai", "online_page_limit", fallback=15),
@@ -57,6 +58,21 @@ def get_docai_config():
         "poll_interval": cfg.getint("docai", "poll_interval", fallback=20),
         "max_wait": cfg.getint("docai", "max_wait", fallback=3600),
     }
+
+
+def get_processor_endpoint(cfg):
+    """Build the DocAI process endpoint URL including version if specified.
+    
+    If processor_version is set, uses the version-specific endpoint:
+      /v1/{processor}/processorVersions/{version}:process
+    Otherwise uses the default:
+      /v1/{processor}:process
+    """
+    base = f"projects/{cfg['project_id']}/locations/{cfg['location']}/processors/{cfg['processor_id']}"
+    ver = cfg.get("processor_version", "")
+    if ver:
+        return f"/v1/{base}/processorVersions/{ver}:process"
+    return f"/v1/{base}:process"
 
 
 def _resolve_token_path(raw_path):
@@ -84,7 +100,7 @@ def get_creds(token_path):
 
     if not creds.valid:
         try:
-            creds.refresh(Request(timeout=30))
+            creds.refresh(Request())
         except Exception as e:
             raise SystemExit(f"Failed to refresh OAuth token: {e}")
 

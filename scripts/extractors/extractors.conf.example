@@ -11,6 +11,11 @@ location = us
 # Layout Parser processor ID
 processor_id = b8ea939312a8ff4
 
+# Processor version (empty = stable/v1.0, or specify e.g. pretrained-layout-parser-v1.6-2026-01-13)
+# Available versions: pretrained-layout-parser-v1.6-2026-01-13 (rc), pretrained-layout-parser-v1.5-2025-08-25,
+#   pretrained-layout-parser-v1.5-pro-2025-08-25, pretrained-layout-parser-v1.0-2024-06-03 (stable)
+processor_version = pretrained-layout-parser-v1.6-2026-01-13
+
 # GCS bucket for batch mode input/output
 gcs_bucket = hermoberto
 
