@@ -1,10 +1,23 @@
-.DS_Store
-*.swp
-*.swo
+# Archivos de ejemplo y outputs generados
+ejemplos/
+
+# Config local (contiene paths y credenciales)
+scripts/extractors/extractors.conf
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
 .venv/
-.env
-.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
 .vscode/
-node_modules/
+.idea/
+
+# Temp
+*.tmp
+*.bak

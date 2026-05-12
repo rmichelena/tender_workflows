@@ -17,16 +17,9 @@ Dependencias:
   pip install markitdown
 """
 
-import sys, os, time, json, re
+import sys, os, time, json
 
-sys.path.insert(0, "/opt/data/home/.local/lib/python3.13/site-packages")
-
-
-def fix_ligatures(text):
-    """Corrige ligaturas tipográficas comunes (fi, fl, ff, ffi, ffl)."""
-    return (text.replace("\ufb01", "fi").replace("\ufb02", "fl")
-                .replace("\ufb00", "ff").replace("\ufb03", "ffi")
-                .replace("\ufb04", "ffl"))
+from common import sanitize_filename, fix_ligatures
 
 
 def main():
@@ -37,7 +30,7 @@ def main():
     input_file = sys.argv[1]
     output_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.dirname(input_file)
     os.makedirs(output_dir, exist_ok=True)
-    base = re.sub(r'[^a-zA-Z0-9._-]', '_', os.path.basename(input_file).rsplit(".", 1)[0])
+    base = sanitize_filename(input_file)
 
     print(f"Processing: {input_file}")
     t0 = time.time()

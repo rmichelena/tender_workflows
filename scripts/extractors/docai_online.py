@@ -5,7 +5,7 @@ Google Document AI — Layout Parser (Online/Chunked mode).
 Extrae texto + estructura de PDFs usando Google Document AI Layout Parser.
 Sin dependencia de Google Cloud Storage — funciona con OAuth de usuario.
 
-Modo ONLINE: documentos ≤ ONLINE_PAGE_LIMIT páginas (15 por defecto).
+Modo ONLINE: documentos ≤ online_page_limit páginas (15 por defecto).
 Modo CHUNKED: documentos grandes se dividen en trozos y se procesan secuencialmente.
 
 ⚠️ LIMITACIÓN: El modo chunked parte el documento arbitrariamente, lo que puede
@@ -23,36 +23,20 @@ Dependencias:
   pip install requests PyMuPDF google-auth-oauthlib
 
 Configuración:
-  - Credenciales OAuth en /opt/data/google_token_personal.json
-  - Processor ID hardcodeado (layout parser del proyecto GCP)
+  Ver extractors.conf.example
 """
 
-import sys, os, time, json, base64, re, tempfile
+import sys, os, time, json, base64, tempfile
 
-sys.path.insert(0, "/opt/data/home/.local/lib/python3.13/site-packages")
-
+from common import (
+    get_docai_config, get_creds, sanitize_filename,
+    parse_chunks, parse_layout_blocks, build_markdown,
+)
 import requests
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 
-# ─── Config ───────────────────────────────────────────────
-PROJECT_ID = "839375208239"
-LOCATION = "us"
-PROCESSOR_ID = "b8ea939312a8ff4"
-PROCESSOR_NAME = f"projects/{PROJECT_ID}/locations/{LOCATION}/processors/{PROCESSOR_ID}"
-API_BASE = f"https://{LOCATION}-documentai.googleapis.com"
-ONLINE_PAGE_LIMIT = 15
-
-TOKEN_PATH = "/opt/data/google_token_personal.json"
-
-
-def get_creds():
-    """Obtiene y refresca credenciales OAuth."""
-    with open(TOKEN_PATH) as f:
-        creds = Credentials.from_authorized_user_info(json.load(f))
-    if creds.expired:
-        creds.refresh(Request())
-    return creds
+cfg = get_docai_config()
+PROJECT_NAME = f"projects/{cfg['project_id']}/locations/{cfg['location']}/processors/{cfg['processor_id']}"
+API_BASE = f"https://{cfg['location']}-documentai.googleapis.com"
 
 
 def count_pdf_pages(file_path):
@@ -64,7 +48,7 @@ def count_pdf_pages(file_path):
     return n
 
 
-def split_pdf(file_path, chunk_size=ONLINE_PAGE_LIMIT):
+def split_pdf(file_path, chunk_size):
     """Divide PDF en trozos de N páginas. Retorna lista de (temp_path, start, end)."""
     import fitz
     doc = fitz.open(file_path)
@@ -97,13 +81,13 @@ def process_single_chunk(pdf_bytes, creds):
                 "enableTableAnnotation": True,
                 "enableImageAnnotation": True,
                 "chunkingConfig": {
-                    "chunkSize": 500,
+                    "chunkSize": cfg["chunk_size"],
                     "includeAncestorHeadings": True
                 }
             }
         }
     }
-    url = f"{API_BASE}/v1/{PROCESSOR_NAME}:process"
+    url = f"{API_BASE}/v1/{PROJECT_NAME}:process"
     r = requests.post(url,
         headers={"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"},
         json=body, timeout=300)
@@ -113,61 +97,17 @@ def process_single_chunk(pdf_bytes, creds):
 
 
 def extract_from_response(result, page_offset=0):
-    """Extrae chunks y blocks de una respuesta DocAI.
-    
-    NOTA: El texto completo está en chunkedDocument.chunks[].content,
-    NO en document.text (que viene vacío para Layout Parser).
-    """
+    """Extrae chunks y blocks de una respuesta DocAI."""
     doc = result.get("document", {})
-
-    chunks_raw = doc.get("chunkedDocument", {}).get("chunks", [])
-    chunks = []
-    for c in chunks_raw:
-        page_span = c.get("pageSpan", {})
-        if page_span:
-            page_span = {
-                "pageStart": page_span.get("pageStart", 1) + page_offset,
-                "pageEnd": page_span.get("pageEnd", 1) + page_offset,
-            }
-        chunks.append({
-            "chunk_id": c.get("chunkId"),
-            "content": c.get("content", ""),
-            "page_span": page_span,
-        })
-
-    blocks_raw = doc.get("documentLayout", {}).get("blocks", [])
-    blocks = []
-    for b in blocks_raw:
-        entry = {"block_id": b.get("blockId", ""), "_page_offset": page_offset}
-        if "textBlock" in b:
-            tb = b["textBlock"]
-            entry.update({"type": "text", "text": tb.get("text", ""), "semantic_type": tb.get("type", "paragraph")})
-        elif "tableBlock" in b:
-            tb = b["tableBlock"]
-            rows = []
-            for hr in tb.get("headerRows", []):
-                rows.append([" ".join(b2.get("textBlock", {}).get("text", "") for b2 in c.get("blocks", [])).strip() for c in hr.get("cells", [])])
-            for br in tb.get("bodyRows", []):
-                rows.append([" ".join(b2.get("textBlock", {}).get("text", "") for b2 in c.get("blocks", [])).strip() for c in br.get("cells", [])])
-            entry.update({"type": "table", "table_rows": rows, "table_row_count": len(rows)})
-        blocks.append(entry)
-
-    return [c["content"] for c in chunks], chunks, blocks
-
-
-def build_markdown(all_chunk_texts):
-    """Construye markdown final desde chunks, deduplicando."""
-    seen = set()
-    md_parts = []
-    for ct in all_chunk_texts:
-        normalized = ct.strip()
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            md_parts.append(normalized)
-    md = "\n\n---\n\n".join(md_parts)
-    md = md.replace("\ufb01", "fi").replace("\ufb02", "fl").replace("\ufb00", "ff")
-    md = md.replace("\ufb03", "ffi").replace("\ufb04", "ffl")
-    return md
+    chunks = parse_chunks(
+        doc.get("chunkedDocument", {}).get("chunks", []),
+        page_offset=page_offset
+    )
+    blocks = parse_layout_blocks(
+        doc.get("documentLayout", {}).get("blocks", []),
+        page_offset=page_offset
+    )
+    return chunks, blocks
 
 
 def main():
@@ -178,49 +118,54 @@ def main():
     input_file = sys.argv[1]
     output_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.dirname(input_file)
     os.makedirs(output_dir, exist_ok=True)
-    base = re.sub(r'[^a-zA-Z0-9._-]', '_', os.path.basename(input_file).rsplit(".", 1)[0])
+    base = sanitize_filename(input_file)
 
     print(f"Processing: {input_file}")
     t0 = time.time()
-    creds = get_creds()
+    creds = get_creds(cfg["token_path"])
     pages = count_pdf_pages(input_file)
     print(f"Pages: {pages}")
 
-    all_chunk_texts, all_chunks, all_blocks = [], [], []
+    all_chunks, all_blocks, failed_chunks = [], [], []
+    page_limit = cfg["online_page_limit"]
 
-    if pages <= ONLINE_PAGE_LIMIT:
+    if pages <= page_limit:
         print(f"Mode: ONLINE")
         with open(input_file, "rb") as f:
             pdf_bytes = f.read()
         result = process_single_chunk(pdf_bytes, creds)
-        ct, ch, bl = extract_from_response(result)
-        all_chunk_texts.extend(ct); all_chunks.extend(ch); all_blocks.extend(bl)
+        chunks, blocks = extract_from_response(result)
+        all_chunks.extend(chunks)
+        all_blocks.extend(blocks)
     else:
-        print(f"Mode: CHUNKED ({pages} pages in chunks of {ONLINE_PAGE_LIMIT})")
-        pdf_chunks = split_pdf(input_file, ONLINE_PAGE_LIMIT)
+        print(f"Mode: CHUNKED ({pages} pages in chunks of {page_limit})")
+        pdf_chunks = split_pdf(input_file, page_limit)
         for i, (chunk_path, start_pg, end_pg) in enumerate(pdf_chunks):
             print(f"  Chunk {i+1}/{len(pdf_chunks)}: pages {start_pg+1}-{end_pg}...", end=" ", flush=True)
             with open(chunk_path, "rb") as f:
                 chunk_bytes = f.read()
             try:
                 result = process_single_chunk(chunk_bytes, creds)
-                ct, ch, bl = extract_from_response(result, page_offset=start_pg)
-                all_chunk_texts.extend(ct); all_chunks.extend(ch); all_blocks.extend(bl)
-                print(f"OK ({len(ct)} chunks)")
+                chunks, blocks = extract_from_response(result, page_offset=start_pg)
+                all_chunks.extend(chunks)
+                all_blocks.extend(blocks)
+                print(f"OK ({len(chunks)} chunks)")
             except Exception as e:
+                failed_chunks.append({"pages": f"{start_pg+1}-{end_pg}", "error": str(e)})
                 print(f"ERROR: {e}")
             finally:
                 os.unlink(chunk_path)
 
-    md = build_markdown(all_chunk_texts)
+    md = build_markdown(all_chunks)
     elapsed = time.time() - t0
 
     text_blocks = sum(1 for b in all_blocks if b.get("type") == "text")
     table_blocks = sum(1 for b in all_blocks if b.get("type") == "table")
 
     print(f"\nResults: {elapsed:.1f}s | {len(all_chunks)} chunks | {len(all_blocks)} blocks | {len(md):,} chars")
+    if failed_chunks:
+        print(f"WARNING: {len(failed_chunks)} chunks failed!")
 
-    # Save
     md_path = os.path.join(output_dir, f"{base}_docai.md")
     json_path = os.path.join(output_dir, f"{base}_docai.json")
     with open(md_path, "w") as f:
@@ -230,10 +175,15 @@ def main():
             "source": input_file, "extractor": "google_docai_online",
             "pages": pages, "elapsed_seconds": round(elapsed, 1),
             "markdown_length": len(md), "chunks": all_chunks, "layout_blocks": all_blocks,
+            "failed_chunks": failed_chunks,
             "metrics": {"total_chunks": len(all_chunks), "total_blocks": len(all_blocks),
-                        "text_blocks": text_blocks, "table_blocks": table_blocks}
+                        "text_blocks": text_blocks, "table_blocks": table_blocks,
+                        "failed_chunks": len(failed_chunks)}
         }, f, indent=2, ensure_ascii=False)
     print(f"Saved: {md_path}, {json_path}")
+
+    if failed_chunks:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,9 @@ Batch runner — ejecuta múltiples extractores sobre múltiples documentos.
 Itera sobre todos los PDF de un directorio y ejecuta los extractores
 seleccionados, generando un reporte de comparación.
 
+Escribe resultados incrementalmente a batch_summary.json para que no se
+pierdan si el proceso se interrumpe.
+
 Uso:
   python3 batch_runner.py --input-dir <dir> --output-dir <dir> [--extractors docai_batch,markitdown]
 
@@ -20,9 +23,9 @@ Dependencias:
   Ver cada extractor individual.
 """
 
-import sys, os, time, json, glob, argparse, subprocess
+import sys, os, time, json, glob, argparse, subprocess, re
 
-sys.path.insert(0, "/opt/data/home/.local/lib/python3.13/site-packages")
+from common import sanitize_filename
 
 EXTRACTORS = {
     "markitdown": {
@@ -38,6 +41,20 @@ EXTRACTORS = {
         "suffix": "docai_batch",
     },
 }
+
+
+def append_result(summary_path, result):
+    """Append a single result to the summary JSON file (incremental writes)."""
+    results = []
+    if os.path.exists(summary_path):
+        with open(summary_path) as f:
+            try:
+                results = json.load(f)
+            except json.JSONDecodeError:
+                results = []
+    results.append(result)
+    with open(summary_path, "w") as f:
+        json.dump(results, f, indent=2)
 
 
 def main():
@@ -62,11 +79,12 @@ def main():
         print(f"No se encontraron PDFs en {args.input_dir}")
         sys.exit(1)
 
+    os.makedirs(args.output_dir, exist_ok=True)
+    summary_path = os.path.join(args.output_dir, "batch_summary.json")
+
     print(f"Found {len(pdfs)} PDFs")
     print(f"Extractors: {selected}")
     print("=" * 60)
-
-    results = []
 
     for pdf_path in pdfs:
         name = os.path.basename(pdf_path)
@@ -88,42 +106,40 @@ def main():
                 elapsed = time.time() - t0
 
                 if r.returncode == 0:
-                    # Find output file
-                    base = os.path.basename(pdf_path).rsplit(".", 1)[0]
-                    base_safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in base)
+                    base = sanitize_filename(pdf_path)
                     suffix = ext["suffix"]
-                    md_path = os.path.join(args.output_dir, f"{base_safe}_{suffix}.md")
+                    md_path = os.path.join(args.output_dir, f"{base}_{suffix}.md")
                     md_size = os.path.getsize(md_path) if os.path.exists(md_path) else 0
                     print(f"OK ({elapsed:.1f}s, {md_size:,} chars)")
-                    results.append({"file": name, "extractor": ext_name, "status": "ok",
-                                    "elapsed": round(elapsed, 1), "chars": md_size})
+                    result = {"file": name, "extractor": ext_name, "status": "ok",
+                              "elapsed": round(elapsed, 1), "chars": md_size}
                 else:
                     print(f"FAIL (exit {r.returncode})")
                     print(f"    {r.stderr[:200]}")
-                    results.append({"file": name, "extractor": ext_name, "status": "error",
-                                    "error": r.stderr[:200]})
+                    result = {"file": name, "extractor": ext_name, "status": "error",
+                              "error": r.stderr[:200]}
             except subprocess.TimeoutExpired:
                 print(f"TIMEOUT (30min)")
-                results.append({"file": name, "extractor": ext_name, "status": "timeout"})
+                result = {"file": name, "extractor": ext_name, "status": "timeout"}
             except Exception as e:
                 print(f"ERROR: {e}")
-                results.append({"file": name, "extractor": ext_name, "status": "error", "error": str(e)})
+                result = {"file": name, "extractor": ext_name, "status": "error", "error": str(e)}
+
+            # Incremental write — survives interruption
+            append_result(summary_path, result)
 
     # Summary
     print("\n" + "=" * 60)
     print("SUMMARY")
     print("=" * 60)
+    with open(summary_path) as f:
+        results = json.load(f)
     for r in results:
         status = r["status"]
         if status == "ok":
             print(f"  {r['file']:<35} {r['extractor']:<15} {r['elapsed']:>6.1f}s  {r['chars']:>10,} chars")
         else:
             print(f"  {r['file']:<35} {r['extractor']:<15} {status.upper()}")
-
-    # Save summary
-    summary_path = os.path.join(args.output_dir, "batch_summary.json")
-    with open(summary_path, "w") as f:
-        json.dump(results, f, indent=2)
     print(f"\nSaved: {summary_path}")
 
 

@@ -1,0 +1,30 @@
+# tender_procurement configuration
+# Copy to extractors.conf and customize. See README for details.
+
+[docai]
+# Google Cloud project ID (numeric)
+project_id = 839375208239
+
+# Document AI processor location
+location = us
+
+# Layout Parser processor ID
+processor_id = b8ea939312a8ff4
+
+# GCS bucket for batch mode input/output
+gcs_bucket = hermoberto
+
+# OAuth token file path
+token_path = google_token_personal.json
+
+# Online mode: max pages per request (API limit = 15)
+online_page_limit = 15
+
+# Chunk size for DocAI chunking config
+chunk_size = 500
+
+# Batch polling interval (seconds)
+poll_interval = 20
+
+# Batch max wait time (seconds)
+max_wait = 3600
