@@ -1,144 +1,99 @@
-# Code Review: `scripts/` folder
+# Code Review v2: `scripts/` folder (post-fixes)
 
 **Date:** 2026-05-12  
-**Reviewers:** GPT-5.5, DeepSeek V4 Pro, Kimi K2.6, GLM-5.1 (Qwen 3.6 timed out)  
-**Scope:** `scripts/extractors/` — 4 Python files, ~720 lines  
-**Files:** `batch_runner.py`, `docai_batch_gcs.py`, `docai_online.py`, `markitdown_extract.py`
+**Reviewers:** GPT-5.5, DeepSeek V4 Pro, Kimi K2.6, GLM-5.1, Qwen 3.6 Plus  
+**Scope:** `scripts/extractors/` — re-review after applying fixes from v1 review  
 
 ---
 
-## Summary
+## ✅ Fixed from v1 (9/13 issues resolved)
 
-Consolidated findings after deduplication:
-
-- **High: 5**
-- **Medium: 6**
-- **Low: 2**
-
----
-
-## High
-
-### 1. Filename sanitization mismatch causes silent data loss
-
-`batch_runner.py` uses `str.isalnum()` (Unicode-aware, keeps accented chars like ó, ñ) while all extractors use `re.sub(r'[^a-zA-Z0-9._-]', '_')` (ASCII-only). For any PDF with non-ASCII characters in its name, the batch runner constructs a path that will never match the extractor output. The summary always reports 0 chars extracted even when extraction succeeded.
-
-**Files:** `batch_runner.py:73` vs `docai_online.py:198`, `docai_batch_gcs.py:212`, `markitdown_extract.py:46`  
-**Flagged by:** GPT-5.5, DeepSeek, GLM  
-**Fix:** Replace `base_safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in base)` with `base_safe = re.sub(r'[^a-zA-Z0-9._-]', '_', base)` and add `import re`.
-
-### 2. GCS list doesn't handle pagination — output truncated at 100 objects
-
-`gcs_list` sets `maxResults: 100` with no `nextPageToken` loop. Large batch operations producing >100 output shards silently lose results beyond the first page.
-
-**File:** `docai_batch_gcs.py:78`  
-**Flagged by:** GPT-5.5, GLM  
-**Fix:** Loop while `nextPageToken` is present in the response, accumulating items across pages.
-
-### 3. GCS cleanup not in finally block — orphaned files on failure
-
-If extraction, JSON parsing, or file writing fails after the batch job completes, cleanup is skipped. Input PDFs and output shards remain on GCS indefinitely, incurring costs and leaking document content.
-
-**File:** `docai_batch_gcs.py:126-132`  
-**Flagged by:** Kimi, GLM  
-**Fix:** Wrap post-upload logic in `try/finally`, perform GCS cleanup in the `finally` block.
-
-### 4. Hardcoded credentials and machine-specific paths
-
-GCP PROJECT_ID, PROCESSOR_ID, and TOKEN_PATH (`/opt/data/google_token_personal.json`) are hardcoded in both DocAI files. Combined with `sys.path.insert(0, "/opt/data/home/.local/lib/python3.13/site-packages")` across all 4 files, these scripts only run on one specific machine and expose infrastructure details in source code.
-
-**Files:** All 4 files  
-**Flagged by:** All 4 reviewers  
-**Fix:** Move credentials to environment variables (`DOCAI_PROJECT_ID`, `DOCAI_PROCESSOR_ID`, `GOOGLE_TOKEN_PATH`). Remove `sys.path.insert` and use a virtualenv or `requirements.txt`.
-
-### 5. `get_creds()` has no error handling
-
-FileNotFoundError, JSONDecodeError, and RefreshError all propagate as raw tracebacks with no context message. In batch pipelines processing dozens of documents, one bad credential state kills the entire run unhelpfully.
-
-**Files:** `docai_online.py:65-70`, `docai_batch_gcs.py:73-78`  
-**Flagged by:** DeepSeek, Kimi  
-**Fix:** Wrap in try/except with actionable messages (`sys.exit(f"Token file not found: {TOKEN_PATH}")`, etc.).
+1. ✅ **Filename sanitization unified** — `batch_runner` now uses same regex as extractors
+2. ✅ **GCS pagination added** — `nextPageToken` loop implemented in `gcs_list`
+3. ✅ **GCS cleanup in `finally` block** — orphaned files no longer leak on failure
+4. ✅ **Hardcoded credentials removed** — moved to `extractors.conf` with `get_docai_config()`
+5. ✅ **`sys.path.insert` removed** — no more machine-specific paths
+6. ✅ **`get_creds()` has error handling** — try/except with actionable messages
+7. ✅ **DRY violations addressed** — shared `common.py` (181 lines) centralizes `get_creds`, `fix_ligatures`, `sanitize_filename`, `extract_table_rows`, `build_markdown`, `load_config`
+8. ✅ **Batch runner writes incrementally** — `append_result()` writes per-PDF instead of at end
+9. ✅ **Token refresh in batch polling** — `creds_getter(force_refresh=True)` on 401
 
 ---
 
-## Medium
+## 🔶 Remaining Issues (6 Medium, 2 Low)
 
-### 6. Deduplication by exact content drops legitimate repeated text
+### M1. `get_creds` checks `creds.expired` but not `creds.valid`
+**File:** `common.py:64-66`  
+**Flagged by:** Kimi, GLM
 
-Both `docai_online.py` and `docai_batch_gcs.py` use a `seen` set to skip chunks with previously-seen content. Procurement documents commonly repeat legal clauses, form headers, or annex titles across pages — these get silently dropped, producing incomplete output.
+A token can be invalid without being expired (revoked, scope mismatch, malformed). The current code only refreshes on `expired`, potentially returning invalid credentials that fail on first use.
 
-**Files:** `docai_online.py:139`, `docai_batch_gcs.py:171`  
-**Flagged by:** GPT-5.5, DeepSeek, Kimi, GLM  
-**Fix:** Deduplicate by `(chunk_id, content)` instead of content alone, or remove deduplication entirely.
+**Fix:** Change to `if not creds.valid:` instead of `if creds.expired:`.
 
-### 7. DRY violation — duplicated logic across 3+ files
+### M2. Token refresh missing in online chunked mode
+**File:** `docai_online.py:87-96`  
+**Flagged by:** GLM
 
-`get_creds()`, `fix_ligatures()`, table-block extraction (~16 identical lines), filename sanitization, and config constants are copy-pasted across files. A bug fix in one copy must be manually replicated.
+The batch extractor properly handles token refresh via `creds_getter`, but `docai_online.py` passes static `creds` directly to `process_single_chunk`. For large documents split into many chunks, the token may expire mid-processing.
 
-**Files:** All 4  
-**Flagged by:** All 4 reviewers  
-**Fix:** Extract shared code into a `common.py` module: `get_creds()`, config constants, `extract_table_rows()`, `fix_ligatures()`.
+**Fix:** Use the same `creds_getter` callable pattern in `docai_online.py`. Before each chunk, get fresh creds; on 401, force-refresh and retry.
 
-### 8. Chunked mode swallows errors — no record of partial failure
+### M3. Race condition in incremental `batch_summary.json` writes
+**File:** `batch_runner.py:40-48`  
+**Flagged by:** Kimi
 
-Failed chunks are printed to stdout but not tracked. The output JSON appears successful with no indication of missing sections.
+`append_result` reads the full JSON, modifies in memory, and rewrites. If interrupted between `json.load` and `json.dump`, the file is corrupted. Concurrent runs would also corrupt each other.
 
-**File:** `docai_online.py:116-122`  
-**Flagged by:** GPT-5.5, Kimi, GLM  
-**Fix:** Track failed chunks in a list, include `failed_chunks` in the output JSON, exit with non-zero code.
+**Fix:** Use atomic writes: write to a temp file and `os.replace()`, or switch to JSONL append mode.
 
-### 9. GCS upload loads entire PDF into RAM
+### M4. `split_pdf` temp file leak on exceptions
+**File:** `docai_online.py:57-76`  
+**Flagged by:** Kimi, GLM
 
-`gcs_upload` calls `f.read()` to slurp the full file before posting. Large procurement PDFs (100+ MB with images) can cause OOM.
+If `fitz.open()` or `new_doc.save()` throws (corrupt PDF, permissions), temp files from prior iterations are never cleaned up. No `try/finally` around temp file creation.
 
-**File:** `docai_batch_gcs.py:84-85`  
-**Flagged by:** DeepSeek  
-**Fix:** Pass the file object directly to `requests.post(data=f)` — requests will stream the upload.
+**Fix:** Wrap in `try/finally` ensuring `os.unlink(tmp_path)` for each created temp file. Or use `tempfile.TemporaryDirectory()`.
 
-### 10. Batch runner loses all results on interruption
+### M5. `creds_getter` has no retry on refresh failure in `poll_operation`
+**File:** `docai_batch_gcs.py:153-165`  
+**Flagged by:** Kimi
 
-Results are accumulated in a list and only written to `batch_summary.json` after all PDFs complete. A crash or SIGINT mid-batch loses all prior work.
+If `creds_getter(force_refresh=True)` throws (network down, token revoked), the poll loop breaks immediately with no retry. For batch operations lasting hours, transient network failures should be retried.
 
-**File:** `batch_runner.py:115-118`  
-**Flagged by:** DeepSeek  
-**Fix:** Write incrementally — append each result to the JSON file as it completes.
+**Fix:** Wrap refresh in retry with backoff (e.g., 3 attempts with increasing sleep).
 
-### 11. No isolation between concurrent runs — GCS path collision
+### M6. GCS cleanup incomplete if `gcs_list` failed
+**File:** `docai_batch_gcs.py:257-260`  
+**Flagged by:** Kimi
 
-GCS paths are deterministic (`input/{base}.pdf`). Two simultaneous runs processing files with the same basename will overwrite each other's GCS objects silently.
+If `gcs_list` throws before cleanup, `output_files` is `[]` and only the input file gets deleted. Output objects that were actually created remain orphaned.
 
-**File:** `docai_batch_gcs.py:96-98`  
-**Flagged by:** GLM  
-**Fix:** Include a UUID or timestamp in GCS paths: `input/{run_id}/{base}.pdf`.
+**Fix:** In the `finally` block, retry `gcs_list` before cleanup, or at minimum log a warning if `output_files` is empty but the batch operation reported success.
 
----
+### L1. `sanitize_filename` strips Unicode without normalization
+**File:** `common.py:91-93`  
+**Flagged by:** Kimi
 
-## Low
+`"Café_Número_1.pdf"` becomes `"Caf__N_mero_1"` instead of `"Cafe_Numero_1"`. More readable output with NFKD normalization first.
 
-### 12. Credentials not refreshed during long batch operations
+**Fix:** Add `unicodedata.normalize('NFKD', base).encode('ascii', 'ignore').decode('ascii')` before the regex.
 
-`get_creds()` is called once; for batch jobs lasting >1 hour, the OAuth token may expire during polling, failing the operation.
+### L2. `import fitz` inside functions instead of module top
+**File:** `docai_online.py:49, 57`  
+**Flagged by:** Kimi
 
-**File:** `docai_batch_gcs.py:125`  
-**Flagged by:** GPT-5.5  
-**Fix:** Refresh credentials inside the poll loop when a 401 is detected.
+Code smell — makes dependency detection harder. Python caches modules so it works, but convention is top-level imports.
 
-### 13. OAuth refresh has no timeout
-
-`creds.refresh(Request())` can hang indefinitely on network issues.
-
-**Files:** `docai_online.py:59`, `docai_batch_gcs.py:66`  
-**Flagged by:** Kimi  
-**Fix:** Pass a `Request()` instance with an explicit timeout.
+**Fix:** Move `import fitz` to the top of the file.
 
 ---
 
-## Recommendations
+## Priority Order for Developer
 
-The three highest-impact fixes:
-
-1. **Unify filename sanitization** — eliminates the silent data-loss bug for non-ASCII filenames
-2. **Add GCS pagination** — prevents truncated output for large documents
-3. **Extract shared utilities** — single place to fix bugs instead of 3+ copies
-
-Additionally, moving credentials to environment variables and removing hardcoded `sys.path` inserts would make the scripts portable beyond the original development machine.
+1. **M1** (`creds.valid`) — one-line fix, prevents subtle auth failures
+2. **M2** (online chunked refresh) — same class of bug that was fixed for batch, unfixed for online
+3. **M3** (atomic writes) — prevents data loss in batch runner
+4. **M4** (temp file cleanup) — resource leak on edge cases
+5. **M5** (refresh retry) — resilience for long-running batch operations
+6. **M6** (cleanup completeness) — storage cost prevention
+7. **L1, L2** — quality improvements, non-blocking
