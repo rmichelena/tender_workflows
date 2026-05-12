@@ -44,8 +44,19 @@ def load_config():
 
 
 def get_docai_config():
-    """Return DocAI config as a dict with sensible defaults."""
+    """Return DocAI config as a dict with sensible defaults.
+    
+    Validates that required keys (project_id, processor_id, token_path) exist.
+    """
     cfg = load_config()
+    # Validate required keys
+    required = {"project_id", "processor_id", "token_path"}
+    missing = [k for k in required if not cfg.get("docai", k, fallback="")]
+    if missing:
+        raise SystemExit(
+            f"Missing required config keys in [docai]: {', '.join(missing)}\n"
+            f"Check extractors.conf — see extractors.conf.example for reference."
+        )
     return {
         "project_id": cfg.get("docai", "project_id"),
         "location": cfg.get("docai", "location", fallback="us"),
@@ -57,6 +68,8 @@ def get_docai_config():
         "chunk_size": cfg.getint("docai", "chunk_size", fallback=500),
         "poll_interval": cfg.getint("docai", "poll_interval", fallback=20),
         "max_wait": cfg.getint("docai", "max_wait", fallback=3600),
+        "enable_image_annotation": cfg.getboolean("docai", "enable_image_annotation", fallback=False),
+        "filter_headers_footers": cfg.getboolean("docai", "filter_headers_footers", fallback=True),
     }
 
 

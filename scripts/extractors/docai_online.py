@@ -50,23 +50,36 @@ def count_pdf_pages(file_path):
 
 
 def split_pdf(file_path, chunk_size):
-    """Divide PDF en trozos de N páginas. Retorna lista de (temp_path, start, end)."""
+    """Divide PDF en trozos de N páginas. Retorna lista de (temp_path, start, end).
+    
+    Cleans up temp files if an exception occurs mid-split.
+    """
     import fitz
     doc = fitz.open(file_path)
     total = len(doc)
     chunks = []
-    for start in range(0, total, chunk_size):
-        end = min(start + chunk_size, total)
-        tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-        tmp_path = tmp.name
-        tmp.close()
-        new_doc = fitz.open()
-        for pg in range(start, end):
-            new_doc.insert_pdf(doc, from_page=pg, to_page=pg)
-        new_doc.save(tmp_path)
-        new_doc.close()
-        chunks.append((tmp_path, start, end))
-    doc.close()
+    try:
+        for start in range(0, total, chunk_size):
+            end = min(start + chunk_size, total)
+            tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+            tmp_path = tmp.name
+            tmp.close()
+            new_doc = fitz.open()
+            try:
+                for pg in range(start, end):
+                    new_doc.insert_pdf(doc, from_page=pg, to_page=pg)
+                new_doc.save(tmp_path)
+            finally:
+                new_doc.close()
+            chunks.append((tmp_path, start, end))
+    except Exception:
+        # Clean up any temp files created before the failure
+        for tmp_path, _, _ in chunks:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        raise
+    finally:
+        doc.close()
     return chunks
 
 

@@ -41,6 +41,8 @@ import requests
 
 cfg = get_docai_config()
 GCS_BUCKET = cfg["gcs_bucket"]
+if not GCS_BUCKET:
+    raise SystemExit("gcs_bucket is required for batch mode. Set it in extractors.conf [docai] section.")
 BATCH_ENDPOINT = get_processor_endpoint(cfg).replace(":process", ":batchProcess")
 API_BASE = f"https://{cfg['location']}-documentai.googleapis.com"
 
@@ -278,7 +280,7 @@ def main():
     # creds_getter for poll_operation (supports token refresh mid-poll)
     _creds = [creds]
     def creds_getter(force_refresh=False):
-        if force_refresh or _creds[0].expired:
+        if force_refresh or not _creds[0].valid:
             from google.auth.transport.requests import Request
             _creds[0].refresh(Request())
         return _creds[0]

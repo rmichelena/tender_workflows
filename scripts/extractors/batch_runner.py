@@ -73,6 +73,8 @@ def main():
     parser.add_argument("--extractors", default="markitdown,docai_batch",
                         help="Extractores separados por coma (default: markitdown,docai_batch)")
     parser.add_argument("--recursive", action="store_true", help="Buscar PDFs recursivamente")
+    parser.add_argument("--clean", action="store_true",
+                        help="Borrar batch_summary.json previo antes de empezar (fresh run)")
     args = parser.parse_args()
 
     selected = args.extractors.split(",")
@@ -90,6 +92,11 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
     summary_path = os.path.join(args.output_dir, "batch_summary.json")
+
+    # --clean: remove previous results for a fresh run
+    if args.clean and os.path.exists(summary_path):
+        os.unlink(summary_path)
+        print("Removed previous batch_summary.json (--clean)")
 
     print(f"Found {len(pdfs)} PDFs")
     print(f"Extractors: {selected}")
