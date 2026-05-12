@@ -8,7 +8,7 @@ Usage in extractors:
     from common import load_config, get_creds, sanitize_filename, fix_ligatures, ...
 """
 
-import os, re, json, configparser, unicodedata
+import os, re, json, configparser, unicodedata, time
 
 # Config file search order: extractors.conf, ../extractors.conf, ../../extractors.conf
 _CONF_CACHE = None
@@ -262,3 +262,59 @@ def extract_image_annotations(all_chunks):
             "source_block_ids": c.get("source_block_ids", []),
         })
     return annotations
+
+
+# ─── HTTP error handling ──────────────────────────────────
+
+# Transient errors worth retrying (Google best practice: exponential backoff)
+_TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+class DocAIError(Exception):
+    """Structured error from DocAI or GCS API calls."""
+
+    def __init__(self, status_code, message, is_transient=False, is_auth=False, is_permission=False):
+        self.status_code = status_code
+        self.is_transient = is_transient
+        self.is_auth = is_auth
+        self.is_permission = is_permission
+        super().__init__(f"HTTP {status_code}: {message}")
+
+
+def classify_http_error(status_code, response_text=""):
+    """Classify an HTTP error for appropriate handling.
+
+    Returns a DocAIError with flags:
+    - is_transient: retryable (429, 5xx) — use exponential backoff
+    - is_auth: authentication issue (401) — refresh token
+    - is_permission: access denied (403) — check IAM/service agent perms
+    """
+    is_transient = status_code in _TRANSIENT_STATUS_CODES
+    is_auth = status_code == 401
+    is_permission = status_code == 403
+    msg = response_text[:500] if response_text else f"HTTP {status_code}"
+    return DocAIError(status_code, msg, is_transient=is_transient,
+                      is_auth=is_auth, is_permission=is_permission)
+
+
+def retry_request(fn, max_retries=3, base_delay=1.0):
+    """Call fn() with exponential backoff on transient HTTP errors.
+
+    fn() should make an HTTP request and return the response object,
+    or raise DocAIError on failure. Non-transient errors propagate immediately.
+
+    Backoff: 1s, 2s, 4s (with jitter).
+    Google recommends this for 429/5xx errors:
+    https://cloud.google.com/storage/docs/retry-strategy
+    """
+    import random
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except DocAIError as e:
+            if not e.is_transient or attempt == max_retries:
+                raise
+            delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
+            print(f"  Retryable error (HTTP {e.status_code}), retrying in {delay:.1f}s ({attempt+1}/{max_retries})...",
+                  flush=True)
+            time.sleep(delay)

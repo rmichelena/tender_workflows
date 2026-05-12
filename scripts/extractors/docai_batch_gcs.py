@@ -35,7 +35,7 @@ import sys, os, time, json, re, urllib.parse, uuid
 from common import (
     get_docai_config, get_creds, sanitize_filename,
     parse_chunks, parse_layout_blocks, build_markdown,
-    get_processor_endpoint,
+    get_processor_endpoint, classify_http_error, retry_request, DocAIError,
 )
 import requests
 
@@ -161,12 +161,17 @@ def start_batch_process(gcs_input_uri, gcs_output_uri, creds):
         }
     }
     url = f"{API_BASE}{BATCH_ENDPOINT}"
-    r = requests.post(url,
-        headers={"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"},
-        json=body, timeout=60)
-    if r.status_code != 200:
-        raise Exception(f"batchProcess error {r.status_code}: {r.text[:500]}")
-    op_name = r.json().get("name", "")
+
+    def _do_request():
+        r = requests.post(url,
+            headers={"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"},
+            json=body, timeout=60)
+        if r.status_code != 200:
+            raise classify_http_error(r.status_code, r.text)
+        return r.json()
+
+    result = retry_request(_do_request)
+    op_name = result.get("name", "")
     print(f"  Operation: {op_name}")
     return op_name
 
@@ -174,28 +179,43 @@ def start_batch_process(gcs_input_uri, gcs_output_uri, creds):
 def poll_operation(operation_name, creds_getter):
     """Poll de operación long-running hasta completar.
 
-    creds_getter: callable returning fresh credentials (handles #12: token refresh).
-    Re-calls on 401 to get fresh token.
+    creds_getter: callable returning fresh credentials (handles token refresh).
+    Handles 401 (auth refresh), 429/5xx (retry with backoff), 403 (permission error).
     """
     url = f"{API_BASE}/v1/{operation_name}"
     start = time.time()
     while True:
         creds = creds_getter()
-        r = requests.get(url, headers={"Authorization": f"Bearer {creds.token}"}, timeout=30)
-        if r.status_code == 401:
-            # Token expired mid-poll — force refresh with retry
-            for attempt in range(3):
-                try:
-                    creds = creds_getter(force_refresh=True)
-                    break
-                except Exception as refresh_err:
-                    if attempt < 2:
-                        time.sleep(2 ** attempt)
-                    else:
-                        raise Exception(f"Token refresh failed after 3 attempts: {refresh_err}")
+
+        def _do_poll():
             r = requests.get(url, headers={"Authorization": f"Bearer {creds.token}"}, timeout=30)
-        if r.status_code != 200:
-            raise Exception(f"Poll error {r.status_code}: {r.text[:300]}")
+            if r.status_code == 401:
+                raise classify_http_error(401, r.text)
+            if r.status_code == 403:
+                raise classify_http_error(403, r.text)
+            if r.status_code != 200:
+                raise classify_http_error(r.status_code, r.text)
+            return r
+
+        try:
+            r = retry_request(_do_poll, max_retries=2)
+        except DocAIError as e:
+            if e.is_auth:
+                # Token expired mid-poll — force refresh with retry
+                for attempt in range(3):
+                    try:
+                        creds = creds_getter(force_refresh=True)
+                        break
+                    except Exception as refresh_err:
+                        if attempt < 2:
+                            time.sleep(2 ** attempt)
+                        else:
+                            raise Exception(f"Token refresh failed after 3 attempts: {refresh_err}")
+                continue  # retry poll with fresh creds
+            elif e.is_permission:
+                raise Exception(f"PERMISSION DENIED: Check IAM roles for service agent. {e}")
+            raise
+
         result = r.json()
         if result.get("done"):
             error = result.get("error")

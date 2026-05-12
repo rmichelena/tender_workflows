@@ -31,7 +31,7 @@ import sys, os, time, json, base64, tempfile
 from common import (
     get_docai_config, get_creds, sanitize_filename,
     parse_chunks, parse_layout_blocks, build_markdown,
-    get_processor_endpoint,
+    get_processor_endpoint, classify_http_error, retry_request,
 )
 import requests
 
@@ -89,12 +89,16 @@ def process_single_chunk(pdf_bytes, creds):
         }
     }
     url = f"{API_BASE}{PROCESS_ENDPOINT}"
-    r = requests.post(url,
-        headers={"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"},
-        json=body, timeout=600)
-    if r.status_code != 200:
-        raise Exception(f"DocAI error {r.status_code}: {r.text[:500]}")
-    return r.json()
+
+    def _do_request():
+        r = requests.post(url,
+            headers={"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"},
+            json=body, timeout=600)
+        if r.status_code != 200:
+            raise classify_http_error(r.status_code, r.text)
+        return r.json()
+
+    return retry_request(_do_request)
 
 
 def extract_from_response(result, page_offset=0):
@@ -162,8 +166,9 @@ def main():
                     all_blocks.extend(blocks)
                     print(f"OK ({len(chunks)} chunks)")
                 except Exception as e:
-                    # On 401, force refresh and retry once
-                    if "401" in str(e):
+                    from common import DocAIError
+                    # On 401 (auth), force refresh and retry once
+                    if isinstance(e, DocAIError) and e.is_auth:
                         try:
                             result = process_single_chunk(chunk_bytes, creds_getter(force_refresh=True))
                             chunks, blocks = extract_from_response(result, page_offset=start_pg)
@@ -173,6 +178,9 @@ def main():
                         except Exception as e2:
                             failed_chunks.append({"pages": f"{start_pg+1}-{end_pg}", "error": str(e2)})
                             print(f"ERROR after retry: {e2}")
+                    elif isinstance(e, DocAIError) and e.is_permission:
+                        failed_chunks.append({"pages": f"{start_pg+1}-{end_pg}", "error": f"PERMISSION DENIED: {e}"})
+                        print(f"PERMISSION ERROR: {e}")
                     else:
                         failed_chunks.append({"pages": f"{start_pg+1}-{end_pg}", "error": str(e)})
                         print(f"ERROR: {e}")
