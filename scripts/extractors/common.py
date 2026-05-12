@@ -129,13 +129,20 @@ def sanitize_filename(filepath):
 
 
 def fix_ligatures(text):
-    """Replace common Unicode ligatures with ASCII equivalents."""
-    return (text.replace("\ufb01", "fi").replace("\ufb02", "fl")
+    """Replace common Unicode ligatures with ASCII equivalents,
+    and normalize LaTeX artifacts from DocAI OCR."""
+    # Unicode ligatures
+    text = (text.replace("\ufb01", "fi").replace("\ufb02", "fl")
                 .replace("\ufb00", "ff").replace("\ufb03", "ffi")
                 .replace("\ufb04", "ffl"))
+    # LaTeX ^{\circ} -> ° (DocAI renders ° as superscript-circle LaTeX)
+    # v1.6 wraps in \(...\), v1.0 doesn't
+    text = re.sub(r'\\\(\s*N\^\{\\circ\}\s*\\\)', 'N°', text)  # v1.6: \(N^{\circ}\)
+    text = re.sub(r'N\^\{\\circ\}', 'N°', text)                # v1.0: N^{\circ}
+    text = re.sub(r'\^\{\\circ\}', '°', text)                   # standalone ^{\circ}
+    text = re.sub(r'\\\(\s*\^\{\\circ\}\s*\\\)', '°', text)     # wrapped: \(\circ\)
+    return text
 
-
-import re as _re
 
 def fix_chunk_spacing(text):
     """Fix missing line breaks in DocAI chunk content.
@@ -153,12 +160,12 @@ def fix_chunk_spacing(text):
     #    "...de ser el caso.1.2. ALCANCELa..." -> "...de ser el caso.\n\n1.2. ALCANCELa..."
     #    IMPORTANT: only match period+digit AFTER a lowercase letter (end of sentence),
     #    NOT inside a heading number like "1.1." that starts a line
-    text = _re.sub(
+    text = re.sub(
         r'([a-záéíóúñ])\.\s*(\d+\.\d+\.\s)',
         r'\1.\n\n\2',
         text
     )
-    text = _re.sub(
+    text = re.sub(
         r'([a-záéíóúñ])\.\s*(\d+\.\s)',
         r'\1.\n\n\2',
         text
@@ -169,7 +176,7 @@ def fix_chunk_spacing(text):
     #    "ALCANCELa" -> "ALCANCE\n\nLa"
     #    Break point: 2+ ALLCAPS chars followed by Upper+lower (start of new word)
     #    This avoids splitting inside ALLCAPS words or normal text like "Ley"
-    text = _re.sub(
+    text = re.sub(
         r'([A-ZÁÉÍÓÚÑ]{2,})([A-ZÁÉÍÓÚÑ][a-záéíóúñ])',
         r'\1\n\n\2',
         text
@@ -177,7 +184,7 @@ def fix_chunk_spacing(text):
 
     # 3. Markdown heading glued to previous non-newline, non-# character
     #    "BIENES 2### CAPÍTULO" -> "BIENES 2\n\n### CAPÍTULO"
-    text = _re.sub(
+    text = re.sub(
         r'([^\n#])(#{1,6}\s)',
         r'\1\n\n\2',
         text
@@ -185,14 +192,14 @@ def fix_chunk_spacing(text):
 
     # 4. Trailing page number noise from PDF footers
     #    " ...texto 3 LICITACIÓN PÚBLICA ..." -> "\n\nLICITACIÓN PÚBLICA ..."
-    text = _re.sub(
+    text = re.sub(
         r'\s+\d{1,2}\s+(LICITACIÓN|CONTRATACIÓN|ADJUDICACIÓN|BASES|DISPOSICIONES|CAPÍTULO|SECCIÓN|ANEXO)',
         r'\n\n\1',
         text
     )
 
     # 5. Collapse excessive blank lines (more than 2 consecutive)
-    text = _re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
 
     return text
 
