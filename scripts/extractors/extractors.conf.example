@@ -28,6 +28,15 @@ online_page_limit = 15
 # Chunk size for DocAI chunking config
 chunk_size = 500
 
+# Enable image annotation (verbose descriptions of logos, stamps, diagrams)
+# Default: false — image annotations are noise for text extraction.
+# Set true for second-pass classification of diagrams vs logos/stamps.
+enable_image_annotation = false
+
+# Filter headers/footers from markdown output (default: true)
+# v1.6+ detects header/footer blocks via semantic_type.
+filter_headers_footers = true
+
 # Batch polling interval (seconds)
 poll_interval = 20
 

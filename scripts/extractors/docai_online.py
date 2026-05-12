@@ -80,7 +80,7 @@ def process_single_chunk(pdf_bytes, creds):
         "processOptions": {
             "layoutConfig": {
                 "enableTableAnnotation": True,
-                "enableImageAnnotation": True,
+                "enableImageAnnotation": cfg.get("enable_image_annotation", False),
                 "chunkingConfig": {
                     "chunkSize": cfg["chunk_size"],
                     "includeAncestorHeadings": True
@@ -185,7 +185,9 @@ def main():
                 if os.path.exists(chunk_path):
                     os.unlink(chunk_path)
 
-    md = build_markdown(all_chunks)
+    md = build_markdown(all_chunks,
+                        filter_headers_footers=cfg.get("filter_headers_footers", True),
+                        filter_image_annotations=not cfg.get("enable_image_annotation", False))
     elapsed = time.time() - t0
 
     text_blocks = sum(1 for b in all_blocks if b.get("type") == "text")

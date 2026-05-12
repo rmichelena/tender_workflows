@@ -141,7 +141,11 @@ def extract_table_rows(table_block):
 
 
 def parse_layout_blocks(blocks_raw, page_offset=0):
-    """Parse documentLayout blocks into structured dicts."""
+    """Parse documentLayout blocks into structured dicts.
+    
+    TextBlock types include: paragraph, subtitle, heading-1..5, header, footer.
+    Headers/footers are tagged for downstream filtering.
+    """
     blocks = []
     for b in blocks_raw:
         entry = {"block_id": b.get("blockId", ""), "_page_offset": page_offset}
@@ -164,7 +168,16 @@ def parse_layout_blocks(blocks_raw, page_offset=0):
 
 
 def parse_chunks(chunks_raw, page_offset=0):
-    """Parse chunkedDocument chunks into structured dicts."""
+    """Parse chunkedDocument chunks into structured dicts.
+    
+    Each chunk may contain:
+    - content: the main text (may include __START_OF_ANNOTATION__ image descriptions)
+    - pageHeaders/pageFooters: header/footer text for the chunk's pages
+    - sourceBlockIds: references to layout blocks that produced this chunk
+    
+    is_image_annotation is set True when content is an image annotation
+    (logo, stamp, signature, diagram description) rather than real text.
+    """
     chunks = []
     for c in chunks_raw:
         page_span = c.get("pageSpan", {})
@@ -173,27 +186,79 @@ def parse_chunks(chunks_raw, page_offset=0):
                 "pageStart": page_span.get("pageStart", 1) + page_offset,
                 "pageEnd": page_span.get("pageEnd", 1) + page_offset,
             }
+        content = c.get("content", "")
+        is_img = ("__START_OF_ANNOTATION__" in content 
+                  or "**Image Description" in content)
         chunks.append({
             "chunk_id": c.get("chunkId"),
-            "content": c.get("content", ""),
+            "content": content,
             "page_span": page_span,
+            "is_image_annotation": is_img,
+            "source_block_ids": c.get("sourceBlockIds", []),
+            "page_headers": [h.get("text", "") for h in c.get("pageHeaders", [])],
+            "page_footers": [f.get("text", "") for f in c.get("pageFooters", [])],
         })
     return chunks
 
 
-def build_markdown(all_chunks):
+def build_markdown(all_chunks, filter_headers_footers=True, filter_image_annotations=True):
     """Build markdown from parsed chunks, deduplicating by (chunk_id, content).
 
     Deduplication uses (chunk_id, content) tuples to preserve legitimately
     repeated text (legal clauses, annex headers) that appear in different chunks.
+    
+    Filtering options:
+    - filter_headers_footers: strip chunks whose semantic_type is header/footer
+    - filter_image_annotations: strip chunks where is_image_annotation=True
+      (logos, stamps, signatures — usually noise for text extraction)
+    
+    Image annotations contain verbose descriptions like "The image displays a logo..."
+    that pollute the text. For technical diagrams, use a second pass with
+    enableImageAnnotation=True and classify each annotation.
     """
     seen = set()
     md_parts = []
     for c in all_chunks:
         content = c["content"].strip()
         key = (c["chunk_id"], content)
-        if content and key not in seen:
-            seen.add(key)
-            md_parts.append(content)
+        if not content or key in seen:
+            continue
+        # Skip chunks that are pure header/footer
+        if filter_headers_footers and c.get("semantic_type") in ("header", "footer"):
+            continue
+        # Skip image annotations (logos, stamps, signatures)
+        if filter_image_annotations and c.get("is_image_annotation"):
+            continue
+        seen.add(key)
+        md_parts.append(content)
     md = "\n\n---\n\n".join(md_parts)
     return fix_ligatures(md)
+
+
+def extract_image_annotations(all_chunks):
+    """Extract image annotation chunks for second-pass classification.
+    
+    Returns list of dicts with:
+    - chunk_id, content, page_span, source_block_ids
+    - annotation_text: just the annotation part (after __START_OF_ANNOTATION__)
+    
+    Use this to classify annotations into: logo/stamp/signature (discard)
+    vs technical diagram/specification (keep and extract).
+    """
+    annotations = []
+    for c in all_chunks:
+        if not c.get("is_image_annotation"):
+            continue
+        content = c["content"]
+        # Strip the annotation marker and extract just the description
+        marker = "__START_OF_ANNOTATION__"
+        idx = content.find(marker)
+        annotation_text = content[idx + len(marker):].strip() if idx >= 0 else content
+        annotations.append({
+            "chunk_id": c["chunk_id"],
+            "content": content,
+            "annotation_text": annotation_text,
+            "page_span": c.get("page_span", {}),
+            "source_block_ids": c.get("source_block_ids", []),
+        })
+    return annotations

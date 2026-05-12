@@ -155,7 +155,7 @@ def start_batch_process(gcs_input_uri, gcs_output_uri, creds):
         "processOptions": {
             "layoutConfig": {
                 "enableTableAnnotation": True,
-                "enableImageAnnotation": True,
+                "enableImageAnnotation": cfg.get("enable_image_annotation", False),
                 "chunkingConfig": {"chunkSize": cfg["chunk_size"], "includeAncestorHeadings": True}
             }
         }
@@ -229,7 +229,9 @@ def extract_from_batch(output_files, creds):
             doc_data.get("documentLayout", {}).get("blocks", [])
         ))
 
-    md = build_markdown(all_chunks)
+    md = build_markdown(all_chunks,
+                        filter_headers_footers=cfg.get("filter_headers_footers", True),
+                        filter_image_annotations=not cfg.get("enable_image_annotation", False))
     return md, all_chunks, all_blocks
 
 
