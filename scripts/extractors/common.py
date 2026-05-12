@@ -135,6 +135,68 @@ def fix_ligatures(text):
                 .replace("\ufb04", "ffl"))
 
 
+import re as _re
+
+def fix_chunk_spacing(text):
+    """Fix missing line breaks in DocAI chunk content.
+
+    DocAI (especially v1.0) often concatenates headings with body text
+    and runs paragraphs together without line breaks. This function
+    re-inserts proper spacing using pattern-based heuristics:
+
+    1. End-of-sentence glued to next numbered heading (safest — run first)
+    2. ALLCAPS heading glued directly to Mixed-case body text
+    3. Markdown heading (## etc) glued to previous non-newline char
+    4. Trailing page number noise from PDF footers
+    """
+    # 1. End of sentence glued to next numbered heading
+    #    "...de ser el caso.1.2. ALCANCELa..." -> "...de ser el caso.\n\n1.2. ALCANCELa..."
+    #    IMPORTANT: only match period+digit AFTER a lowercase letter (end of sentence),
+    #    NOT inside a heading number like "1.1." that starts a line
+    text = _re.sub(
+        r'([a-záéíóúñ])\.\s*(\d+\.\d+\.\s)',
+        r'\1.\n\n\2',
+        text
+    )
+    text = _re.sub(
+        r'([a-záéíóúñ])\.\s*(\d+\.\s)',
+        r'\1.\n\n\2',
+        text
+    )
+
+    # 2. ALLCAPS word(s) at end of heading glued to start of body text
+    #    "REFERENCIASCuando" -> "REFERENCIAS\n\nCuando"
+    #    "ALCANCELa" -> "ALCANCE\n\nLa"
+    #    Break point: 2+ ALLCAPS chars followed by Upper+lower (start of new word)
+    #    This avoids splitting inside ALLCAPS words or normal text like "Ley"
+    text = _re.sub(
+        r'([A-ZÁÉÍÓÚÑ]{2,})([A-ZÁÉÍÓÚÑ][a-záéíóúñ])',
+        r'\1\n\n\2',
+        text
+    )
+
+    # 3. Markdown heading glued to previous non-newline, non-# character
+    #    "BIENES 2### CAPÍTULO" -> "BIENES 2\n\n### CAPÍTULO"
+    text = _re.sub(
+        r'([^\n#])(#{1,6}\s)',
+        r'\1\n\n\2',
+        text
+    )
+
+    # 4. Trailing page number noise from PDF footers
+    #    " ...texto 3 LICITACIÓN PÚBLICA ..." -> "\n\nLICITACIÓN PÚBLICA ..."
+    text = _re.sub(
+        r'\s+\d{1,2}\s+(LICITACIÓN|CONTRATACIÓN|ADJUDICACIÓN|BASES|DISPOSICIONES|CAPÍTULO|SECCIÓN|ANEXO)',
+        r'\n\n\1',
+        text
+    )
+
+    # 5. Collapse excessive blank lines (more than 2 consecutive)
+    text = _re.sub(r'\n{3,}', '\n\n', text)
+
+    return text
+
+
 def extract_table_rows(table_block):
     """Extract rows from a DocAI tableBlock into list of lists of strings."""
     rows = []
@@ -243,7 +305,7 @@ def build_markdown(all_chunks, filter_headers_footers=True, filter_image_annotat
         if filter_image_annotations and c.get("is_image_annotation"):
             continue
         seen.add(key)
-        md_parts.append(content)
+        md_parts.append(fix_chunk_spacing(content))
     md = "\n\n---\n\n".join(md_parts)
     return fix_ligatures(md)
 
