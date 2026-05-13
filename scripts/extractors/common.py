@@ -128,6 +128,24 @@ def sanitize_filename(filepath):
     return re.sub(r'[^a-zA-Z0-9._-]', '_', ascii_base)
 
 
+def clean_ade_output(text):
+    """Clean LandingAI ADE markdown output.
+
+    Removes:
+    - All <::...::> annotation blocks (attestations/signatures, logos,
+      page decorations, transcriptions, image descriptions)
+    - NUL bytes (\\x00) -> ° (ADE sometimes outputs these for degree symbols)
+    - Collapse excessive blank lines left after removals
+    """
+    # Remove all <::...::> blocks (attestations, logos, decorations, etc.)
+    text = re.sub(r'<::.*?::>', '', text, flags=re.DOTALL)
+    # NUL bytes -> ° (degree symbol)
+    text = text.replace('\x00', '°')
+    # Collapse 3+ blank lines into 2
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
 def fix_ligatures(text):
     """Replace common Unicode ligatures with ASCII equivalents,
     and normalize LaTeX artifacts from DocAI OCR."""
