@@ -1,0 +1,266 @@
+# model_routing.yaml — Selección de modelo por tarea, basada en evidencia
+# v0.2 — actualizado tras ICAO-00068.
+#
+# Regla operativa #10 (agent_patterns.md): "Model routing por evidencia, no por reputación general".
+# Cada selección documenta el porqué — debe revisarse con cada licitación nueva.
+
+version: 0.2
+based_on_evidence: "ICAO-00068 (mayo 2026)"
+
+# ---------------------------------------------------------------
+# OBSERVACIONES EMPÍRICAS DE ICAO-00068
+# ---------------------------------------------------------------
+# Estas observaciones son las que justifican los routings de abajo.
+
+observations:
+  glm_5p1:
+    - "Único modelo que produjo JSON válido directamente sin truncamiento en BOM HL/Exploded"
+    - "Compacta mejor el output estructurado (17333 comp tokens para 67 items vs ~33000 de los otros para output equivalente)"
+    - "Confiable para tareas con schema fuerte y output grande"
+    - "Recomendación: PRIMARIO para todos los pasos con JSON output estructurado"
+
+  kimi_k2p6:
+    - "Truncó JSON sistemáticamente con max_tokens=16384, mejoró parcialmente con 32768"
+    - "Más verboso en output que glm-5p1"
+    - "Razonamiento decente pero no diferenciador para BOM"
+    - "Recomendación: NO usar como primario en pasos con output estructurado grande"
+
+  deepseek_v4_pro:
+    - "Igual problema de truncamiento que kimi"
+    - "Razonamiento técnico fuerte (lo destaca su tarjeta) pero no se aprovechó por el truncamiento"
+    - "Funcionó OK como fallback en chunk 4 VSAT del paso 2.4 tras fallar glm-5p1"
+    - "Recomendación: fallback secundario, no primario"
+
+  minimax_m2p7:
+    - "Truncamiento similar a kimi/deepseek"
+    - "Usado como revisor 'ojos frescos' en paso 3.2 — detectó 38 correcciones útiles"
+    - "Recomendación: bueno como AUDITOR/REVISOR, no como productor de output estructurado grande"
+
+# ---------------------------------------------------------------
+# ROUTING POR PASO
+# ---------------------------------------------------------------
+
+routing:
+
+  # Paso 1.1-1.3 — Normalización (mayormente determinístico, no LLM)
+  # El LLM solo aparece como fallback para visión donde el OCR clásico falla
+  paso_1_vision_fallback:
+    primary: "Gemini-2.5-Pro"
+    fallback: "GPT-5.5"
+    reason: |
+      Solo se usa si LandingAI ADE deja gaps. Caso raro. Modelos con visión + contexto largo.
+    function_required: "vision_ocr"
+    notes: "No se usó en ICAO-00068 — LandingAI cubrió todo"
+
+  # Paso 1.4 — Merge aclaraciones (ejecutor + auditor)
+  paso_1_4_ejecutor:
+    primary: "glm-5p1"
+    fallback: "GPT-5.4"
+    reason: |
+      Edición quirúrgica de documento markdown. Necesita razonamiento sólido + bajo riesgo de re-escritura completa.
+      glm-5p1 demostró ser conservador en outputs (no inventa cuando no hay datos).
+    function_required: "reasoning"
+    tool_budget:
+      max_file_reads: 10
+      max_file_writes: 5
+      max_iterations: 1  # NO ITERAR — falla loud si gaps
+
+  paso_1_4_auditor:
+    primary: "minimax-m2p7"  # diferente al ejecutor
+    fallback: "Kimi-K2.6"
+    reason: |
+      "Ojos frescos" — modelo DIFERENTE del ejecutor.
+      minimax-m2p7 demostró ser bueno detectando omisiones en paso 3.2 de ICAO-00068.
+    function_required: "auditor_revisor"
+    handoff_budget: 1  # NO REVERSE EDGE
+
+  # Paso 2.1 — BOM High-Level (productor + auditor)
+  # CAMBIO v0.2: eliminadas variantes paralelas. 1 productor + 1 auditor.
+  paso_2_1_productor:
+    primary: "glm-5p1"
+    fallback: "Kimi-K2.6"
+    reason: |
+      El único modelo que produjo JSON válido en ICAO-00068 sin rescue.
+      Output structured grande (16-37 items con specs en contexto) requiere compactness.
+    function_required: "bom_extraction"
+    schema: "schemas/bom_item.schema.json"
+    output_validation: "strict_json_schema"
+
+  paso_2_1_auditor:
+    primary: "Kimi-K2.6"  # diferente al productor
+    fallback: "DeepSeek-V4-Pro"
+    reason: |
+      "Ojos frescos" sobre el BOM HL. Detecta items faltantes, agrupaciones inconsistentes, decisiones implícitas mal aplicadas.
+    function_required: "auditor_revisor"
+    handoff_budget: 1
+
+  # Paso 2.3 — BOM Exploded (productor + auditor)
+  paso_2_3_productor:
+    primary: "glm-5p1"
+    fallback: "DeepSeek-V4-Pro"
+    reason: |
+      Output structured más grande aún (~150 items). glm-5p1 confiable.
+      DeepSeek como fallback (mostró buen razonamiento técnico en ICAO).
+    function_required: "bom_extraction"
+    schema: "schemas/bom_item.schema.json"
+    output_validation: "strict_json_schema"
+    context_strategy: "selective"  # solo secciones relevantes del EETT por chunk de items
+
+  paso_2_3_auditor:
+    primary: "minimax-m2p7"
+    fallback: "Kimi-K2.6"
+    reason: |
+      "Ojos frescos" sobre BOM Exploded. Verifica desagregación completa, parent_id correcto, requisitos en contexto.
+    function_required: "auditor_revisor"
+    handoff_budget: 1
+
+  # Paso 3.1 — Specs + herencia
+  paso_3_1_productor:
+    primary: "glm-5p1"
+    fallback: "GPT-5.5"
+    reason: |
+      Output structured grande (specs por item, hasta 1000 reqs total).
+      Procesar en batches de 5 items con context selectivo (solo secciones EETT relevantes).
+    function_required: "specs_extraction"
+    schema: "schemas/item_specs.schema.json"
+    batching: {batch_size: 5, max_batches: 50}
+    context_strategy: "selective"
+
+  # Paso 3.2 — Revisor "ojos frescos"
+  paso_3_2_revisor:
+    primary: "minimax-m2p7"  # confirmado por ICAO-00068
+    fallback: "Gemini-2.5-Pro"
+    reason: |
+      ICAO confirmó: detectó 38 correcciones (28 FALTANTE + 6 clasificación + 4 otros).
+      Modelo DIFERENTE del paso 3.1 productor.
+    function_required: "auditor_revisor"
+    handoff_budget: 1
+
+  # Paso 4 — BOM búsqueda (determinístico, no LLM)
+  paso_4:
+    type: "deterministic"
+    reason: |
+      Filtrado + limpieza referencias no-buscables. Script Python.
+      LLM call solo si hay traducción de norma local → estándar internacional ambigua.
+
+  # Paso 6 — Búsqueda por ítem (ÚNICO paso multi-agent del workflow)
+
+  paso_6_item_manager:
+    primary: "glm-5p1"
+    fallback: "Kimi-K2.6"
+    reason: |
+      Agente real con loop, tools, autonomía bounded.
+      Necesita razonamiento sólido para validar candidatos contra specs verbatim.
+      glm-5p1 confiable con tool calling.
+    function_required: "item_manager"
+    tool_budget:
+      max_search_calls: 12      # 6 por worker × 2 workers
+      max_fetch_calls: 16       # 8 por worker × 2 workers
+      max_pdf_parses: 6         # 3 por worker × 2 workers
+      max_iterations: 3         # productor → validar → decidir relanzar (hasta 3 ciclos)
+    handoff_budget_to_workers: 1  # 1 ronda inicial + max 2 relanzamientos = 3 rondas totales
+
+  paso_6_search_worker_a:
+    primary: "Kimi-K2.5-Turbo"
+    fallback: "GPT-5.4-Mini"
+    reason: |
+      Worker rápido, búsqueda en INGLÉS prioritariamente.
+      Throughput alto (varios items en paralelo) → modelo eficiente.
+    function_required: "search_worker"
+    search_tool: "brave"  # ver catalog_tools.md capa A
+    language_priority: ["en", "es"]
+    tool_budget:
+      max_searches: 6
+      max_fetches: 8
+      max_pdf_parses: 3
+
+  paso_6_search_worker_b:
+    primary: "GLM-5-Turbo"  # diferente al worker A
+    fallback: "Qwen-3.6-Plus"
+    reason: |
+      Worker B con modelo + tool de búsqueda DIFERENTE al A.
+      Búsqueda en ESPAÑOL prioritariamente + diversidad de motor.
+    function_required: "search_worker"
+    search_tool: "exa"  # con findSimilar para diversidad
+    language_priority: ["es", "en"]
+    tool_budget:
+      max_searches: 6
+      max_fetches: 8
+      max_pdf_parses: 3
+
+  paso_6_matriz_cumplimiento:
+    # CAMBIO v0.2: producción de matriz como LLM call SEPARADA, no parte del search worker
+    primary: "glm-5p1"
+    fallback: "Kimi-K2.6"
+    reason: |
+      Tarea distinta de la búsqueda: dado un candidato + spec del item + datasheet,
+      producir matriz verbatim contra cada requirement.
+      Schema fuerte. Output estructurado mediano. glm-5p1 confiable.
+    function_required: "compliance_matrix"
+    schema: "schemas/candidato_cumplimiento.schema.json"
+    handoff_budget: 1
+    output_validation: "strict_json_schema"
+
+  # Paso 7.1 — Consolidación final
+  paso_7_1_consolidador:
+    primary: "glm-5p1"
+    fallback: "GPT-5.4-Mini"
+    reason: |
+      Sintetiza BOM + specs + matrices de Paso 6.
+      Output structured grande. glm-5p1 confiable.
+    function_required: "consolidator"
+    schema: "schemas/consolidado_row.schema.json"
+
+  # Paso 7.2 — QA Final
+  paso_7_2_qa:
+    primary: "minimax-m2p7"
+    fallback: "Gemini-2.5-Pro"
+    reason: |
+      Critic terminal — verifica consistencia. Si encuentra problemas críticos: falla loud, NO reverse edge al consolidador.
+      minimax-m2p7 buen detector de inconsistencias (validado en ICAO 3.2).
+    function_required: "auditor_revisor"
+    handoff_budget: 0  # ningún reverse edge
+
+# ---------------------------------------------------------------
+# REGLAS GLOBALES DE ROUTING
+# ---------------------------------------------------------------
+
+global_rules:
+
+  # Regla 1: Diversidad obligatoria entre productor y auditor
+  diversidad_productor_auditor: |
+    En todo paso con producer + auditor, los modelos DEBEN ser distintos.
+    El orquestador verifica esto antes de cada delegación.
+
+  # Regla 2: Schema validation obligatoria
+  schema_validation: |
+    Todo output de LLM call con `schema` definido se valida post-call con un validador determinístico (no otro LLM).
+    Falla = retry una vez con el error como feedback; segundo falla = falla loud al humano.
+    NO usar bracket counting rescue.
+
+  # Regla 3: Tool budget enforced
+  tool_budget_enforced: |
+    El orquestador pasa el tool budget como parte del context del subagente.
+    Cuando el subagente se queda sin budget, devuelve lo que tiene; no intenta más.
+
+  # Regla 4: Recalibrar por evidencia
+  recalibrar: |
+    Tras cada licitación, actualizar el campo `observations` con lo aprendido.
+    Si un modelo del primary falla 2 corridas seguidas, promover el fallback a primary.
+
+  # Regla 5: Fail-loud antes que retry silencioso
+  fail_loud: |
+    Cuando un paso falla persistentemente:
+    - JSON inválido tras retry → falla loud, no rescue.
+    - Timeout consistente → falla loud, no scripts paralelos.
+    - Subagente sin candidato tras agotar tool budget → reportar SIN_CANDIDATO con diagnóstico.
+
+# ---------------------------------------------------------------
+# MODELOS DESCARTADOS PARA ESTE WORKFLOW (con razón)
+# ---------------------------------------------------------------
+
+descartados:
+  GPT-5.3-Codex:
+    reason: "Especializado en coding/coding agents. No aporta valor sobre los demás para este workflow."
+  GLM-5V-Turbo:
+    reason: "Visión documental. No se usa porque LandingAI cubre el Paso 1."
