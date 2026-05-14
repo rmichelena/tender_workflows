@@ -86,12 +86,26 @@ a) **Vigencia**: usar Jina Reader o Firecrawl para acceder a la página del fabr
 
 b) **Origen/marca**: verificar contra overlay. Si incumple → DESCARTADO.
 
-c) **Datasheet PDF**:
+c) **Datasheet PDF** (cascada de intentos):
+
+   **Intento 1 — Página del fabricante**:
    - Buscar link al datasheet en la página del fabricante (heurística de `catalog_tools.md` §4.1).
    - Si encontrás link directo a `.pdf`: descargar con HTTP directo.
    - Si está detrás de form simple sin email obligatorio: usar Browserbase con Playwright.
-   - Si está detrás de email/reCAPTCHA: marcar `evidence_quality: weak (no_public_datasheet)`, no gastar más budget.
-   - Parsear PDF descargado con Docling (default) o LlamaParse (si las tablas son complejas).
+   - Si está detrás de email/reCAPTCHA: pasar al Intento 2.
+
+   **Intento 2 — Fallback Google + filetype:pdf** (ver `catalog_tools.md` §4.5):
+   - **Solo si el candidato ya es pre-candidato** (vigencia ✅ + marca/origen ✅) y queda budget de search.
+   - Construir query: `"datasheet" "{marca}" "{modelo}" filetype:pdf` y variantes.
+   - Probar hasta 2-3 queries antes de rendirse.
+   - Validar que el PDF resultante corresponda al modelo correcto (no a variante/sucesor distinto).
+   - Documentar `datasheet_source: "external"` y citar la fuente (distribuidor, integrador, etc.).
+
+   **Si tampoco el Intento 2 funciona**:
+   - Marcar `evidence_quality: weak (no_public_datasheet)`.
+   - El candidato puede seguir como VALIDO o CONDICIONADO con muchos `parcial_sin_info` en la matriz.
+
+   **Parsear PDF descargado** (cualquier fuente): Docling (default) o LlamaParse (si las tablas son complejas).
 
 d) **Cumplimiento de requisitos Hard** (validación rápida):
    - Buscar evidencia de cada requisito Hard en el datasheet parseado.
@@ -173,8 +187,20 @@ Generar `ITEM-{id}_resultado.json` con la estructura indicada en §Output. Las m
       "part_number": "HI-PE-PLUS-STD",
       "url_fabricante": "https://www.ceia.net/security/product/HI-PE-Plus",
       "url_datasheet": "https://www.ceia.net/.../HIPEPlusbrochureE.pdf",
+      "datasheet_source": "manufacturer",
       "datasheet_parsed_path": "/proyecto/artifacts/step_6_resultados/datasheets/CEIA_HI-PE-Plus.md",
       "ruta_matriz": "matrices/ITEM-IT-0007/ITEM-IT-0007_candidato_1_CEIA_HI-PE-Plus.json"
+    },
+    {
+      "candidato_num": 2,
+      "marca": "Rohde & Schwarz",
+      "modelo": "VCS-4G",
+      "part_number": "1410.1234.02",
+      "url_fabricante": "https://www.rohde-schwarz.com/.../vcs-4g",
+      "url_datasheet": "https://www.distribuidor-ejemplo.com/.../RS_VCS-4G_datasheet.pdf",
+      "datasheet_source": "external (Google + filetype:pdf, distribuidor-ejemplo.com)",
+      "datasheet_parsed_path": "/proyecto/artifacts/step_6_resultados/datasheets/RS_VCS-4G.md",
+      "ruta_matriz": "matrices/ITEM-IT-0007/ITEM-IT-0007_candidato_2_RS_VCS-4G.json"
     }
   ],
   "candidatos_condicionados": [],

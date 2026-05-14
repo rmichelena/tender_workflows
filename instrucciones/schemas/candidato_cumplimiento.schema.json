@@ -13,6 +13,11 @@
     "estado": { "type": "string", "enum": ["VALIDO", "CONDICIONADO"] },
     "url_fabricante": { "type": "string", "format": "uri" },
     "url_datasheet": { "type": "string" },
+    "datasheet_source": {
+      "type": "string",
+      "enum": ["manufacturer", "external", "none"],
+      "description": "manufacturer = encontrado en el sitio del fabricante. external = encontrado vía búsqueda Google + filetype:pdf en distribuidor/tercero. none = no se encontró datasheet público."
+    },
     "datasheet_parsed_path": { "type": "string" },
     "fuentes_consultadas": {
       "type": "array",

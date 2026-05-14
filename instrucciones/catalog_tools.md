@@ -115,7 +115,51 @@ Ejemplos:
 - Síntoma: Jina/Firecrawl devuelven `<html>` con `<div id="app">` vacío o markdown `<200 tokens`.
 - Acción: escalar a Firecrawl con `actions:[{wait:3000}]` o directamente a Browserbase.
 
-### 4.5 Detección de "solicite cotización" sin datasheet público
+### 4.5 Datasheet no encontrado en sitio del fabricante — fallback a búsqueda externa
+
+Cuando el subagente-item identifica un **pre-candidato vigente** (página de fabricante activa, no EOL, marca/origen OK) pero NO encuentra link al datasheet en el sitio del fabricante, antes de declarar `evidence_quality: weak` debe intentar el fallback de búsqueda externa.
+
+**Razón**: muchos fabricantes (Rohde & Schwarz, Cobham, Codan, Harris, etc.) no exponen el datasheet en su web pública, pero el PDF circula libremente en sitios de distribuidores, integradores, archivos técnicos, IEEE/ITU repositorios, etc.
+
+**Patrón obligatorio — Google + filetype:pdf**:
+
+Construir queries Google con formato:
+```
+"datasheet" "{marca}" "{modelo}" filetype:pdf
+```
+
+Variantes a probar (en orden, hasta éxito o agotar 2-3 intentos del budget):
+
+1. `"datasheet" "{marca}" "{modelo}" filetype:pdf`
+2. `"{marca}" "{modelo}" datasheet filetype:pdf` (sin comillas en "datasheet" — más recall)
+3. `"{modelo}" specifications filetype:pdf` (si la marca está implícita en el modelo)
+4. `"{marca}" "{modelo}" "ficha técnica" filetype:pdf` (variante español si el equipo es popular en Latam)
+5. `"{marca}" "{modelo}" brochure filetype:pdf`
+
+**Cuándo ejecutar este fallback**:
+- ✅ El candidato ya pasó vigencia (página fabricante activa, no EOL).
+- ✅ El candidato ya pasó filtro de marca/origen del overlay.
+- ✅ La página del fabricante NO tiene link al datasheet PDF directo, ni accesible vía form simple.
+- ✅ Tenés al menos 2 fetch + 1 parse de budget restante.
+
+**Cuándo NO ejecutar** (anti-pattern):
+- ❌ Para todos los candidatos por defecto. Es un fallback, no la primera línea.
+- ❌ Para candidatos que ya van a ser descartados por incumplimiento Hard claro.
+- ❌ Cuando ya consumiste todo el budget de search/fetch.
+
+**Tool a usar**: Brave Search API con el operador `filetype:pdf`. Si Brave no soporta bien el operador para este caso, fallback a Tavily o Exa con la query igualmente formada — los tres engines respetan el operador en grados variables.
+
+**Procesamiento del resultado**:
+1. Validar que el PDF resultante corresponda al modelo correcto (a veces los buscadores devuelven datasheets de variantes/sucesores).
+2. Descargar con HTTP directo (no consumir Firecrawl si el PDF es accesible).
+3. Parsear con Docling.
+4. Citar la fuente real: documentar `url_datasheet` con el sitio donde se encontró (distribuidor, integrador, archivo) y agregar nota `datasheet_source: "external (Google + filetype:pdf)"` para auditoría.
+
+**Si después del fallback tampoco hay datasheet**:
+- Marcar `evidence_quality: weak (no_public_datasheet)`.
+- El candidato puede seguir siendo VÁLIDO o CONDICIONADO con info parcial — pero la matriz reflejará muchos `parcial_sin_info`.
+
+### 4.6 Detección de "solicite cotización" sin datasheet público
 
 Red flags en la página del producto:
 - "request a quote", "contact sales"
@@ -123,7 +167,7 @@ Red flags en la página del producto:
 - Ausencia total de specs numéricas en el HTML
 - Ausencia de PDFs en el dominio
 
-En ese caso, el subagente marca `evidence_quality: weak (no_public_datasheet)` y **no gasta más créditos** intentando bypass.
+En ese caso, ejecutar primero el fallback de §4.5 (Google + filetype:pdf). Si tampoco aparece nada, marcar `evidence_quality: weak (no_public_datasheet)` y **no gastar más créditos**.
 
 ---
 

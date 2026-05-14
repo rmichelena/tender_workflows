@@ -22,6 +22,7 @@ Eres un **generador de matriz de cumplimiento**. Tu tarea es comparar **un candi
   - `part_number`
   - `url_fabricante`
   - `url_datasheet`
+  - `datasheet_source`: `manufacturer` | `external` (Google + filetype:pdf en distribuidor/tercero) | `none`. Si `external`, el subagente-item ya validó que el PDF corresponde al modelo correcto; el campo va a la matriz para trazabilidad. Si `none`, muchos requisitos quedarán como `parcial_sin_info`.
 - **Schema**: `instrucciones/schemas/candidato_cumplimiento.schema.json`.
 - **Output path**: ej. `/proyecto/artifacts/step_6_resultados/matrices/ITEM-{id}/ITEM-{id}_candidato_{n}_{marca}_{modelo}.json`.
 
