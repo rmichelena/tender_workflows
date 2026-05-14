@@ -404,7 +404,7 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
     
     xref_hashes = {}
     xref_sizes = {}
-    xref_pages = defaultdict(list)
+    xref_pages = defaultdict(set)
     hash_to_xrefs = defaultdict(list)
     xref_phashes = {}       # perceptual hash for visual dedup
     
@@ -413,7 +413,7 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
         
         for img in page.get_images(full=True):
             xref = img[0]
-            xref_pages[xref].append(i + 1)
+            xref_pages[xref].add(i + 1)
             if xref not in xref_hashes:
                 try:
                     pix = pymupdf.Pixmap(doc, xref)
@@ -453,7 +453,7 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                 "hash": xref_hashes.get(xr, "?"),
                 "width": w, "height": h,
                 "page_count": len(pages),
-                "pages_sample": pages[:10],
+                "pages_sample": sorted(pages)[:10],
                 "category": "HIGH_FREQ",
                 "label": _label_for_size(w, h, len(pages))
             })
@@ -469,9 +469,9 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
             
             if not any(xr in flagged_xrefs for xr in xrefs):
                 w, ht = xref_sizes.get(keep, (0, 0))
-                all_pages = []
+                all_pages = set()
                 for xr in xrefs:
-                    all_pages.extend(xref_pages[xr])
+                    all_pages.update(xref_pages[xr])
                 removal_candidates.append({
                     "xrefs": xrefs,
                     "hash": h,
@@ -533,9 +533,9 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                 continue
             
             w, ht = xref_sizes.get(merged[0], (0, 0))
-            all_pages = []
+            all_pages = set()
             for xr in merged:
-                all_pages.extend(xref_pages.get(xr, []))
+                all_pages.update(xref_pages.get(xr, set()))
             
             # Keep the xref used on most pages, flag the rest
             keep = max(merged, key=lambda x: len(xref_pages[x]))
@@ -565,7 +565,7 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                 "hash": xref_hashes.get(xr, "?"),
                 "width": w, "height": h,
                 "page_count": len(xref_pages[xr]),
-                "pages_sample": xref_pages[xr][:5],
+                "pages_sample": sorted(xref_pages[xr])[:5],
                 "category": "TINY",
                 "label": f"Decoration ({w}x{h}px)"
             })
@@ -599,23 +599,23 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
             hf_candidate = high_freq_by_hash[h]
             if xr not in hf_candidate["xrefs"]:
                 hf_candidate["xrefs"].append(xr)
-                extra_pages = xref_pages.get(xr, [])
+                extra_pages = xref_pages.get(xr, set())
                 hf_candidate["pages_sample"] = sorted(
-                    set(hf_candidate.get("pages_sample", []) + extra_pages)
+                    set(hf_candidate.get("pages_sample", [])) | extra_pages
                 )[:10]
                 hf_candidate["page_count"] += len(extra_pages)
             flagged_xrefs.add(xr)
             continue
         # Find all xrefs with this same hash (may have been partially flagged)
         siblings = hash_to_xrefs.get(h, [])
-        total_pages = sum(len(xref_pages.get(s, [])) for s in siblings if s not in flagged_xrefs)
+        total_pages = sum(len(xref_pages.get(s, set())) for s in siblings if s not in flagged_xrefs)
         if total_pages >= 2 and total_pages < min_freq:
             unflagged = [s for s in siblings if s not in flagged_xrefs]
             if unflagged:
                 w, ht = xref_sizes.get(unflagged[0], (0, 0))
-                all_pages = []
+                all_pages = set()
                 for s in unflagged:
-                    all_pages.extend(xref_pages.get(s, []))
+                    all_pages.update(xref_pages.get(s, set()))
                 removal_candidates.append({
                     "xrefs": unflagged,
                     "hash": h,
@@ -674,7 +674,7 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                 "xref": xr,
                 "hash": xref_hashes.get(xr, "?"),
                 "width": w, "height": h,
-                "pages": xref_pages[xr]
+                "pages": sorted(xref_pages[xr])
             })
     
     cat_counts = defaultdict(int)
@@ -841,8 +841,9 @@ def _strip_text_redaction(doc, report, categories):
     patterns_to_redact = []
     for c in text_candidates:
         if c["category"] == "PAGE_NUMBER":
-            # Use regex for page numbers
-            patterns_to_redact.append(("PAGE_NUMBER", c["text"], None, None))
+            # Use regex for page numbers, with zone constraint (M2)
+            zone = c.get("zone")  # "header" or "footer"
+            patterns_to_redact.append(("PAGE_NUMBER", c["text"], None, zone))
         else:
             # Store the normalized form for fuzzy matching
             # Also store individual significant words for pre-filtering
@@ -877,6 +878,24 @@ def _strip_text_redaction(doc, report, categories):
                 for ptype, pattern, sig_words, pattern_zone in patterns_to_redact:
                     if ptype == "PAGE_NUMBER":
                         if _PAGE_NUMBER_RE.match(line_text):
+                            # M2: zone enforcement — only redact if in header/footer/margin
+                            if pattern_zone:
+                                page_h = page.rect.height
+                                page_w = page.rect.width
+                                ly = line["bbox"][1]
+                                lx = line["bbox"][0]
+                                if ly < page_h * header_zone:
+                                    line_zone = "header"
+                                elif ly > page_h * footer_zone:
+                                    line_zone = "footer"
+                                elif lx < page_w * left_margin:
+                                    line_zone = "left_margin"
+                                elif lx > page_w * right_margin:
+                                    line_zone = "right_margin"
+                                else:
+                                    line_zone = "content"
+                                if line_zone == "content":
+                                    continue  # M2: skip PAGE_NUMBER in content zone
                             should_redact = True
                             break
                     elif ptype == "TEXT_REPEAT":
@@ -948,7 +967,7 @@ def _strip_digital_signatures(doc, report):
                 # V (signature value) — can be ~36KB of PKCS7 data
                 v = doc.xref_get_key(w.xref, "V")
                 if v[0] == 'xref':
-                    sig_value_xrefs.add(int(_re.search(r'(\d+)\s+0\s+R', v[1]).group(1)))
+                    sig_value_xrefs.add(int(_re.search(r'(\d+)\s+\d+\s+R', v[1]).group(1)))
     
     count = len(sig_widget_xrefs)
     
@@ -957,7 +976,7 @@ def _strip_digital_signatures(doc, report):
         page = doc[page_idx]
         annots_key = doc.xref_get_key(page.xref, "Annots")
         if annots_key[0] == 'array':
-            arr = [int(x) for x in _re.findall(r'(\d+)\s+0\s+R', annots_key[1])]
+            arr = [int(x) for x in _re.findall(r'(\d+)\s+\d+\s+R', annots_key[1])]
             remaining = [x for x in arr if x not in sig_widget_xrefs]
             doc.xref_set_key(page.xref, "Annots",
                             "null" if not remaining else 
@@ -1161,12 +1180,15 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
     """
     # Build filter sets from report
     page_number_norms = set()
+    page_number_zones = {}  # norm → zone ("header"/"footer"/etc) — M2
     text_repeat_norms = set()
     text_repeat_zones = {}  # norm → zone ("header"/"footer")
     
     for c in report.get("removal_candidates", []):
         if c["category"] == "PAGE_NUMBER" and skip_page_numbers:
             page_number_norms.add(c["text"])
+            if "zone" in c:
+                page_number_zones[c["text"]] = c["zone"]
         elif c["category"] == "TEXT_REPEAT" and skip_text_repeat:
             text_repeat_norms.add(c["text"])
             if "zone" in c:
@@ -1200,9 +1222,30 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
                 if not line_text:
                     continue
                 
-                # Filter: page numbers
+                # Filter: page numbers (M2: only skip if in header/footer/margin zone)
                 if skip_page_numbers and _PAGE_NUMBER_RE.match(line_text):
-                    continue
+                    # M2: check if this page number pattern has a detected zone
+                    pn_norm = _normalize_for_clustering(line_text)
+                    if pn_norm in page_number_zones:
+                        detected_zone = page_number_zones[pn_norm]
+                        ly = line["bbox"][1]
+                        lx = line["bbox"][0]
+                        if ly < h * _header_zone:
+                            line_zone = "header"
+                        elif ly > h * _footer_zone:
+                            line_zone = "footer"
+                        elif lx < page_w * _left_margin:
+                            line_zone = "left_margin"
+                        elif lx > page_w * _right_margin:
+                            line_zone = "right_margin"
+                        else:
+                            line_zone = "content"
+                        if line_zone == "content":
+                            pass  # Don't skip — page number in content zone
+                        else:
+                            continue
+                    else:
+                        continue  # No zone info — skip (backward compatible)
                 
                 # Filter: repeated header/footer/margin text (normalized match + zone check)
                 if skip_text_repeat:
