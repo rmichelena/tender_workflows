@@ -1,0 +1,31 @@
+# overlay_usuario.yaml — Preferencias capturadas en Gate 0
+# Proyecto: ICAO-00068
+
+origen_fabricacion: sin_preferencia
+
+marcas:
+  modems_satelitales:
+    preferida: Comtech
+  nms:
+    preferida: Comtech
+  buc:
+    preferida: Terrasat
+  lnb:
+    preferida: Norsat
+  filtro_pasabanda:
+    preferida: Norsat
+  switcher_redundancia_buc:
+    preferida: Terrasat
+  switcher_redundancia_lnb:
+    preferida: Terrasat
+  switches_red:
+    preferidas: [Cisco, Huawei, HPE]
+    nota: si ninguna de esas cumple, se aceptan otras marcas
+  otros:
+    preferencia: sin_preferencia
+
+docs_modo: SIMPLE  # 1 subagente por documento
+
+metadata:
+  capturado: "2026-05-13"
+  fuente: "Gate 0 — diálogo con humano via Telegram"

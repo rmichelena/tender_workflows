@@ -1,3 +1,17 @@
 output/
 .env_landingai
 *.json.bak
+__pycache__/
+
+# Binary artifacts (PDFs, images, XLSX) — too large for git
+proyecto/inputs/
+proyecto/artifacts/
+proyecto/hermes-shared/
+
+# Data outputs (JSON, TSV, MD reports) — regenerable
+proyecto/outputs/*.json
+proyecto/outputs/*.tsv
+proyecto/outputs/*.xlsx
+
+# Weird artifact from a script bug
+5}x{p[height:
