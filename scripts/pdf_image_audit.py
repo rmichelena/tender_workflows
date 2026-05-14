@@ -118,27 +118,33 @@ def _normalize_for_clustering(text):
     return t
 
 
-def _detect_text_watermarks(doc, header_zone=0.12, footer_zone=0.88, threshold=0.3,
-                             min_pages=5):
+def _detect_text_watermarks(doc, header_zone=0.12, footer_zone=0.88,
+                           left_margin=0.08, right_margin=0.90,
+                           threshold=0.3, min_pages=5):
     """
-    Detect text that repeats on many pages in header/footer zones.
+    Detect text that repeats on many pages in non-content zones.
     
-    Combines ideas from gentrith78/pdf_header_and_footer_detector:
-    - Spatial zones: top N% = header, bottom N% = footer
-    - Line-level analysis (not word-level) to catch multi-span patterns
-    - Normalization with regex (numbers→N) before clustering, so
-      "Página 1 de 106" and "Página 50 de 106" cluster as one pattern
+    Zones (any text OUTSIDE these is "content" and ignored):
+    - header: top N% of page (y < header_zone * page_height)
+    - footer: bottom N% of page (y > footer_zone * page_height)
+    - left_margin: left edge (x < left_margin * page_width)
+    - right_margin: right edge (x > right_margin * page_width)
+    
+    The key criterion is SPATIAL REPETITION: same normalized text at the
+    same zone on ≥threshold pages = decorative/watermark, regardless of
+    whether it's horizontal, rotated, or any other orientation.
     
     Returns list of candidate dicts for removal_candidates.
     """
     total_pages = len(doc)
     
-    # Collect lines in header/footer zones across ALL pages
+    # Collect lines in non-content zones across ALL pages
     zone_lines = []  # [(page, zone, y, text, norm_text)]
     
     for i in range(total_pages):
         page = doc[i]
-        h = page.rect.height
+        ph = page.rect.height
+        pw = page.rect.width
         try:
             blocks = page.get_text("dict")["blocks"]
         except:
@@ -152,12 +158,22 @@ def _detect_text_watermarks(doc, header_zone=0.12, footer_zone=0.88, threshold=0
                 if not text or len(text) < 2:
                     continue
                 y = line["bbox"][1]
+                x = line["bbox"][0]  # left edge of line
                 norm = _normalize_for_clustering(text)
                 
-                if y < h * header_zone:
-                    zone_lines.append((i + 1, "header", y, text, norm))
-                elif y > h * footer_zone:
-                    zone_lines.append((i + 1, "footer", y, text, norm))
+                # Classify zone: header > footer > margins > content
+                if y < ph * header_zone:
+                    zone = "header"
+                elif y > ph * footer_zone:
+                    zone = "footer"
+                elif x < pw * left_margin:
+                    zone = "left_margin"
+                elif x > pw * right_margin:
+                    zone = "right_margin"
+                else:
+                    continue  # content zone — skip
+                
+                zone_lines.append((i + 1, zone, y, text, norm))
     
     if not zone_lines:
         return []
@@ -170,6 +186,11 @@ def _detect_text_watermarks(doc, header_zone=0.12, footer_zone=0.88, threshold=0
     
     # Find groups meeting threshold
     candidates = []
+    
+    zone_labels = {
+        "header": "Header", "footer": "Footer",
+        "left_margin": "Left margin", "right_margin": "Right margin"
+    }
     
     for (zone, norm), entries in norm_groups.items():
         pages = sorted(set(pg for pg, _, _ in entries))
@@ -188,8 +209,8 @@ def _detect_text_watermarks(doc, header_zone=0.12, footer_zone=0.88, threshold=0
             label = f'Page numbering: "{sample_texts[0]}" on {page_count}/{total_pages} pages'
         else:
             category = "TEXT_REPEAT"
-            zone_label = "header" if zone == "header" else "footer"
-            label = f'{zone_label.title()} text: "{sample_texts[0][:50]}" on {page_count}/{total_pages} pages'
+            zl = zone_labels.get(zone, zone.title())
+            label = f'{zl} text: "{sample_texts[0][:50]}" on {page_count}/{total_pages} pages'
         
         candidates.append({
             "text": norm,
@@ -792,11 +813,22 @@ def _strip_text_redaction(doc, report, categories):
                         if pattern == line_norm:
                             # Zone check: only redact if line is in same zone as detected pattern
                             if pattern_zone:
-                                line_y = line["bbox"][1]
                                 page_h = page.rect.height
-                                line_zone = "header" if line_y < page_h * 0.12 else ("footer" if line_y > page_h * 0.88 else "content")
+                                page_w = page.rect.width
+                                ly = line["bbox"][1]
+                                lx = line["bbox"][0]
+                                if ly < page_h * 0.12:
+                                    line_zone = "header"
+                                elif ly > page_h * 0.88:
+                                    line_zone = "footer"
+                                elif lx < page_w * 0.08:
+                                    line_zone = "left_margin"
+                                elif lx > page_w * 0.90:
+                                    line_zone = "right_margin"
+                                else:
+                                    line_zone = "content"
                                 if line_zone != pattern_zone:
-                                    continue  # Skip: content zone, not header/footer
+                                    continue  # Skip: different zone
                             should_redact = True
                             break
                 
@@ -1052,6 +1084,7 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
     for i in range(len(doc)):
         page = doc[i]
         h = page.rect.height
+        page_w = page.rect.width
         try:
             blocks = page.get_text("dict")["blocks"]
         except:
@@ -1070,17 +1103,28 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
                 if skip_page_numbers and _PAGE_NUMBER_RE.match(line_text):
                     continue
                 
-                # Filter: repeated header/footer text (normalized match + zone check)
+                # Filter: repeated header/footer/margin text (normalized match + zone check)
                 if skip_text_repeat:
                     norm = _normalize_for_clustering(line_text)
                     if norm in text_repeat_norms:
                         # Verify zone matches: only remove if line is in same zone as detected pattern
                         if norm in text_repeat_zones:
-                            line_y = line["bbox"][1]  # top of line bbox
-                            line_zone = "header" if line_y < h * 0.12 else ("footer" if line_y > h * 0.88 else "content")
-                            if line_zone == text_repeat_zones[norm]:
+                            detected_zone = text_repeat_zones[norm]
+                            ly = line["bbox"][1]
+                            lx = line["bbox"][0]
+                            if ly < h * 0.12:
+                                line_zone = "header"
+                            elif ly > h * 0.88:
+                                line_zone = "footer"
+                            elif lx < page_w * 0.08:
+                                line_zone = "left_margin"
+                            elif lx > page_w * 0.90:
+                                line_zone = "right_margin"
+                            else:
+                                line_zone = "content"
+                            if line_zone == detected_zone:
                                 continue
-                            # Line is in content zone — don't remove even if norm matches
+                            # Line is in a different zone — don't remove
                         else:
                             continue
                 
