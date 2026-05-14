@@ -261,6 +261,10 @@ def _detect_drawing_watermarks(doc, threshold=0.5, min_pages=10, quantize=1.0):
         except Exception:
             continue
         
+        # Safety: skip pages with excessive drawings (e.g., CAD/blueprint pages)
+        if len(drawings) > 500:
+            continue
+        
         for d in drawings:
             r = d.get("rect")
             if not r:
@@ -289,6 +293,11 @@ def _detect_drawing_watermarks(doc, threshold=0.5, min_pages=10, quantize=1.0):
     MERGE_TOLERANCE = 2.0  # pt
     keys = list(drawing_groups.keys())
     merged = set()       # keys already absorbed into another
+    
+    # Safety: skip fusion entirely if too many unique keys (e.g., CAD/blueprint pages)
+    # O(n²) fusion with 135K keys would take hours; 5K keys ≈ 25M comparisons is ~2s
+    MAX_FUSION_KEYS = 5000
+    skip_fusion = len(keys) > MAX_FUSION_KEYS
 
     def _structural_match(a, b):
         """Same fill, color, item_types."""
@@ -309,37 +318,39 @@ def _detect_drawing_watermarks(doc, threshold=0.5, min_pages=10, quantize=1.0):
         merged.add(b_key)
 
     # Pass 1: position-based fusion (nearby siblings)
-    for i_a in range(len(keys)):
-        if keys[i_a] in merged:
-            continue
-        for i_b in range(i_a + 1, len(keys)):
-            if keys[i_b] in merged:
+    if not skip_fusion:
+        for i_a in range(len(keys)):
+            if keys[i_a] in merged:
                 continue
-            if _structural_match(keys[i_a], keys[i_b]) and \
-               _spatial_close(keys[i_a][0], keys[i_b][0], MERGE_TOLERANCE):
-                _merge(keys[i_b], keys[i_a])
+            for i_b in range(i_a + 1, len(keys)):
+                if keys[i_b] in merged:
+                    continue
+                if _structural_match(keys[i_a], keys[i_b]) and \
+                   _spatial_close(keys[i_a][0], keys[i_b][0], MERGE_TOLERANCE):
+                    _merge(keys[i_b], keys[i_a])
 
     # Pass 2: size-based fusion (mirror siblings — same visual, diff position)
     # Only merge if combined page count would reach threshold
-    for i_a in range(len(keys)):
-        if keys[i_a] in merged:
-            continue
-        q_a, _, _, _ = keys[i_a]
-        pages_a = set(p[0] for p in drawing_groups[keys[i_a]])
-        for i_b in range(i_a + 1, len(keys)):
-            if keys[i_b] in merged:
+    if not skip_fusion:
+        for i_a in range(len(keys)):
+            if keys[i_a] in merged:
                 continue
-            if not _structural_match(keys[i_a], keys[i_b]):
-                continue
-            q_b, _, _, _ = keys[i_b]
-            if not _same_size(q_a, q_b, MERGE_TOLERANCE):
-                continue
-            pages_b = set(p[0] for p in drawing_groups[keys[i_b]])
-            combined = len(pages_a | pages_b)
-            # Only fuse if combined would pass threshold
-            if combined / total_pages >= threshold and combined >= min_pages:
-                _merge(keys[i_b], keys[i_a])
-                pages_a = pages_a | pages_b  # update for next iteration
+            q_a, _, _, _ = keys[i_a]
+            pages_a = set(p[0] for p in drawing_groups[keys[i_a]])
+            for i_b in range(i_a + 1, len(keys)):
+                if keys[i_b] in merged:
+                    continue
+                if not _structural_match(keys[i_a], keys[i_b]):
+                    continue
+                q_b, _, _, _ = keys[i_b]
+                if not _same_size(q_a, q_b, MERGE_TOLERANCE):
+                    continue
+                pages_b = set(p[0] for p in drawing_groups[keys[i_b]])
+                combined = len(pages_a | pages_b)
+                # Only fuse if combined would pass threshold
+                if combined / total_pages >= threshold and combined >= min_pages:
+                    _merge(keys[i_b], keys[i_a])
+                    pages_a = pages_a | pages_b  # update for next iteration
 
     # Filter: only drawings on ≥threshold pages and ≥min_pages
     candidates = []
