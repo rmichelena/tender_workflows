@@ -158,7 +158,7 @@ def start_batch_process(gcs_input_uri, gcs_output_uri, creds):
             "layoutConfig": {
                 "enableTableAnnotation": True,
                 "enableImageAnnotation": cfg.get("enable_image_annotation", False),
-                "chunkingConfig": {"chunkSize": cfg["chunk_size"], "includeAncestorHeadings": True}
+                "chunkingConfig": {"chunkSize": cfg["chunk_size"], "includeAncestorHeadings": False}
             }
         }
     }

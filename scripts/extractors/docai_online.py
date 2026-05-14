@@ -96,7 +96,7 @@ def process_single_chunk(pdf_bytes, creds):
                 "enableImageAnnotation": cfg.get("enable_image_annotation", False),
                 "chunkingConfig": {
                     "chunkSize": cfg["chunk_size"],
-                    "includeAncestorHeadings": True
+                    "includeAncestorHeadings": False
                 }
             }
         }
