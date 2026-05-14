@@ -1068,9 +1068,11 @@ def _strip_recurring_drawings(doc, report):
     for page_idx, rects in page_removals.items():
         page = doc[page_idx]
         
-        # Redact drawing areas (no fill — just remove vector operators)
+        # Redact drawing areas with white fill to cover vector drawings.
+        # fill=None does NOT affect vector drawings (only text spans).
+        # True removal requires content-stream surgery (pikepdf roadmap).
         for r in rects:
-            page.add_redact_annot(r, fill=None)
+            page.add_redact_annot(r, fill=(1, 1, 1))
         
         # Apply redactions but DON'T affect images
         page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE)
