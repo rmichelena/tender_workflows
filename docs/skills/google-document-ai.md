@@ -77,7 +77,7 @@ GET https://{location}-documentai.googleapis.com/v1/{operation_name}
   },
   "processOptions": {
     "layoutConfig": {
-      "chunkingConfig": {"chunkSize": 500, "includeAncestorHeadings": true}
+      "chunkingConfig": {"chunkSize": 500, "includeAncestorHeadings": false}
     }
   }
 }
@@ -87,7 +87,7 @@ GET https://{location}-documentai.googleapis.com/v1/{operation_name}
 
 ### Mandatory processOptions
 - `layoutConfig.chunkingConfig.chunkSize: 500` — required for chunked output
-- `includeAncestorHeadings: true` — chunks include parent headings for context
+- `includeAncestorHeadings: false` — **CRITICAL: set to false for text extraction** (see Pitfall #33)
 
 ### Where the text lives
 `document.text` comes **empty** in Layout Parser. Always use:
@@ -302,6 +302,7 @@ token_path = /opt/data/google_token_personal.json
 30. **LandingAI SDK returns `data=None` with `output_url` for large documents** — For multi-page PDFs (135p observed), `ParseJobGetResponse.data` is `None` but `output_url` contains a pre-signed S3 URL to the full JSON result (`{markdown, chunks, splits, grounding, metadata}`). The URL expires in ~1 hour. Always check `output_url` when `data is None` before treating it as a failure. Download with `urllib.request.urlopen(job.output_url)` and parse the JSON manually.
 31. **LandingAI: always list existing jobs before creating new ones** — `client.parse_jobs.list()` returns all recent jobs with status. Before submitting a new extraction, check if a completed job already exists for the same document. Creating duplicate jobs wastes credits (~1.5 credits/page for dpt-2-mini, ~3 credits/page for dpt-2-latest). Recover results from completed jobs with `client.parse_jobs.get(job_id=...)` + `output_url` download.
 32. **LandingAI SDK `create()` returns only `job_id`** — `ParseJobCreateResponse` has only `job_id` field, no `status`. Polling requires `client.parse_jobs.get(job_id=create_resp.job_id)` which returns `ParseJobGetResponse` with `status`, `data`, `output_url`, `progress`, `failure_reason`. Status values observed: `pending`, `processing`, `completed`, `failed`.
+33. **`includeAncestorHeadings: true` repeats headers in every chunk** — DocAI's chunking is designed for RAG: each chunk gets its full ancestral heading chain prepended (document title + section + subsection). For a 135-page CORPAC document, this caused `# ESPECIFICACIONES TÉCNICAS...` to appear in 139/139 chunks, and `# 5.3.2 Características generales...` in 36 chunks. The total text inflated by ~10K chars of pure repetition. **Fix:** Set `includeAncestorHeadings: false` in `processOptions.layoutConfig.chunkingConfig`. For legacy jobs already extracted with `true`, `common.py`'s `build_markdown()` now includes `_strip_ancestral_headings()` that removes heading-only prefixes from chunk starts. This is a **post-hoc fallback** — always set the API param to `false` for new jobs. The `includeAncestorHeadings` option only makes sense for vector search/RAG where chunks are retrieved in isolation and need context.
 
 ## Files
 
