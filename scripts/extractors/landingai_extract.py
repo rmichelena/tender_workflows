@@ -77,27 +77,58 @@ def extract_document(filepath, model="dpt-2-mini", output_dir=None, clean=True):
 
     start = time.time()
 
-    # Parse document
-    job = client.parse_jobs.create(
+    # Parse document — create returns only job_id
+    create_resp = client.parse_jobs.create(
         document=open(filepath, "rb"),
         model=model,
     )
+    job_id = create_resp.job_id
 
-    # Poll until complete
-    while job.status != "complete":
+    # Poll until complete (get() returns ParseJobGetResponse with status/data)
+    job = client.parse_jobs.get(job_id=job_id)
+    while job.status not in ("completed", "complete", "failed"):
         time.sleep(2)
-        job = client.parse_jobs.get(job_id=job.job_id)
+        job = client.parse_jobs.get(job_id=job_id)
 
     elapsed = time.time() - start
 
-    if job.data is None:
-        print(f"ERROR: Job failed. Status: {job.status}, reason: {job.failure_reason}", file=sys.stderr)
+    if job.status == "failed":
+        print(f"ERROR: Job failed. reason: {getattr(job, 'failure_reason', 'unknown')}", file=sys.stderr)
         sys.exit(1)
 
-    response = job.data
-    raw_markdown = response.markdown
-    chunks = response.chunks
-    metadata = response.metadata
+    # SDK may return data=None with output_url for large documents
+    # In that case, download from S3 directly
+    if job.data is not None:
+        response = job.data
+        raw_markdown = response.markdown
+        chunks = response.chunks
+        metadata = response.metadata
+    elif job.output_url:
+        import urllib.request
+        print("  Downloading result from output_url...")
+        raw_bytes = urllib.request.urlopen(job.output_url).read()
+        import json as _json
+        result_data = _json.loads(raw_bytes)
+        raw_markdown = result_data.get("markdown", "")
+        chunks_data_raw = result_data.get("chunks", [])
+        metadata = result_data.get("metadata")
+
+        # Wrap raw chunks into simple objects for downstream compatibility
+        class _Chunk:
+            def __init__(self, d):
+                self.id = d.get("id", "")
+                self.type = d.get("type", "")
+                self.markdown = d.get("markdown", "")
+                self.grounding = None
+                if "grounding" in d:
+                    g = d["grounding"]
+                    class _G:
+                        page = g.get("page", 0)
+                    self.grounding = _G()
+        chunks = [_Chunk(c) for c in chunks_data_raw]
+    else:
+        print("ERROR: Job completed but no data or output_url", file=sys.stderr)
+        sys.exit(1)
 
     print(f"  Completed in {elapsed:.1f}s")
     print(f"  Chunks: {len(chunks)}")
