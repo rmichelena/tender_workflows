@@ -385,7 +385,9 @@ def _detect_drawing_watermarks(doc, threshold=0.5, min_pages=10, quantize=1.0):
 
 
 def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
-                       text_threshold=0.5, text_min_pages=10):
+                       text_threshold=0.5, text_min_pages=10,
+                       header_zone=0.12, footer_zone=0.88,
+                       left_margin=0.08, right_margin=0.90):
     """
     Scan a PDF and classify images AND text by duplication/repetition patterns.
     
@@ -650,7 +652,11 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
         removal_candidates.extend(digital_sigs)
     
     # 6. TEXT_REPEAT + PAGE_NUMBER: Text watermarks and headers
-    text_candidates = _detect_text_watermarks(doc, threshold=text_threshold, 
+    text_candidates = _detect_text_watermarks(doc, header_zone=header_zone,
+                                               footer_zone=footer_zone,
+                                               left_margin=left_margin,
+                                               right_margin=right_margin,
+                                               threshold=text_threshold, 
                                                min_pages=text_min_pages)
     removal_candidates.extend(text_candidates)
     
@@ -691,7 +697,13 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
         "images_flagged": len(flagged_xrefs),
         "text_flagged": text_flagged,
         "content_images_remaining": len(content_images),
-        "categories": dict(cat_counts)
+        "categories": dict(cat_counts),
+        "zones": {
+            "header_zone": header_zone,
+            "footer_zone": footer_zone,
+            "left_margin": left_margin,
+            "right_margin": right_margin
+        }
     }
     
     doc.close()
@@ -720,7 +732,8 @@ def _strip_images_content_stream(doc, report, categories):
     Remove flagged images by editing page content streams.
     
     For each page, resolves which resource names point to flagged xrefs
-    ON THAT PAGE, then removes only those /Name Do operators.
+    ON THAT PAGE using page.get_images(full=True), then removes only
+    those /Name Do operators from the content stream.
     
     This is page-aware: the same resource name (e.g. "Xop1") may point
     to a flagged xref on one page but a content image on another.
@@ -729,7 +742,7 @@ def _strip_images_content_stream(doc, report, categories):
     """
     xrefs_to_strip = set()
     for c in report["removal_candidates"]:
-        if c["category"] in categories and c["category"] not in ("TEXT_REPEAT", "PAGE_NUMBER"):
+        if c["category"] in categories and c["category"] not in ("TEXT_REPEAT", "PAGE_NUMBER", "DRAWING_REPEAT"):
             xrefs_to_strip.update(c["xrefs"])
     
     if not xrefs_to_strip:
@@ -744,37 +757,16 @@ def _strip_images_content_stream(doc, report, categories):
             if not contents:
                 continue
             
-            # Build name→xref mapping for THIS page's resources
+            # Build name→xref mapping for THIS page using PyMuPDF structured API
+            # (fixes H5: no regex on resource dictionaries — handles nested dicts correctly)
             page_name_to_xref = {}
             try:
-                resources = doc.xref_get_key(page.xref, "Resources")
-                if resources[0] not in ('dict', 'xref'):
-                    continue
-                
-                # Resolve Resources dict (may be inline or indirect)
-                if resources[0] == 'xref':
-                    res_xref = int(re.search(r'(\d+)\s+0\s+R', resources[1]).group(1))
-                    res_str = doc.xref_object(res_xref)
-                else:
-                    res_str = resources[1]
-                
-                # Find the XObject sub-dict
-                xo_match = re.search(r'/XObject\s*<<([^>]*)>>', res_str)
-                if not xo_match:
-                    # XObject might be an indirect reference
-                    xo_ref = re.search(r'/XObject\s+(\d+)\s+0\s+R', res_str)
-                    if xo_ref:
-                        xo_inner = doc.xref_object(int(xo_ref.group(1)))
-                    else:
-                        continue
-                else:
-                    xo_inner = xo_match.group(0)
-                
-                # Parse all /Name xref R entries
-                for m in re.finditer(r'/(\w+)\s+(\d+)\s+0\s+R', xo_inner):
-                    name = m.group(1)
-                    xref = int(m.group(2))
-                    page_name_to_xref[name] = xref
+                for img in page.get_images(full=True):
+                    # img tuple: (xref, smask, w, h, bpc, cs, alt, name, ...)
+                    img_xref = img[0]
+                    img_name = img[7] if len(img) > 7 else None
+                    if img_name:
+                        page_name_to_xref[img_name] = img_xref
             except Exception:
                 continue
             
@@ -788,6 +780,8 @@ def _strip_images_content_stream(doc, report, categories):
                 continue
             
             # Remove only those /Name Do operators from content streams
+            # (fixes H4: regex is name-specific and only targets known flagged names,
+            #  not a general /Name Do pattern — safe for well-formed names from get_images)
             page_modified = False
             for c_xref in contents:
                 try:
@@ -798,7 +792,7 @@ def _strip_images_content_stream(doc, report, categories):
                     new_stream = stream
                     for name in names_to_remove:
                         pattern = re.compile(
-                            rb'/\s*' + re.escape(name.encode()) + rb'\s+Do\b'
+                            rb'/\s*' + re.escape(name.encode('latin-1')) + rb'\s+Do\b'
                         )
                         new_stream = pattern.sub(b'', new_stream)
                     
@@ -825,6 +819,9 @@ def _strip_text_redaction(doc, report, categories):
     then redacts them WITHOUT fill (transparent) — just removes the text
     operators from the content stream, no white rectangles inserted.
     
+    Zone thresholds are read from report["summary"]["zones"] (set during
+    analysis) so strip uses the same zones as detection.
+    
     Returns: (modified_pages, spans_redacted)
     """
     text_candidates = [c for c in report["removal_candidates"]
@@ -832,6 +829,13 @@ def _strip_text_redaction(doc, report, categories):
     
     if not text_candidates:
         return 0, 0
+    
+    # Read zone thresholds from report (M1: consistent with detection)
+    zones = report.get("summary", {}).get("zones", {})
+    header_zone = zones.get("header_zone", 0.12)
+    footer_zone = zones.get("footer_zone", 0.88)
+    left_margin = zones.get("left_margin", 0.08)
+    right_margin = zones.get("right_margin", 0.90)
     
     # Build set of normalized patterns to redact
     patterns_to_redact = []
@@ -884,13 +888,13 @@ def _strip_text_redaction(doc, report, categories):
                                 page_w = page.rect.width
                                 ly = line["bbox"][1]
                                 lx = line["bbox"][0]
-                                if ly < page_h * 0.12:
+                                if ly < page_h * header_zone:
                                     line_zone = "header"
-                                elif ly > page_h * 0.88:
+                                elif ly > page_h * footer_zone:
                                     line_zone = "footer"
-                                elif lx < page_w * 0.08:
+                                elif lx < page_w * left_margin:
                                     line_zone = "left_margin"
-                                elif lx > page_w * 0.90:
+                                elif lx > page_w * right_margin:
                                     line_zone = "right_margin"
                                 else:
                                     line_zone = "content"
@@ -1171,6 +1175,13 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
     doc = pymupdf.open(pdf_path)
     pages_text = []
     
+    # Read zone thresholds from report (M1: consistent with detection)
+    zones = report.get("summary", {}).get("zones", {})
+    _header_zone = zones.get("header_zone", 0.12)
+    _footer_zone = zones.get("footer_zone", 0.88)
+    _left_margin = zones.get("left_margin", 0.08)
+    _right_margin = zones.get("right_margin", 0.90)
+    
     for i in range(len(doc)):
         page = doc[i]
         h = page.rect.height
@@ -1202,13 +1213,13 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
                             detected_zone = text_repeat_zones[norm]
                             ly = line["bbox"][1]
                             lx = line["bbox"][0]
-                            if ly < h * 0.12:
+                            if ly < h * _header_zone:
                                 line_zone = "header"
-                            elif ly > h * 0.88:
+                            elif ly > h * _footer_zone:
                                 line_zone = "footer"
-                            elif lx < page_w * 0.08:
+                            elif lx < page_w * _left_margin:
                                 line_zone = "left_margin"
-                            elif lx > page_w * 0.90:
+                            elif lx > page_w * _right_margin:
                                 line_zone = "right_margin"
                             else:
                                 line_zone = "content"
@@ -1341,6 +1352,10 @@ Examples:
                         help="Top %% of page to scan for headers (default 0.12)")
     parser.add_argument("--footer-zone", type=float, default=0.88,
                         help="Bottom %% of page to scan for footers (default 0.88)")
+    parser.add_argument("--left-margin", type=float, default=0.08,
+                        help="Left %% of page for margin zone (default 0.08)")
+    parser.add_argument("--right-margin", type=float, default=0.90,
+                        help="Right %% of page for margin zone (default 0.90)")
     parser.add_argument("--categories", help="Comma-separated categories to strip (default: all)")
     parser.add_argument("--no-text", action="store_true", help="Skip text watermark removal")
     parser.add_argument("--text-only", action="store_true", help="Only remove text watermarks")
@@ -1358,7 +1373,11 @@ Examples:
     report = analyze_pdf_images(args.pdf, min_freq=args.min_freq, 
                                  tiny_max_px=args.tiny_max,
                                  text_threshold=args.text_threshold,
-                                 text_min_pages=args.text_min_pages)
+                                 text_min_pages=args.text_min_pages,
+                                 header_zone=args.header_zone,
+                                 footer_zone=args.footer_zone,
+                                 left_margin=args.left_margin,
+                                 right_margin=args.right_margin)
     print_report(report)
     
     # Save report
