@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "candidato_cumplimiento.schema.json",
-  "title": "Matriz de cumplimiento por candidato",
+  "title": "Matriz de cumplimiento por candidato (v0.2)",
   "type": "object",
   "required": ["item_id", "candidato_num", "marca", "modelo", "estado", "cumplimiento", "resumen"],
   "properties": {
@@ -13,6 +13,7 @@
     "estado": { "type": "string", "enum": ["VALIDO", "CONDICIONADO"] },
     "url_fabricante": { "type": "string", "format": "uri" },
     "url_datasheet": { "type": "string" },
+    "datasheet_parsed_path": { "type": "string" },
     "fuentes_consultadas": {
       "type": "array",
       "items": { "type": "string" }
@@ -31,6 +32,11 @@
             "enum": ["OK", "PARCIAL", "NO_CUMPLE"],
             "description": "Mapeo emoji: OK=✅, PARCIAL=⚠️, NO_CUMPLE=❌"
           },
+          "subtipo_parcial": {
+            "type": ["string", "null"],
+            "enum": [null, "parcial_sin_info", "parcial_cumple_parcial", "parcial_inconsistente"],
+            "description": "Solo requerido cuando resultado=PARCIAL. null cuando resultado=OK o NO_CUMPLE. Distingue: (a) sin información en datasheet, (b) cumple solo con accesorio/config adicional, (c) datasheet inconsistente con sí mismo o con página web."
+          },
           "valor_encontrado": { "type": "string" },
           "referencias": {
             "type": "array",
@@ -41,11 +47,14 @@
     },
     "resumen": {
       "type": "object",
-      "required": ["cumple", "parcial", "incumple"],
+      "required": ["cumple", "incumple", "total"],
       "properties": {
         "cumple": { "type": "integer", "minimum": 0 },
-        "parcial": { "type": "integer", "minimum": 0 },
-        "incumple": { "type": "integer", "minimum": 0 }
+        "parcial_sin_info": { "type": "integer", "minimum": 0 },
+        "parcial_cumple_parcial": { "type": "integer", "minimum": 0 },
+        "parcial_inconsistente": { "type": "integer", "minimum": 0 },
+        "incumple": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 }
       }
     },
     "notas": { "type": "string" }

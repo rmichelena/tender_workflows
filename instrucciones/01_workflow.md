@@ -1,8 +1,22 @@
-# 01_workflow.md — Runbook operativo de procurement
+# 01_workflow.md — Runbook operativo de procurement (v0.2)
 
-> **Regla general**: para cada subpaso, ejecutar exactamente lo indicado: Owner, Prompt, Inputs, Modelo/Tools, Outputs, QA/Gate, Criterio Done.
-> Selección de modelo/tool: desde `catalog_modelos.md` y `catalog_tools.md`, cumpliendo diversidad (no repetir mismo modelo en subagentes paralelos del mismo paso) y rotación (no repetir modelo+tool en reintentos). Parámetros operativos desde `params.yaml`.
-> **JSON como canónico**: cualquier paso que produce datos estructurados (BOMs, item packs, specs, resultados, matrices, consolidado) entrega JSON. El orquestador genera los derivados (TSV, MD, XLSX) automáticamente.
+> **Regla general**: para cada subpaso, ejecutar exactamente lo indicado: Owner, Tipo, Prompt, Inputs, Modelo/Tools, Tool budget, Outputs, QA/Gate, Criterio Done.
+> Selección de modelo: desde `model_routing.yaml` (no de `catalog_modelos.md` directamente — ese describe capacidades; el routing decide quién hace qué basado en evidencia).
+> Selección de tools: desde `catalog_tools.md`, respetando primario+fallback.
+> Patrones de delegación: ver `agent_patterns.md` — leer antes de delegar.
+> **JSON como canónico**: cualquier paso que produce datos estructurados entrega JSON validado contra schema. El orquestador genera los derivados (TSV, MD, XLSX) automáticamente.
+
+## Cambios v0.2 vs v0.1
+
+| Decisión v0.1 | Aprendizaje ICAO-00068 | Decisión v0.2 |
+|---|---|---|
+| 3 variantes BOM HL + consolidación | 28 requisitos FALTANTE por decisiones implícitas inconsistentes | **1 productor + 1 auditor "ojos frescos"** |
+| 4 variantes BOM Exploded + consolidación | Idem + 504 timeout con 426 items | **1 productor + 1 auditor + scratchpad compartido con 2.1** |
+| OCR Paso 1: subagente LLM-vision | LandingAI ADE funciona mejor | **Pipeline determinístico: DOCX→PDF + pdf_image_audit + LandingAI ADE** |
+| Matriz cumplimiento dentro del search worker | Mezcla búsqueda + validación + estructuración | **LLM call separada post-búsqueda** |
+| Solo Firecrawl | Sin créditos a mitad → degradación silenciosa | **Pool de tools con fallback explícito** (catalog_tools.md) |
+| Solo español en queries | 0% hit rate | **Búsqueda bilingüe ES+EN obligatoria** |
+| `max_tokens` alto | JSON truncado en kimi/deepseek/minimax | **Tool budget explícito + schema validation** |
 
 ---
 
@@ -12,245 +26,338 @@
 **Acción**: Solicitar y registrar:
 - `origen_fabricacion`: países permitidos | vetados | sin preferencia
 - `marcas`: preferidas | vetadas | sin preferencia
-- `docs_modo`: SIMPLE | COMPLEJO (para pasos 1.1–1.3)
 
 **Output**: `/proyecto/overlay_usuario.yaml`
 **Done**: overlay guardado, confirmado por humano.
 
----
-
-## Paso 1 — Normalización documental
-
-### 1.1–1.3 Convertir documentos fuente a Markdown
-
-**Owner**: Orquestador → lanza Subagente(s) OCR
-**Prompt**: `prompts/prompt_ocr_vision.md`
-**Inputs**: cada archivo de `/proyecto/inputs/` (EETT, anexos, aclaraciones). Una invocación por archivo.
-**Modelo**: Seleccionar del catálogo → función "OCR/Visión documental" (ej. Gemini 2.5 Pro, GPT-5.5, GLM-5V Turbo)
-**Tools**: N/A (procesamiento documental, no búsqueda web)
-**Timeout**: `params.yaml → timeouts.default`
-
-- **Modo SIMPLE** (según `overlay_usuario.yaml`): lanzar 1 subagente por documento.
-- **Modo COMPLEJO**: lanzar 2 subagentes por documento (modelos distintos, ambos con función OCR/Visión). Post-proceso: el orquestador hace diff entre ambas versiones y produce la versión consolidada resolviendo discrepancias.
-
-**Outputs**: `/proyecto/artifacts/step_1_normalizados/{nombre_doc}.md`
-**Gate 1**: Pausar. Presentar markdowns al humano para spot-check. Si hay errores graves, relanzar con otro modelo.
-**Done**: todos los documentos de `inputs/` tienen su `.md` validado por humano.
+> Nota v0.2: ya no se pregunta `docs_modo` (SIMPLE/COMPLEJO). El Paso 1 ahora es pipeline determinístico que maneja ambos casos uniformemente.
 
 ---
 
-### 1.4 Incorporar aclaraciones → documentos "aclarados"
+## Paso 1 — Normalización documental (pipeline determinístico)
 
-**Owner**: Orquestador → 2 subagentes (Ejecutor + Auditor)
+**Tipo**: workflow no-LLM determinístico + LLM call selectiva como fallback.
 
-**Subagente Ejecutor**:
-- Prompt: `prompts/prompt_merge_aclaraciones_ejecutor.md`
-- Modelo: función "Reasoning" (ej. GPT-5.4, GLM-5.1, GPT-5.5)
-- Inputs: EETT/anexos en MD (de step_1) + aclaraciones en MD (de step_1)
-- Output: `/proyecto/artifacts/step_1_aclaradas/{nombre_doc}_aclarada_v1.md`
-- Timeout: `params.yaml → timeouts.default`
+### 1.1 Conversión a PDF (si aplica)
 
-**Subagente Auditor** (modelo DISTINTO al ejecutor):
-- Prompt: `prompts/prompt_merge_aclaraciones_auditor.md`
-- Modelo: función "Auditor/Revisor" o "Reasoning largo" (distinto al ejecutor)
-- Inputs: documento aclarado (output del ejecutor) + aclaraciones originales en MD + documento base en MD
-- Output: `/proyecto/artifacts/step_1_aclaradas/auditoria_aclaraciones_{doc}.md`
-- Timeout: `params.yaml → timeouts.default`
+**Owner**: Orquestador (script determinístico)
+**Tarea**: por cada archivo en `/proyecto/inputs/`:
+- Si es DOCX → convertir a PDF (LibreOffice headless o equivalente).
+- Si es ya PDF → pasar sin tocar.
 
-**Post-proceso**: si el auditor detecta gaps (aclaraciones no incorporadas o cambios huérfanos), el orquestador instruye al ejecutor para corregir y vuelve a auditar hasta cobertura 1:1.
+**Output**: `/proyecto/artifacts/step_1_pdfs/{nombre_doc}.pdf`
+**Done**: todos los inputs son PDF.
+
+### 1.2 Optimizador (quitar headers/footers/firmas/sellos/decorativos)
+
+**Owner**: Orquestador (script `scripts/pdf_image_audit.py` o similar)
+**Tarea**: detectar y eliminar zonas repetitivas (headers, footers, watermarks, firmas, sellos, logos decorativos) que aparecen en múltiples páginas. Producir PDF "limpio".
+
+**Output**: `/proyecto/artifacts/step_1_pdfs_clean/{nombre_doc}.pdf`
+**Done**: PDFs optimizados sin elementos repetitivos no útiles.
+
+### 1.3 OCR + parsing a Markdown
+
+**Owner**: Orquestador (script `scripts/extractors/landingai_extract.py`)
+**Tarea**: pasar cada PDF optimizado por LandingAI ADE → Markdown con tablas preservadas + separadores `<!-- PAGE n -->`.
+
+**Output**: `/proyecto/artifacts/step_1_normalizados/{nombre_doc}.md`
+**Gate 1**: Pausar. Presentar markdowns al humano para spot-check rápido en documentos críticos (EETT principales).
+**Done**: todos los inputs tienen su `.md`.
+
+**Fallback** (si LandingAI deja gaps en alguna página): LLM call one-shot con visión sobre la página específica (Gemini 2.5 Pro o GPT-5.5, ver `model_routing.yaml → paso_1_vision_fallback`).
+
+---
+
+## Paso 1.4 — Incorporar aclaraciones → documentos "aclarados"
+
+**Tipo**: evaluator-optimizer bounded (ver agent_patterns §2.2).
+
+### 1.4.1 Ejecutor
+
+**Owner**: Orquestador → 1 subagente
+**Tipo**: LLM call con tools `file` + `terminal`
+**Prompt**: `prompts/prompt_merge_aclaraciones_ejecutor.md`
+**Modelo**: desde `model_routing.yaml → paso_1_4_ejecutor` (primary: glm-5p1)
+**Context** (paths, NO contenido):
+- Rutas a EETT/anexos en MD (de step_1_normalizados)
+- Rutas a aclaraciones en MD
+- Schema de salida: `schemas/...`
+- Output path: `/proyecto/artifacts/step_1_aclaradas/{nombre_doc}_aclarada_v1.md`
+**Tool budget**: `model_routing.yaml → paso_1_4_ejecutor.tool_budget`
+
+**Reglas**:
+- Edición quirúrgica (patches con marca de trazabilidad), NO re-escritura del documento completo.
+- Marcas obligatorias: `[Modificado según Aclaración X, punto Y]`, `[Agregado según...]`, `[Eliminado según...]`.
+
+### 1.4.2 Auditor
+
+**Owner**: Orquestador → 1 subagente
+**Modelo**: DISTINTO al ejecutor (`model_routing.yaml → paso_1_4_auditor`, primary: minimax-m2p7).
+**Prompt**: `prompts/prompt_merge_aclaraciones_auditor.md`
+**Handoff budget**: 1 (auditor revisa una vez, sin reverse edge).
+
+**Reglas**:
+- Si auditor encuentra cobertura 1:1 con marcas correctas → OK.
+- Si encuentra gaps mayores → **falla loud y escala al humano**, NO devuelve al ejecutor para "otra iteración".
+
 **Gate 2**: presentar reporte de auditoría al humano. Esperar aprobación.
-**Done**: auditoría OK (cobertura 1:1) + aprobación humana.
+**Done**: cobertura 1:1 + aprobación humana.
 
-> **Regla post-1.4**: a partir de aquí, SOLO se usan los documentos "aclarados". Los documentos de aclaración originales ya no se pasan como input a ningún paso posterior.
+> **Regla post-1.4**: a partir de aquí, SOLO se usan los documentos "aclarados".
 
 ---
 
-## Paso 2 — Extracción de BOM (bienes + servicios) **con especificaciones en contexto**
+## Paso 2 — Extracción de BOM (con specs en contexto) — **REDISEÑADO v0.2**
 
-> **Cambio respecto al diseño inicial**: para evitar pérdida de correlación entre el ítem y sus requisitos (p.ej. confundir "torre de soporte de antena" con "torre de soporte de baliza"), los subagentes de BOM extraen cada ítem **junto con los requisitos que aparecen en la sección donde se menciona**. El paso 3 deja de ser "extracción" y pasa a ser verificación + refinamiento + herencia.
+> **Cambio principal v0.2**: eliminadas las 3+4 variantes paralelas. Reemplazadas por **1 productor + 1 auditor "ojos frescos"** en cada subpaso, con **scratchpad de decisiones compartido**.
+> Razón: las variantes generaron inconsistencias por decisiones implícitas distintas (naming, agrupación). La consolidación posterior perdió requisitos. Aplicar Cognition #1 ("share context, share full agent traces, not just individual messages").
 
-### 2.1 BOM High-Level (3 variantes)
+### 2.0 Inicializar scratchpad compartido
 
-**Owner**: Orquestador → lanza 3 subagentes
+**Owner**: Orquestador (determinístico)
+**Tarea**: crear `/proyecto/scratchpad/decisiones_bom.md` vacío con headers:
+- Convenciones de naming (cómo nombrar grupos, sub-sistemas, ítems compuestos)
+- Abreviaturas usadas (ej. `VSAT`, `HUB`, `UPS`)
+- Supuestos técnicos (ej. "los cables de baja potencia ≤24V se asocian al equipo destino, no a la fuente")
+
+Este archivo se enriquece a medida que el productor toma decisiones. El auditor y los siguientes pasos lo leen.
+
+### 2.1 BOM High-Level — Productor
+
+**Tipo**: LLM call con schema fuerte.
+**Owner**: Orquestador → 1 subagente
 **Prompt**: `prompts/prompt_bom_highlevel.md`
-**Inputs**: EETT aclaradas + anexos aclarados (todos)
-**Modelos**: 3 modelos distintos del catálogo → función "BOM/Extracción" (ej. Kimi K2.6, GLM-5.1, Gemini 2.5 Pro)
-**Tools**: N/A
-**Timeout**: `params.yaml → timeouts.default`
-**Outputs canónicos**: `/proyecto/artifacts/step_2_bom/BOM_highlevel_var{1,2,3}.json`
-**Derivados (auto)**: `BOM_highlevel_var{n}.tsv` y `.md`
-**Done**: 3 variantes generadas en JSON.
+**Modelo**: `model_routing.yaml → paso_2_1_productor` (primary: glm-5p1).
+**Context** (paths):
+- Rutas a EETT aclaradas + anexos aclarados
+- Schema: `schemas/bom_item.schema.json`
+- Scratchpad: `/proyecto/scratchpad/decisiones_bom.md` (lee y escribe decisiones nuevas)
+- Output path: `/proyecto/artifacts/step_2_bom/BOM_highlevel.json`
+**Tool budget**: `max_file_reads: 15`, `max_file_writes: 3`.
+**Output validation**: schema_validation strict — si JSON inválido tras 1 retry, falla loud.
 
-### 2.2 Consolidar BOM High-Level
+### 2.2 BOM High-Level — Auditor "ojos frescos"
 
-**Owner**: Orquestador (ejecución directa, sin subagentes)
-**Tarea**: contrastar las 3 variantes JSON entre sí y contra las EETT aclaradas. Verificar que no falte ni sobre nada. Producir consolidado con agrupaciones/clasificaciones, preservando los requisitos en contexto.
-**Inputs**: 3 variantes JSON + EETT aclaradas
-**Output canónico**: `/proyecto/artifacts/step_2_bom/BOM_highlevel_consolidado.json`
-**Derivados (auto)**: `BOM_highlevel_consolidado.tsv` y `.md`
-**Done**: consolidado completo, sin omisiones ni duplicados respecto a EETT.
+**Tipo**: LLM call.
+**Owner**: Orquestador → 1 subagente (modelo DISTINTO).
+**Prompt**: `prompts/prompt_bom_auditor.md` (nuevo en v0.2)
+**Modelo**: `model_routing.yaml → paso_2_1_auditor` (primary: Kimi-K2.6).
+**Context**: BOM HL JSON + EETT aclaradas + scratchpad.
+**Handoff budget**: 1.
 
-### 2.3 BOM Exploded (4 variantes)
+**Tarea del auditor**:
+- Verificar completitud (items faltantes).
+- Verificar consistencia con scratchpad (naming, agrupación).
+- Reportar items faltantes / items sobrantes / clasificaciones inconsistentes.
 
-**Owner**: Orquestador → lanza 4 subagentes
+**Resolución**:
+- Si auditor reporta solo problemas menores: el orquestador aplica correcciones determinísticas (renames, reagrupaciones según scratchpad).
+- Si auditor reporta items faltantes mayores: **falla loud y escala al humano**.
+
+**Output final**: `/proyecto/artifacts/step_2_bom/BOM_highlevel.json` (corregido si aplica)
+**Done**: BOM HL auditado, scratchpad actualizado.
+
+### 2.3 BOM Exploded — Productor
+
+**Tipo**: LLM call con schema fuerte.
+**Owner**: Orquestador → 1 subagente
 **Prompt**: `prompts/prompt_bom_exploded.md`
-**Inputs**:
-- Subagentes 1 y 2: EETT aclaradas + BOM High-Level consolidado JSON
-- Subagentes 3 y 4: EETT aclaradas solamente (sin BOM HL)
+**Modelo**: `model_routing.yaml → paso_2_3_productor` (primary: glm-5p1).
+**Context** (paths):
+- BOM HL auditado (de 2.2)
+- EETT aclaradas (selección por sección, no documento completo — context engineering "select")
+- Scratchpad actualizado
+- Schema: `schemas/bom_item.schema.json`
+- Output path: `/proyecto/artifacts/step_2_bom/BOM_exploded.json`
+**Tool budget**: `max_file_reads: 30`, `max_file_writes: 3`.
+**Output validation**: schema_validation strict.
 
-**Modelos**: 4 modelos distintos del catálogo → función "BOM/Extracción" (ej. GPT-5.4 Mini, Kimi K2.5 Turbo, DeepSeek V4 Pro, Qwen 3.6 Plus)
-**Variable en prompt**: `{INCLUYE_BOM_HL: true|false}`
-**Timeout**: `params.yaml → timeouts.default`
-**Outputs canónicos**: `/proyecto/artifacts/step_2_bom/BOM_exploded_var{1,2,3,4}.json`
-**Derivados (auto)**: `.tsv` y `.md`
-**Done**: 4 variantes generadas en JSON, cada una con sus requisitos en contexto por ítem.
+**Estrategia de context**:
+- Si el BOM HL tiene >20 items, procesar en **batches por grupo** (Comunicaciones / Energía / Infraestructura / etc.), cada batch con context selectivo de las secciones EETT relevantes.
+- Cada batch escribe a un sub-archivo, el orquestador concatena al final.
 
-### 2.4 Consolidar BOM Exploded
+### 2.4 BOM Exploded — Auditor "ojos frescos"
 
-**Owner**: Orquestador (ejecución directa)
-**Tarea**: contrastar las 4 variantes JSON entre sí y contra EETT aclaradas. Desagregar todo accesorio como ítem separado. Verificar completitud. Preservar los requisitos extraídos en contexto por cada ítem.
-**Inputs**: 4 variantes JSON + EETT aclaradas
-**Output canónico**: `/proyecto/artifacts/step_2_bom/BOM_exploded_consolidado.json`
-**Derivados (auto)**: `.tsv` y `.md`
-**Done**: BOM exploded final, desagregado, sin omisiones, con requisitos en contexto por cada ítem.
+**Tipo**: LLM call.
+**Owner**: Orquestador → 1 subagente (modelo DISTINTO).
+**Prompt**: `prompts/prompt_bom_auditor.md`
+**Modelo**: `model_routing.yaml → paso_2_3_auditor` (primary: minimax-m2p7).
+**Handoff budget**: 1.
 
-### 2.5 Item Pack — Generar un archivo JSON+MD por ítem (determinista)
+**Tarea del auditor**:
+- Verificar desagregación completa (cables, conectores, fuentes, kits separados).
+- Verificar `parent_id` correcto en cada accesorio.
+- Verificar que `requisitos_en_contexto` esté presente y verbatim.
+- Reportar gaps.
 
-**Owner**: Orquestador (ejecución directa, 1 pasada — tarea mecánica)
-**Prompt**: `prompts/prompt_item_pack_from_bom.md` (referencia de estructura)
-**Inputs**: `BOM_exploded_consolidado.json`
-**Tarea**: por cada ítem del BOM exploded, generar:
-- Un archivo canónico JSON: estructura de metadata + requisitos extraídos en contexto (heredados del BOM)
-- Un derivado MD para vista humana
+**Resolución**:
+- Problemas menores: orquestador aplica correcciones determinísticas.
+- Problemas mayores: falla loud → humano.
 
+**Output final**: `/proyecto/artifacts/step_2_bom/BOM_exploded.json`
+**Done**: BOM Exploded auditado, scratchpad finalizado.
+
+### 2.5 Item Pack — Generar un archivo JSON+MD por ítem (determinístico)
+
+**Owner**: Orquestador (script determinístico, 1 pasada)
+**Inputs**: `BOM_exploded.json`
 **Outputs**:
-- Canónicos: `/proyecto/artifacts/step_2_5_items/ITEM-{id}.json` (uno por ítem)
+- Canónicos: `/proyecto/artifacts/step_2_5_items/ITEM-{id}.json`
 - Derivados (auto): `ITEM-{id}.md`
-**Done**: existe un `.json` (+ `.md` derivado) por cada ítem del BOM exploded.
+**Done**: 1 JSON+MD por ítem.
 
 ---
 
-## Paso 3 — Verificación, refinamiento y herencia de especificaciones
+## Paso 3 — Verificación, refinamiento y herencia de specs
 
-> **Cambio de rol**: este paso ya no extrae specs desde cero (eso lo hizo el paso 2). Ahora verifica completitud, normaliza, clasifica hard/soft, y resuelve herencia entre ítems padre/hijo.
+> **Cambio v0.2**: orden topológico explícito (padres antes que hijos) + batches de 5 items con context selectivo.
 
-### 3.1 Verificar y completar specs por ítem (pasada 1)
+### 3.1 Verificar y completar specs por ítem
 
-**Owner**: Orquestador → lanza Subagente Specs
+**Tipo**: LLM call en batches.
+**Owner**: Orquestador → lanza N batches secuencialmente (no paralelo, para mantener orden topológico).
+
+**Orden de procesamiento**:
+1. Identificar capas topológicas por `parent_id`:
+   - Capa 0: items sin parent.
+   - Capa 1: items con parent en capa 0.
+   - Capa 2: etc.
+2. Procesar capa 0 completa antes de capa 1, etc. Esto asegura que cuando un hijo necesita resolver herencia, su padre ya está procesado.
+
 **Prompt**: `prompts/prompt_specs_verificacion_herencia.md`
-**Modelo**: función "Reasoning + Contexto largo" (ej. GPT-5.5, Gemini 2.5 Pro)
-**Inputs**:
-- Archivos `ITEM-{id}.json` (del paso 2.5, ya con requisitos en contexto extraídos del BOM)
-- EETT aclaradas completas
-**Tarea del subagente**:
-1. Para cada ítem, **verificar** que los requisitos extraídos en contexto (paso 2) están completos: recorrer la sección correspondiente de las EETT y confirmar que no falta ningún requisito explícito.
-2. **Normalizar** formato y clasificar cada requisito como `hard` ("deberá/obligatorio/valor cuantitativo explícito") o `soft` ("preferentemente/deseable").
-3. **Resolver herencia**: si un ítem tiene `parent_id`, evaluar qué requisitos del padre aplican técnicamente (ej. antena hereda banda de frecuencia de su radio). Incorporarlos como `HEREDADO`.
-4. Mantener el texto **verbatim** y la **trazabilidad** (documento + sección + página) de cada requisito.
+**Modelo**: `model_routing.yaml → paso_3_1_productor` (primary: glm-5p1).
+**Batching**: 5 items por batch (de `model_routing.yaml`).
+**Context** (paths):
+- Items del batch: `ITEM-{id}.json` (con requisitos_en_contexto del paso 2)
+- EETT aclaradas: solo las secciones referenciadas por los items del batch (selective context)
+- Specs de padres ya procesados (si los items del batch tienen parent_id)
+- Schema: `schemas/item_specs.schema.json`
 
-**Outputs canónicos**: `/proyecto/artifacts/step_3_specs/ITEM-{id}_specs.json`
-**Derivados (auto)**: `ITEM-{id}_specs.md`
-**Timeout**: `params.yaml → timeouts.default`
-**Done**: todos los ítems tienen specs verificadas, normalizadas, con herencia resuelta y trazabilidad completa.
+**Output validation**: schema_validation strict por batch. Si un batch falla, retry una vez; segundo fallo = falla loud para ese batch.
 
-### 3.2 Revisión "ojos frescos" (pasada 2)
+**Outputs**: `/proyecto/artifacts/step_3_specs/ITEM-{id}_specs.json` + `.md`
+**Done**: todos los items procesados con `estado_specs: VERIFICADO`.
 
-**Owner**: Orquestador → lanza Subagente Revisor
+### 3.2 Revisión "ojos frescos"
+
+**Tipo**: LLM call.
+**Owner**: Orquestador → 1 subagente.
 **Prompt**: `prompts/prompt_specs_revisor.md`
-**Modelo**: distinto al usado en 3.1 (regla "revisor ≠ productor"). Ej.: si 3.1 fue GPT-5.5, usar Gemini 2.5 Pro o Kimi K2.6.
-**Inputs**: ítems con specs (output JSON de 3.1) + EETT aclaradas
-**Tarea**: verificar que no falten requisitos, que la herencia sea correcta, que las citas sean precisas, que la clasificación hard/soft sea coherente. Reportar gaps o errores.
-**Output**: `/proyecto/artifacts/step_3_specs/revision_specs.md` + correcciones a ítems si aplica
-**Timeout**: `params.yaml → timeouts.default`
-**Post-proceso**: si hay correcciones, el orquestador las aplica a los `ITEM-{id}_specs.json` (regenerando los `.md` derivados).
-**Done**: revisión OK, sin gaps críticos.
+**Modelo**: DISTINTO al de 3.1 (`model_routing.yaml → paso_3_2_revisor`, primary: minimax-m2p7).
+**Context** (paths):
+- Todos los `ITEM-{id}_specs.json` de 3.1
+- EETT aclaradas
+
+**Tarea**: verificar completitud, herencia, clasificación hard/soft, trazabilidad, coherencia ítem↔requisitos.
+
+**Estrategia para evitar context overload**: procesar en chunks de 15 items, generar reporte parcial por chunk, concatenar reportes al final.
+
+**Output**: `/proyecto/artifacts/step_3_specs/revision_specs.md`
+**Handoff budget**: 1 — si reporta problemas críticos, falla loud → humano.
+**Done**: revisión OK o correcciones aplicadas.
 
 ---
 
-## Paso 4 — BOM "para búsqueda" (solo bienes, sin cantidades) + QA
+## Paso 4 — BOM "para búsqueda" (determinístico)
 
-**Owner**: Orquestador (ejecución directa + QA interno)
-**Prompt**: `prompts/prompt_bom_para_busqueda.md`
-**Inputs**: `BOM_exploded_consolidado.json` + ítems con specs finales (paso 3, JSON)
+**Tipo**: workflow no-LLM.
+**Owner**: Orquestador (script `proyecto/scripts/step4_bom_busqueda.py`).
+**Inputs**: `BOM_exploded.json` + `ITEM-{id}_specs.json` (todos).
 **Tarea**:
-- Filtrar: solo bienes (quitar servicios: instalación, configuración, capacitación, etc.)
-- Quitar cantidades
-- Limpiar referencias no-buscables (ej. "según autorización MTC", "conectar a Redap Corpac") y reemplazarlas por especificaciones técnicas equivalentes que un agente de búsqueda pueda usar
-- Mantener specs como parámetros técnicos buscables
+- Filtrar bienes (descartar `tipo: SERVICIO`).
+- Quitar cantidades.
+- Limpiar referencias no-buscables (normas/autoridades locales → estándares internacionales si discernibles; si no, marcar para revisión).
 
-**Output canónico**: `/proyecto/artifacts/step_4_busqueda/BOM_busqueda.json`
-**Derivados (auto)**: `BOM_busqueda.tsv`
-**QA**: verificar que (a) no quedaron servicios, (b) no quedaron cantidades, (c) no quedaron referencias no-buscables, (d) todos los bienes del BOM exploded están presentes.
-**Done**: BOM búsqueda limpio y verificado.
+**Output**: `/proyecto/artifacts/step_4_busqueda/BOM_busqueda.json` (+ `.tsv` derivado).
+**QA interno**: sin servicios, sin cantidades, sin refs no-buscables, completitud.
+**Done**: BOM búsqueda limpio.
 
 ---
 
-## Paso 5 — Confirmar/actualizar preferencias del usuario
+## Paso 5 — REMOVIDO en v0.2
 
-**Owner**: Orquestador (diálogo con humano)
-**Tarea**: presentar el BOM búsqueda al humano. Preguntar si hay cambios o adiciones a las preferencias de origen/marca capturadas en Gate 0. Actualizar `overlay_usuario.yaml` si corresponde.
-**Done**: overlay confirmado/actualizado.
+> En v0.1 era "confirmar preferencias" entre Paso 4 y Paso 6. Se elimina: si las preferencias cambian, se actualiza `overlay_usuario.yaml` y se relanza Paso 6 selectivamente. Innecesario como gate fijo.
+
+Una nueva pausa **opcional** post-Paso 4 permite al humano marcar items como `SKIP` o `DIFERIR` antes de invertir tokens en Paso 6 (de `MEJORAS_PROPUESTAS.md` mejora 5.1).
 
 ---
 
-## Paso 6 — Búsqueda de equipamiento (3 niveles, por ítem)
+## Paso 6 — Búsqueda de candidatos (ÚNICO paso multi-agent del workflow)
 
-**Arquitectura**:
+> **Tipo**: orchestrator-workers con fan-out paralelo (ver agent_patterns §2.3).
+> **Cambio v0.2**: matriz de cumplimiento como LLM call SEPARADA post-búsqueda + búsqueda bilingüe + tool budget explícito + pool de tools con fallback.
+
+### Arquitectura
 
 ```
 Orquestador
-  → Subagente-Item (1 por ítem, en batches de batch_size_items_step6)
-      → Search-Worker A (modelo X + tool Y)
-      → Search-Worker B (modelo Z + tool W)
+  → Subagente-Item (1 por ítem, en batches de N items simultáneos)
+      → Search-Worker A (modelo + Brave + EN priority)
+      → Search-Worker B (modelo + Exa + ES priority)
+      [Item-manager valida candidatos]
+      [Item-manager invoca Generador-Matriz para cada candidato Válido/Condicionado]
 ```
 
 ### 6.1 Lanzar Subagentes-Item (en batches)
 
-**Owner**: Orquestador → lanza Subagentes-Item
+**Owner**: Orquestador.
 **Prompt**: `prompts/prompt_item_manager.md`
-**Modelo**: función "Subagente-Item" (ej. GLM-5.1, Kimi K2.6, GPT-5.5)
-**Inputs por subagente-item**:
-- `ITEM-{id}_specs.json` (con todos los requisitos hard/soft + herencia ya resuelta)
-- `overlay_usuario.yaml` (restricciones origen/marca)
-- `formato_matriz_cumplimiento.md` (formato obligatorio)
-- `catalog_modelos.md` y `catalog_tools.md` (para seleccionar workers)
-- `params.yaml` (timeouts, reintentos, combos sugeridos)
-
-**Timeout subagente-item**: `params.yaml → timeouts.item_manager` (1500s = 25 min)
-**Batch size**: `params.yaml → batching.batch_size_items_step6` (3 ítems simultáneos = 3 subagentes-item activos)
+**Modelo**: `model_routing.yaml → paso_6_item_manager` (primary: glm-5p1).
+**Context** (paths):
+- `ITEM-{id}_specs.json`
+- `/proyecto/overlay_usuario.yaml`
+- `catalog_tools.md`
+- `formato_matriz_cumplimiento.md`
+- Schema candidato: `schemas/candidato_cumplimiento.schema.json`
+**Tool budget**: `model_routing.yaml → paso_6_item_manager.tool_budget` (12 search calls + 16 fetch + 6 PDF parses + 3 iteraciones max).
+**Timeout**: `params.yaml → timeouts.item_manager` (1500s).
+**Batch size**: `params.yaml → batching.batch_size_items_step6` (3 items simultáneos).
 
 ### 6.2 Lógica interna del Subagente-Item
 
 (Se define en detalle en `prompt_item_manager.md`. Resumen:)
 
-1. Lanzar 2 Search-Workers con modelos y tools distintos:
-   - Worker A: modelo + search provider del combo `intento_1.worker_a`
-   - Worker B: modelo + search provider del combo `intento_1.worker_b`
-   - Prompt workers: `prompts/prompt_search_worker.md`
-   - Timeout workers: `params.yaml → timeouts.search_worker` (600s = 10 min)
-2. Recibir candidatos de ambos workers.
-3. Validar cada candidato (con su propia búsqueda/verificación):
-   - Confirmar producto vigente (página de fabricante activa, sin mención EOL)
-   - Verificar cumplimiento de CADA requisito hard contra fuente primaria (datasheet/manual fabricante)
-   - Clasificar: VÁLIDO | CONDICIONADO | DESCARTADO
-4. Si no hay ≥1 candidato válido: relanzar (hasta `params.yaml → limits.max_relanzamientos_item` veces) con:
-   - Exclusiones dinámicas (modelos que fallaron)
-   - Rotación a combos `intento_2`, `intento_3` de `params.yaml`
-5. Producir output:
-   - JSON canónico del resultado: `ITEM-{id}_resultado.json` con candidatos, clasificación y log de búsqueda
-   - Derivado MD: `ITEM-{id}_resultado.md`
-   - Una matriz de cumplimiento por candidato Válido/Condicionado, en JSON (`ITEM-{id}_candidato_{n}.json`) y MD derivado, según `formato_matriz_cumplimiento.md`.
-6. Si tras todos los reintentos no hay candidato válido: reportar SIN_CANDIDATO + diagnóstico.
+1. **Fan-out a 2 search-workers en paralelo**:
+   - Worker A: modelo `paso_6_search_worker_a` + tool `brave` + idioma EN priority.
+   - Worker B: modelo `paso_6_search_worker_b` + tool `exa` + idioma ES priority.
+   - Cada worker recibe su `tool_budget` y devuelve candidatos en JSON estructurado (no texto libre).
 
-### 6.3 Recepción y Gate
+2. **Consolidación de candidatos** (determinístico): deduplicar por marca+modelo+PN.
 
-**Owner**: Orquestador
+3. **Validación por candidato**:
+   - Vigencia (página fabricante activa, no EOL).
+   - Origen/marca según overlay.
+   - Capacidad de descargar datasheet PDF del fabricante (ver `catalog_tools.md` capa C).
+   - Verificación de requisitos Hard contra datasheet.
+   - Clasificación: VALIDO | CONDICIONADO | DESCARTADO.
+
+4. **Generación de matriz de cumplimiento** (LLM call SEPARADA, ver 6.3): por cada candidato VALIDO/CONDICIONADO.
+
+5. **Decisión de relanzar**:
+   - Si ≥1 VALIDO y queda iteración: intentar completar 3 candidatos.
+   - Si 0 VALIDO y queda iteración: relanzar con exclusiones dinámicas (modelos descartados) y combos rotados.
+   - Si agotó iteraciones sin VALIDO: estado `SIN_CANDIDATO` + diagnóstico.
+
+### 6.3 Generación de matriz de cumplimiento (LLM call separada)
+
+**Tipo**: LLM call invocada por el Subagente-Item para cada candidato Válido/Condicionado.
+**Prompt**: `prompts/prompt_matriz_cumplimiento.md` (nuevo en v0.2)
+**Modelo**: `model_routing.yaml → paso_6_matriz_cumplimiento` (primary: glm-5p1).
+**Context** (paths):
+- `ITEM-{id}_specs.json` (requisitos verbatim)
+- Path al datasheet PDF descargado + parseado del candidato
+- Schema: `schemas/candidato_cumplimiento.schema.json`
+**Output**: `/proyecto/artifacts/step_6_resultados/matrices/ITEM-{id}/ITEM-{id}_candidato_{n}_{marca}_{modelo}.json` + `.md`.
+**Handoff budget**: 1 (sin reverse edge).
+
+### 6.4 Recepción y Gate
+
 **Outputs**:
-- `/proyecto/artifacts/step_6_resultados/items/ITEM-{id}_resultado.json` + `.md` (uno por ítem)
-- `/proyecto/artifacts/step_6_resultados/matrices/ITEM-{id}/ITEM-{id}_candidato_{n}_{marca}_{modelo}.json` + `.md` (uno por candidato Válido/Condicionado)
+- `/proyecto/artifacts/step_6_resultados/items/ITEM-{id}_resultado.json` + `.md` (1 por ítem)
+- `/proyecto/artifacts/step_6_resultados/matrices/ITEM-{id}/*.json` + `.md` (1 par por candidato Válido/Condicionado)
 
-**Gate 4**: para ítems con estado SIN_CANDIDATO: pausar, presentar diagnóstico al humano, esperar decisión (relajar requisito / aceptar condicionado / buscar manualmente).
-**Done**: todos los ítems tienen ≥1 candidato válido, o decisión humana documentada.
+**Gate 4**: para items con estado SIN_CANDIDATO, pausar y presentar diagnóstico. El humano decide: relajar requisito / aceptar condicionado / búsqueda manual.
 
 ---
 
@@ -258,38 +365,30 @@ Orquestador
 
 ### 7.1 Producir consolidado
 
-**Owner**: Orquestador (ejecución directa)
+**Tipo**: LLM call con schema.
+**Owner**: Orquestador → 1 subagente.
 **Prompt**: `prompts/prompt_consolidacion_paso7.md`
-**Inputs**:
-- `BOM_busqueda.json` (paso 4)
-- Todos los `ITEM-{id}_resultado.json` (paso 6)
-- Todas las matrices `ITEM-{id}_candidato_{n}.json` (paso 6)
+**Modelo**: `model_routing.yaml → paso_7_1_consolidador` (primary: glm-5p1).
+**Context** (paths):
+- `BOM_busqueda.json`
+- `BOM_exploded.json` (para incluir servicios en consolidado)
+- Todos los `ITEM-{id}_resultado.json`
+- Todas las matrices JSON
+- Schema: `schemas/consolidado_row.schema.json`
 
-**Tarea**: producir el consolidado canónico en formato "long" (una entrada por candidato). Conformidad con `schemas/consolidado_row.schema.json`.
-
-**Outputs**:
-- Canónico: `/proyecto/outputs/consolidado.json`
-- Derivados (auto):
-  - `/proyecto/outputs/consolidado.tsv` (tabular para procesamiento)
-  - `/proyecto/outputs/consolidado.md` (lectura humana)
-  - `/proyecto/outputs/consolidado.xlsx` (con filtros y hoja de resumen, sin celdas combinadas)
+**Output canónico**: `/proyecto/outputs/consolidado.json`
+**Derivados (auto, determinísticos)**: `.tsv`, `.md`, `.xlsx`.
 
 ### 7.2 QA Final
 
-**Owner**: Orquestador → lanza Subagente QA
+**Tipo**: LLM call (critic terminal).
+**Owner**: Orquestador → 1 subagente.
 **Prompt**: `prompts/prompt_QA_final.md`
-**Modelo**: función "Auditor/Revisor", distinto del que produjo 7.1
-**Checks**:
-- Conteo de ítems = total de bienes en BOM búsqueda
-- Cada ítem tiene ≥1 candidato (o decisión humana documentada para SIN_CANDIDATO)
-- Todos los campos obligatorios están llenos en el JSON canónico
-- URLs de evidencia presentes y bien formateadas
-- Notas presentes para candidatos condicionados
-- Consistencia entre `ITEM-{id}_resultado.json`, matrices y tabla consolidada
-- Existencia de los archivos de matriz referenciados
+**Modelo**: DISTINTO al consolidador (`model_routing.yaml → paso_7_2_qa`, primary: minimax-m2p7).
+**Handoff budget**: 0 (sin reverse edge). Si QA encuentra problemas críticos: **falla loud y escala**, NO retorna al consolidador.
 
 **Output**: `/proyecto/outputs/QA_report.md`
-**Done**: QA OK. Entregable final listo.
+**Done**: QA OK o problemas escalados al humano.
 
 ---
 
@@ -297,24 +396,42 @@ Orquestador
 
 ```
 proyecto/
-├── inputs/                          (fuentes originales, read-only)
-├── overlay_usuario.yaml             (preferencias)
+├── inputs/                                (fuentes originales, read-only)
+├── overlay_usuario.yaml                   (preferencias)
+├── scratchpad/
+│   └── decisiones_bom.md                  (decisiones compartidas entre 2.1-2.4)
 ├── artifacts/
-│   ├── step_1_normalizados/         (markdowns de docs fuente)
-│   ├── step_1_aclaradas/            (docs aclarados + auditoría)
-│   ├── step_2_bom/                  (variantes + consolidados HL/exploded en JSON+TSV+MD)
-│   ├── step_2_5_items/              (1 JSON+MD por ítem, base estructurada)
-│   ├── step_3_specs/                (ítems verificados + revisión)
-│   ├── step_4_busqueda/             (BOM búsqueda en JSON+TSV)
+│   ├── step_1_pdfs/                       (DOCX→PDF si aplica)
+│   ├── step_1_pdfs_clean/                 (post optimizer)
+│   ├── step_1_normalizados/               (markdowns post-LandingAI)
+│   ├── step_1_aclaradas/                  (docs aclarados + auditoría)
+│   ├── step_2_bom/                        (BOM HL y Exploded en JSON + derivados)
+│   ├── step_2_5_items/                    (1 JSON+MD por ítem)
+│   ├── step_3_specs/                      (ítems verificados + revisión)
+│   ├── step_4_busqueda/                   (BOM búsqueda)
 │   └── step_6_resultados/
-│       ├── items/                   (resultado por ítem en JSON+MD)
-│       └── matrices/ITEM-XXX/       (matrices por candidato en JSON+MD)
+│       ├── items/                         (resultado por ítem)
+│       └── matrices/ITEM-XXX/             (matrices por candidato)
 ├── outputs/
-│   ├── consolidado.json             (canónico)
-│   ├── consolidado.tsv              (derivado tabular)
-│   ├── consolidado.md               (derivado legible)
-│   ├── consolidado.xlsx             (derivado Excel)
+│   ├── consolidado.json / .tsv / .md / .xlsx
 │   └── QA_report.md
 └── logs/
-    └── decision_log.md              (modelos usados, reintentos, escalamientos)
+    └── decision_log.md
 ```
+
+---
+
+## Auditoría y trazabilidad
+
+Cada delegación se logea en `/proyecto/logs/decision_log.md` con:
+- Timestamp.
+- Paso + subpaso.
+- Modelo elegido (y motivo si difiere de `model_routing.yaml`).
+- Tools usadas (y motivo de fallback si aplica).
+- Tool budget consumido (búsquedas / fetches / parses / iteraciones).
+- Handoff budget consumido.
+- Duración.
+- Errores y retries.
+- Escalamientos al humano.
+
+Tras cada licitación: producir `autoevaluacion_v{N}.md` con incidentes en formato post-mortem honesto (sin auto-justificación). Actualizar `model_routing.yaml → observations` y `catalog_tools.md` con aprendizajes.
