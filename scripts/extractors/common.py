@@ -343,40 +343,9 @@ def build_markdown(all_chunks, filter_headers_footers=True, filter_image_annotat
         if filter_image_annotations and c.get("is_image_annotation"):
             continue
         seen.add(key)
-        # Strip ancestral headings from chunk start
-        content = _strip_ancestral_headings(content)
-        if content:
-            md_parts.append(fix_chunk_spacing(content))
+        md_parts.append(fix_chunk_spacing(content))
     md = "\n\n---\n\n".join(md_parts)
     return fix_ligatures(md)
-
-
-def _strip_ancestral_headings(content):
-    """Remove ancestral heading lines (# ## ###) from the start of a chunk.
-    
-    DocAI Layout Parser with includeAncestorHeadings=True prepends section
-    headings to every chunk for RAG context. This strips them, keeping only
-    the unique body text. If the chunk is purely headings (no body), returns
-    the content as-is (it's a structural chunk worth keeping once).
-    """
-    lines = content.split("\n")
-    heading_end = 0
-    i = 0
-    while i < len(lines):
-        stripped = lines[i].strip()
-        if stripped.startswith("#"):
-            heading_end = i + 1
-            i += 1
-            # Skip blank lines after heading
-            while i < len(lines) and lines[i].strip() == "":
-                heading_end = i + 1
-                i += 1
-        elif stripped == "":
-            i += 1
-        else:
-            break
-    body = "\n".join(lines[heading_end:]).strip()
-    return body if body else content.strip()
 
 
 def extract_image_annotations(all_chunks):
