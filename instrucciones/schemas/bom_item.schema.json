@@ -1,19 +1,19 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "bom_item.schema.json",
-  "title": "BOM Item (Exploded o High-Level)",
-  "description": "Estructura de un ítem dentro de un BOM (high-level o exploded). Para HL, los accesorios se describen dentro de descripcion_completa; para exploded, cada accesorio es su propio ítem con parent_id.",
+  "title": "BOM Item (Exploded o High-Level) — v0.2",
+  "description": "Estructura de un ítem dentro de un BOM. Para HL, los accesorios se describen dentro de descripcion_completa; para Exploded, cada accesorio es su propio ítem con parent_id. Este schema describe un solo ítem; el contenedor del BOM completo está en bom_envelope.schema.json.",
   "type": "object",
-  "required": ["id", "grupo", "tipo", "descripcion", "referencia_eett", "requisitos_en_contexto"],
+  "required": ["id", "grupo", "tipo", "referencia_eett", "requisitos_en_contexto"],
   "properties": {
     "id": {
       "type": "string",
-      "description": "ID consecutivo: HL-001, IT-0001, etc.",
+      "description": "ID consecutivo. HL-001/002... para High-Level; IT-0001/0002... para Exploded.",
       "pattern": "^(HL|IT)-[0-9]{3,4}$"
     },
     "parent_id": {
       "type": "string",
-      "description": "ID del ítem padre (vacío si independiente)"
+      "description": "ID del ítem padre (vacío si independiente). Solo aplica a Exploded."
     },
     "grupo": {
       "type": "string",
@@ -25,21 +25,25 @@
     },
     "major_unit": {
       "type": "string",
-      "description": "Solo para BOM HL: nombre corto del major unit"
+      "description": "Solo para BOM HL: nombre corto del major unit (ej. 'Radio base VHF')."
     },
     "descripcion": {
-      "type": "string"
+      "type": "string",
+      "description": "Solo para Exploded: descripción del ítem desagregado (ej. 'Cable coaxial RG-213, 30m')."
     },
     "descripcion_completa": {
       "type": "string",
-      "description": "Solo para BOM HL: incluye accesorios en la descripción"
+      "description": "Solo para HL: descripción que incluye los accesorios asociados (ej. 'Radio base VHF, incluyendo: micrófono, cable de alimentación, conector tipo N...')."
     },
-    "cantidad": { "type": "string" },
-    "unidad": { "type": "string" },
-    "referencia_eett": { "type": "string" },
+    "cantidad": { "type": "string", "description": "Vacío si no está explícito en EETT." },
+    "unidad": { "type": "string", "description": "Vacío si no está explícito en EETT." },
+    "referencia_eett": {
+      "type": "string",
+      "description": "Documento + sección + página de la EETT donde se menciona el ítem."
+    },
     "requisitos_en_contexto": {
       "type": "array",
-      "description": "Requisitos extraídos verbatim de la sección donde el ítem se menciona. Esto preserva la correlación ítem ↔ requisitos.",
+      "description": "Requisitos extraídos verbatim de la sección donde el ítem se menciona. Preserva la correlación ítem ↔ requisitos. NO clasificar hard/soft acá; eso es trabajo del Paso 3.",
       "items": {
         "type": "object",
         "required": ["texto_verbatim", "referencia"],
@@ -54,8 +58,9 @@
       "items": {
         "type": "string",
         "enum": ["inferido", "tbd", "asociacion_inferida"]
-      }
+      },
+      "default": []
     },
-    "notas_bom": { "type": "string" }
+    "notas_bom": { "type": "string", "default": "" }
   }
 }

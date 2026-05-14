@@ -1,18 +1,27 @@
-# Prompt — Subagente Verificación + Refinamiento + Herencia de Especificaciones (Paso 3.1)
+# Prompt — Subagente Verificación + Herencia de Specs (Paso 3.1) — v0.2
 
-> **Cambio de rol respecto al diseño inicial**: este subagente ya **no extrae specs desde cero** (eso lo hizo el paso 2 al producir el BOM con requisitos en contexto). Ahora **verifica, refina y resuelve herencia**:
+> **Rol redefinido vs v0.1**: este subagente ya **no extrae specs desde cero** (eso lo hizo el Paso 2 al producir el BOM con requisitos en contexto). Ahora **verifica, refina y resuelve herencia**:
 > 1. **Verifica completitud** — ¿faltan requisitos del ítem en las EETT?
 > 2. **Normaliza** — formato consistente, deduplicación, agrupación lógica.
 > 3. **Clasifica** hard / soft.
 > 4. **Resuelve herencia** — incorpora requisitos del ítem padre que aplican técnicamente.
 
-## Inputs
+## Reglas v0.2 (no negociables)
 
-- `{ITEM_BASE_JSON}`: ruta al ítem base (`ITEM-{id}.json` del paso 2.5, con `requisitos_en_contexto` ya extraídos).
-- `{EETT_ACLARADAS}`: archivos markdown de EETT aclaradas.
-- `{ANEXOS_ACLARADOS}`: archivos markdown de anexos aclarados (puede estar vacío).
-- `{ITEM_PADRE_JSON}`: si el ítem tiene `parent_id`, ruta al `ITEM-{parent_id}_specs.json` ya procesado (puede ser opcional si se procesa en orden de padres → hijos).
-- `{OUTPUT_PATH_JSON}`: ruta donde escribir el ítem con specs verificadas (canónico).
+1. **Procesamiento en batches de 5 items** (configurado por orquestador): no toda la lista en una pasada.
+2. **Orden topológico obligatorio**: el orquestador procesa primero items con `parent_id: ""` (capa 0), después items cuyo padre ya está procesado, etc. Vos no te preocupás del orden — recibís el batch ya ordenado.
+3. **Context selectivo**: NO recibís todas las EETT — solo las secciones referenciadas por los items de tu batch + specs ya verificadas de los padres (si los items tienen `parent_id`). Esto evita context overload (causa del INC-005 de ICAO-00068).
+4. **Contexto = paths, no contenido**.
+5. **Schema validation**: tu output se valida contra `schemas/item_specs.schema.json`. Falla = retry una vez con error como feedback; segundo falla = falla loud.
+6. **Sin inventar**: solo requisitos EXPLÍCITOS en EETT/aclaradas (texto narrativo, listas, tablas, notas al pie) o explícitamente heredados del padre.
+
+## Inputs (paths)
+
+- **ITEM_BASE_JSON**: paths a los `ITEM-{id}.json` del batch (Paso 2.5, con `requisitos_en_contexto` ya extraídos).
+- **EETT_ACLARADAS**: paths — pero con range references por sección/página relevantes para los items del batch.
+- **ANEXOS_ACLARADOS**: paths similares (puede estar vacío).
+- **ITEMS_PADRES_JSON**: paths a los `ITEM-{parent_id}_specs.json` ya procesados (Paso 3.1 anterior) para items que tengan `parent_id`. Si la capa actual no tiene padres con specs (ej. capa 0), esta lista está vacía.
+- **OUTPUT_DIR**: directorio donde escribir los `ITEM-{id}_specs.json` con `estado_specs: VERIFICADO`.
 
 ## Procedimiento
 

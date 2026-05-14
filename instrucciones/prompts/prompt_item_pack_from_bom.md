@@ -1,6 +1,8 @@
-# Prompt — Generación de Item Pack (BOM Exploded → un JSON+MD por ítem)
+# Prompt — Generación de Item Pack (Paso 2.5) — v0.2
 
-**Tarea determinista** ejecutada por el orquestador (no requiere subagente con razonamiento). A partir del BOM Exploded consolidado, generá un par de archivos (JSON canónico + MD derivado) por cada ítem. Estos archivos sirven como base atómica para los pasos 3 (verificación de specs + herencia) y 6 (búsqueda).
+> **Tipo**: tarea determinística del orquestador. NO requiere LLM. Es transformación mecánica BOM Exploded JSON → un archivo JSON+MD por item. Se ejecuta con script o handler determinístico, NO se delega a un subagente con razonamiento.
+
+A partir del BOM Exploded consolidado, generá un par de archivos (JSON canónico + MD derivado) por cada item. Estos archivos sirven como base atómica para el Paso 3 (verificación de specs + herencia) y Paso 6 (búsqueda).
 
 ## Inputs
 

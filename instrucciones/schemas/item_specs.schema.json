@@ -1,9 +1,10 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "item_specs.schema.json",
-  "title": "Item con specs verificadas (paso 3)",
+  "title": "Item con specs verificadas (Paso 3) — v0.2",
+  "description": "Estructura de un ITEM-{id}_specs.json. Ciclo de vida: PENDIENTE_VERIFICACION (Paso 2.5) → VERIFICADO (Paso 3.1) → REVISADO (Paso 3.2). El Paso 3.1 procesa en orden topológico (padres antes que hijos) para que la herencia pueda resolverse.",
   "type": "object",
-  "required": ["item_id", "nombre", "tipo", "estado_specs", "requerimientos"],
+  "required": ["item_id", "nombre", "tipo", "estado_specs"],
   "properties": {
     "item_id": { "type": "string" },
     "nombre": { "type": "string" },

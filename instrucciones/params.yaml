@@ -1,81 +1,129 @@
-# params.yaml — Parámetros operativos del workflow de procurement
-# Versión 1.0 — formato YAML, leído por el orquestador en arranque.
+# params.yaml — Parámetros operativos del workflow (v0.2)
+#
+# Reorganización v0.2: la información se reparte entre 3 archivos:
+#   - params.yaml (este): timeouts, batches, handoff budgets, política de derivados.
+#   - model_routing.yaml: selección de modelo por paso/función, basada en evidencia.
+#   - catalog_tools.md: stack de tools con primary+fallback.
+#
+# Lo que SOLÍA estar acá y migró a model_routing.yaml:
+#   - step6_combos (combos modelo+tool por intento) → ahora viven en model_routing.yaml.
+#   - model_pools (pools por función) → ahora en model_routing.yaml.
+#   - tool_pools (pools de tools) → ahora en catalog_tools.md como capas con primary+fallback.
 
-version: 1.0
+version: 0.2
 
-# --- Batching y límites ---
+# ---------------------------------------------------------------
+# BATCHING Y LIMITES
+# ---------------------------------------------------------------
+
 batching:
-  batch_size_items_step6: 3            # ítems simultáneos en paso 6 (= 3 subagentes-item activos)
-  search_workers_per_item: 2           # workers de búsqueda por ítem (debe ser 2)
+  # Paso 2.3 BOM Exploded: si HL tiene >20 items, productor procesa por grupo.
+  bom_exploded_partial_threshold_items: 20
+  # Paso 3.1 Specs: procesar en batches de 5 items con context selectivo.
+  batch_size_specs: 5
+  # Paso 3.2 Revisor: chunks de 15 items para evitar context overload.
+  batch_size_review: 15
+  # Paso 6 Búsqueda: items simultáneos.
+  batch_size_items_step6: 3
+  # Workers paralelos por item en paso 6 (no cambiar — el diseño asume 2).
+  search_workers_per_item: 2
 
 limits:
-  max_relanzamientos_item: 2           # reintentos adicionales al intento inicial
-  min_candidatos_validos_por_item: 1   # mínimo para considerar el ítem resuelto
-  objetivo_candidatos_por_item: 3      # ideal (shortlist)
+  # Paso 6: relanzamientos del subagente-item (iteración inicial + N relanzamientos).
+  max_relanzamientos_item: 2
+  min_candidatos_validos_por_item: 1
+  objetivo_candidatos_por_item: 3
 
-# --- Timeouts (segundos) ---
-# default = 5 min para tareas estándar (OCR, merge, BOM, specs, QA, etc.)
-# search_worker = 10 min (definido por el usuario)
-# item_manager = 25 min (incluye reintentos completos del ciclo de búsqueda)
+# ---------------------------------------------------------------
+# TIMEOUTS (segundos)
+# ---------------------------------------------------------------
+
 timeouts:
-  default: 300
-  search_worker: 600
-  item_manager: 1500
+  default: 300                 # 5 min — pasos estándar (OCR, merge, BOM, specs, QA).
+  bom_productor: 600           # 10 min — paso 2.1 y 2.3 (BOM HL y Exploded).
+  bom_auditor: 300             # 5 min — paso 2.2 y 2.4.
+  specs_batch: 300             # 5 min por batch de 5 items (paso 3.1).
+  specs_revisor_chunk: 300     # 5 min por chunk de 15 items (paso 3.2).
+  search_worker: 600           # 10 min por worker (paso 6).
+  item_manager: 1500           # 25 min — ciclo completo del subagente-item con reintentos.
+  matriz_cumplimiento: 300     # 5 min por matriz por candidato.
 
-# --- Reintentos por tool ---
+# ---------------------------------------------------------------
+# HANDOFF BUDGETS
+# ---------------------------------------------------------------
+# Cuántas veces puede un handoff (productor → auditor → ?) iterar antes de fail loud.
+# 1 = revisor revisa una vez, sin reverse edge. 0 = critic terminal sin reverse.
+
+handoff_budgets:
+  paso_1_4_merge_aclaraciones: 1
+  paso_2_1_bom_hl: 1
+  paso_2_3_bom_exploded: 1
+  paso_3_2_specs_revisor: 1
+  paso_6_matriz: 1
+  paso_7_2_qa: 0
+
+# ---------------------------------------------------------------
+# REINTENTOS POR TOOL
+# ---------------------------------------------------------------
+
 retries:
   tool_call_default: 2
   per_tool:
     brave: 1
+    exa: 1
+    tavily: 1
     perplexity: 1
     tinyfish: 1
-    firecrawl: 2                       # parsing puede fallar por timeout del sitio destino
+    jina_reader: 2
+    firecrawl: 2              # parsing puede fallar por timeout del sitio destino.
+    browserbase: 2
+    docling: 2
+    llamaparse: 1
 
-# --- Política de diversidad ---
+# ---------------------------------------------------------------
+# POLITICA DE DIVERSIDAD (refuerza model_routing.yaml)
+# ---------------------------------------------------------------
+
 diversity:
   no_repetir_modelo_en_subagentes_paralelos: true
   no_repetir_tool_en_subagentes_paralelos: true
   rotar_modelo_y_tool_en_relanzamientos: true
   revisor_debe_usar_modelo_distinto_al_productor: true
 
-# --- Combos sugeridos para paso 6 (rotación entre intentos) ---
-# Cada intento define la combinación modelo+tool para los dos workers paralelos.
-# El orquestador respeta diversidad y rotación. Si el modelo/tool no está disponible,
-# debe sustituirlo por otro del mismo "function pool" (ver catalog_modelos.md).
-step6_combos:
-  intento_1:
-    worker_a: { model: "Kimi-K2.6", tool: "brave" }
-    worker_b: { model: "GLM-5.1", tool: "perplexity" }
-  intento_2:
-    worker_a: { model: "Gemini-2.5-Pro", tool: "tinyfish" }
-    worker_b: { model: "GPT-5.4-Mini", tool: "brave" }
-  intento_3:
-    worker_a: { model: "DeepSeek-V4-Pro", tool: "perplexity" }
-    worker_b: { model: "Qwen-3.6-Plus", tool: "tinyfish" }
+# ---------------------------------------------------------------
+# POLITICA DE DERIVADOS AUTOMATICOS
+# ---------------------------------------------------------------
+# Cuando un subagente entrega JSON canónico, el orquestador genera estos derivados
+# determinísticamente (sin LLM call).
 
-# --- Pools de modelos por función (referenciados desde catalog_modelos.md) ---
-# El orquestador elige libremente dentro del pool, respetando diversidad/rotación.
-model_pools:
-  orchestrator: ["GPT-5.5", "Gemini-3.1-Pro", "Kimi-K2.6"]
-  vision_ocr: ["Gemini-2.5-Pro", "GPT-5.5", "GLM-5V-Turbo", "Kimi-K2.6"]
-  reasoning_long: ["GPT-5.5", "Gemini-2.5-Pro", "GLM-5.1", "Kimi-K2.6"]
-  bom_extraction: ["Kimi-K2.6", "GLM-5.1", "Gemini-2.5-Pro", "DeepSeek-V4-Pro", "Qwen-3.6-Plus", "GPT-5.4-Mini"]
-  auditor_revisor: ["GPT-5.4", "Gemini-2.5-Pro", "Kimi-K2.6", "GLM-5.1"]
-  item_manager: ["GPT-5.5", "GLM-5.1", "Kimi-K2.6"]
-  search_worker: ["Kimi-K2.5-Turbo", "GPT-5.4-Mini", "GLM-5-Turbo", "Qwen-3.6-Plus"]
-  fast_throughput: ["GPT-5.4-Mini", "GLM-5-Turbo", "Kimi-K2.5-Turbo"]
-
-# --- Pools de tools ---
-tool_pools:
-  search: ["brave", "perplexity", "tinyfish"]
-  fetch_parse: ["firecrawl"]
-
-# --- Política de derivados ---
-# Cuando un subagente entrega JSON, el orquestador genera estos derivados:
 auto_derivatives:
-  bom_json_to: ["tsv", "md"]
-  item_json_to: ["md"]
-  specs_json_to: ["md"]
-  result_json_to: ["md"]
-  matriz_json_to: ["md"]
-  consolidado_json_to: ["tsv", "md", "xlsx"]
+  bom_envelope_json_to: ["tsv", "md"]              # paso 2.1, 2.3
+  item_pack_json_to: ["md"]                        # paso 2.5
+  item_specs_json_to: ["md"]                       # paso 3.1
+  item_resultado_json_to: ["md"]                   # paso 6 resultado
+  matriz_json_to: ["md"]                           # paso 6 matriz
+  bom_busqueda_json_to: ["tsv"]                    # paso 4
+  consolidado_json_to: ["tsv", "md", "xlsx"]       # paso 7.1
+
+# ---------------------------------------------------------------
+# MONITOREO DE CREDITOS (nuevo en v0.2)
+# ---------------------------------------------------------------
+# Antes de lanzar paso 6, verificar saldo de cada vendor y abortar si está bajo.
+# Si un vendor llega a 10% del budget durante paso 6, escalar a su fallback.
+
+credit_monitoring:
+  vendors_to_check: ["firecrawl", "exa", "tavily", "browserbase", "llamaparse"]
+  abort_threshold_pct: 5        # abortar si vendor está al 5% del budget mensual
+  fallback_threshold_pct: 10    # escalar a fallback si está al 10%
+
+# ---------------------------------------------------------------
+# COTAS DURAS POR ITEM (paso 6)
+# ---------------------------------------------------------------
+# Si un item alcanza estas cotas sin resolverse, el subagente-item devuelve
+# SIN_CANDIDATO con diagnóstico — NO sigue gastando budget.
+
+per_item_caps_step6:
+  max_fetches_html: 8
+  max_pdf_downloads: 3
+  max_pdf_parses: 3
+  max_search_calls: 12          # 6 por worker × 2 workers

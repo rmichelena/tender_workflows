@@ -1,7 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "consolidado_row.schema.json",
-  "title": "Fila del consolidado final (paso 7)",
+  "title": "Fila del consolidado final (Paso 7) — v0.2",
+  "description": "Una fila por (item × candidato). Items SIN_CANDIDATO y SERVICIO también aparecen con candidato_num=0.",
   "type": "object",
   "required": ["item_id", "nombre", "grupo", "tipo", "candidato_num", "estado"],
   "properties": {
@@ -11,12 +12,12 @@
     "tipo": { "type": "string", "enum": ["BIEN", "SERVICIO"] },
     "spec_clave": {
       "type": "string",
-      "description": "Resumen de 2-3 requisitos Hard más diferenciadores"
+      "description": "Resumen 1-línea de 2-3 requisitos Hard más diferenciadores. Para vista rápida; las specs completas viven en ITEM-{id}_specs.json."
     },
     "candidato_num": {
       "type": "integer",
       "minimum": 0,
-      "description": "0 si SIN_CANDIDATO o SERVICIO; ≥1 si hay candidato"
+      "description": "0 si SIN_CANDIDATO o SERVICIO; ≥1 si hay candidato."
     },
     "marca": { "type": "string" },
     "modelo": { "type": "string" },
@@ -27,9 +28,19 @@
     },
     "url_fabricante": { "type": "string" },
     "url_datasheet": { "type": "string" },
+    "datasheet_source": {
+      "type": "string",
+      "enum": ["manufacturer", "external", "none", ""],
+      "description": "manufacturer = sitio del fabricante. external = encontrado vía Google + filetype:pdf en distribuidor/tercero. none = no se encontró. Vacío si es SERVICIO o SIN_CANDIDATO."
+    },
     "resumen_cumplimiento": {
       "type": "string",
-      "description": "Formato: '{n} OK / {n} PARCIAL / {n} NO_CUMPLE'"
+      "description": "Formato detallado v0.2: '{cumple} OK / {sin_info} sin_info / {parcial_cumple_parcial} parcial / {parcial_inconsistente} inconsistente / {incumple} NO_CUMPLE'. Vacío para SERVICIO/SIN_CANDIDATO."
+    },
+    "evidence_quality": {
+      "type": "string",
+      "enum": ["strong", "weak", ""],
+      "description": "strong: datasheet de fabricante o external verificado. weak: solo HTML del fabricante o referencias secundarias."
     },
     "notas": { "type": "string" },
     "ruta_matriz": { "type": "string" },

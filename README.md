@@ -2,6 +2,24 @@
 
 Pipeline de extracción y análisis de documentos de licitación pública.
 
+## Visión general
+
+El proyecto tiene dos planos:
+
+1. **Workflow conceptual** (`instrucciones/`) — define el pipeline completo de 7 pasos desde EETT/aclaraciones hasta un consolidado de shortlist con matrices de cumplimiento. Es la documentación canónica de qué hace el sistema, cómo se delega a sub-agentes LLM, qué modelo va a qué tarea, qué tools usar.
+
+   Archivos clave a leer en orden:
+   - `instrucciones/00_prompt_orquestador.md` — punto de entrada del orquestador.
+   - `instrucciones/agent_patterns.md` — patrones de delegación (10 reglas operativas).
+   - `instrucciones/01_workflow.md` — runbook de los 7 pasos.
+   - `instrucciones/params.yaml`, `model_routing.yaml`, `catalog_tools.md` — parámetros, routing, tools.
+   - `instrucciones/prompts/` — plantillas de cada sub-agente.
+   - `instrucciones/schemas/` — contratos JSON canónicos.
+
+2. **Implementación parcial** (`scripts/extractors/`) — pipeline real del **Paso 1 (normalización documental)**, ya funcional. El resto del workflow se ejecuta delegando a sub-agentes según `instrucciones/`. Esta sección del README documenta los extractores.
+
+Estado actual: **v0.2**. La v0.1 corrió end-to-end contra ICAO-00068 con resultado desigual (10.7% hit rate). v0.2 incorpora aprendizajes documentados en `REVIEW_FRESH_EYES.md`, `MEJORAS_PROPUESTAS.md` y los autoevaluaciones en `proyecto/logs/`.
+
 ## Estructura
 
 ```

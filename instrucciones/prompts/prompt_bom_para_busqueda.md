@@ -1,6 +1,15 @@
-# Prompt — Generación del BOM para Búsqueda (Paso 4) + QA
+# Prompt — Generación del BOM para Búsqueda (Paso 4) + QA — v0.2
 
-**Tarea determinista** ejecutada por el orquestador. A partir del BOM exploded consolidado y los `ITEM-{id}_specs.json` ya verificados (paso 3), producí una versión simplificada para que los agentes de búsqueda (paso 6) puedan trabajar sobre cada ítem.
+> **Tipo**: tarea principalmente determinística del orquestador (filtrado + limpieza). Sin embargo, la traducción de referencias normativas locales a estándares internacionales (ej. "norma DGAC" → "ICAO Annex X" si discernible) requiere razonamiento técnico — para esos casos puntuales puede invocarse una LLM call one-shot delegada.
+
+A partir del BOM Exploded consolidado y los `ITEM-{id}_specs.json` ya verificados (Paso 3), producí una versión simplificada para que los search workers del Paso 6 puedan trabajar sobre cada item sin contexto local peruano.
+
+## Reglas v0.2
+
+1. **Determinístico cuando posible**: filtrado de servicios, eliminación de cantidades, etc. = script Python.
+2. **LLM call selectiva** solo para traducir referencias normativas no obvias (las obvias el script las maneja con un diccionario).
+3. **QA interno obligatorio** antes de cerrar (ver §QA).
+4. **Output con schema fuerte**: el resultado se valida.
 
 ## Inputs
 

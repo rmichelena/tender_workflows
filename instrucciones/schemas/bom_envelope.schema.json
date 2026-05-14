@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "bom_envelope.schema.json",
+  "title": "BOM Envelope — contenedor de BOM HL o Exploded (v0.2)",
+  "description": "Estructura del archivo completo BOM_highlevel.json o BOM_exploded.json. Contiene metadata + status + array de items + tbd + referencia al scratchpad.",
+  "type": "object",
+  "required": ["tipo", "status", "fuentes_consultadas", "items"],
+  "properties": {
+    "tipo": {
+      "type": "string",
+      "enum": ["BOM_HIGH_LEVEL", "BOM_EXPLODED"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["COMPLETE", "PARTIAL"],
+      "description": "COMPLETE: el productor terminó todos los items. PARTIAL: se quedó sin budget u output tokens; los items completados son válidos pero faltan algunos."
+    },
+    "partial_reason": {
+      "type": "string",
+      "description": "Solo presente si status=PARTIAL. Ej: 'approaching_output_limit', 'tool_budget_exhausted', 'timeout'."
+    },
+    "bom_hl_source": {
+      "type": "string",
+      "description": "Solo para BOM_EXPLODED: path al BOM HL del cual se derivó."
+    },
+    "fuentes_consultadas": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "grupos_identificados": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "bom_item.schema.json" }
+    },
+    "tbd": {
+      "type": "array",
+      "description": "Ambigüedades detectadas durante producción que requieren revisión humana.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "descripcion": { "type": "string" },
+          "referencia": { "type": "string" }
+        }
+      },
+      "default": []
+    },
+    "scratchpad_path": {
+      "type": "string",
+      "description": "Path al scratchpad de decisiones compartido entre Paso 2.1 y 2.3."
+    }
+  }
+}

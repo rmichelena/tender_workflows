@@ -1,6 +1,18 @@
-# Prompt — Consolidación Final (Paso 7)
+# Prompt — Consolidación Final (Paso 7.1) — v0.2
 
-**Tarea ejecutada por el orquestador** (no requiere subagente con razonamiento profundo, solo agregación estructurada). Producir la tabla consolidada final del proyecto, unificando el BOM de búsqueda con los resultados de búsqueda de todos los ítems.
+> **Tipo**: principalmente tarea determinística del orquestador (agregación + transformación de schemas). El JSON canónico se construye con script. Las derivaciones a TSV/MD/XLSX también son determinísticas.
+>
+> **LLM call selectiva** solo para `spec_clave` (resumen 1-línea de 2-3 requisitos Hard más diferenciadores) — esa síntesis sí necesita razonamiento.
+
+Producir el consolidado final unificando el BOM de búsqueda + BOM exploded (para servicios) + resultados de búsqueda + matrices de cumplimiento.
+
+## Reglas v0.2
+
+1. **Output canónico = JSON**; derivados TSV/MD/XLSX se generan determinísticamente.
+2. **Schema validation**: el JSON canónico se valida contra `schemas/consolidado_row.schema.json`.
+3. **Completitud**: todos los items del BOM Exploded (bienes + servicios) deben aparecer.
+4. **Items SIN_CANDIDATO y SERVICIOS**: incluir con `candidato_num: 0` (no omitir).
+5. **`datasheet_source` y `evidence_quality`** se propagan desde la matriz al consolidado para filtros downstream.
 
 ## Inputs
 
