@@ -277,9 +277,75 @@ def _detect_drawing_watermarks(doc, threshold=0.5, min_pages=10, quantize=1.0):
             key = (q, fill, color, item_sig)
             drawing_groups[key].append((i, pymupdf.Rect(r)))
     
+    # ── Sibling key fusion ──────────────────────────────────────────────
+    # Elements that alternate position (e.g., odd/even pages) end up in
+    # separate keys that never individually reach the threshold.
+    #
+    # Pass 1: merge keys that share fill, color, item_types and are within
+    #         2pt of each other (handles sub-pixel position jitter).
+    # Pass 2: merge keys that share fill, color, item_types and have the
+    #         same SIZE (±2pt) regardless of position — handles elements
+    #         that mirror between left/right or top/bottom of the page.
+    MERGE_TOLERANCE = 2.0  # pt
+    keys = list(drawing_groups.keys())
+    merged = set()       # keys already absorbed into another
+
+    def _structural_match(a, b):
+        """Same fill, color, item_types."""
+        return a[1] == b[1] and a[2] == b[2] and a[3] == b[3]
+
+    def _spatial_close(q_a, q_b, tol):
+        """All 4 coords within tol."""
+        return all(abs(a - b) <= tol for a, b in zip(q_a, q_b))
+
+    def _same_size(q_a, q_b, tol):
+        """Width and height within tol (position-independent)."""
+        w_a, h_a = q_a[2] - q_a[0], q_a[3] - q_a[1]
+        w_b, h_b = q_b[2] - q_b[0], q_b[3] - q_b[1]
+        return abs(w_a - w_b) <= tol and abs(h_a - h_b) <= tol
+
+    def _merge(b_key, a_key):
+        drawing_groups[a_key].extend(drawing_groups[b_key])
+        merged.add(b_key)
+
+    # Pass 1: position-based fusion (nearby siblings)
+    for i_a in range(len(keys)):
+        if keys[i_a] in merged:
+            continue
+        for i_b in range(i_a + 1, len(keys)):
+            if keys[i_b] in merged:
+                continue
+            if _structural_match(keys[i_a], keys[i_b]) and \
+               _spatial_close(keys[i_a][0], keys[i_b][0], MERGE_TOLERANCE):
+                _merge(keys[i_b], keys[i_a])
+
+    # Pass 2: size-based fusion (mirror siblings — same visual, diff position)
+    # Only merge if combined page count would reach threshold
+    for i_a in range(len(keys)):
+        if keys[i_a] in merged:
+            continue
+        q_a, _, _, _ = keys[i_a]
+        pages_a = set(p[0] for p in drawing_groups[keys[i_a]])
+        for i_b in range(i_a + 1, len(keys)):
+            if keys[i_b] in merged:
+                continue
+            if not _structural_match(keys[i_a], keys[i_b]):
+                continue
+            q_b, _, _, _ = keys[i_b]
+            if not _same_size(q_a, q_b, MERGE_TOLERANCE):
+                continue
+            pages_b = set(p[0] for p in drawing_groups[keys[i_b]])
+            combined = len(pages_a | pages_b)
+            # Only fuse if combined would pass threshold
+            if combined / total_pages >= threshold and combined >= min_pages:
+                _merge(keys[i_b], keys[i_a])
+                pages_a = pages_a | pages_b  # update for next iteration
+
     # Filter: only drawings on ≥threshold pages and ≥min_pages
     candidates = []
     for key, occurrences in drawing_groups.items():
+        if key in merged:
+            continue
         page_set = set(p[0] for p in occurrences)
         page_count = len(page_set)
         freq = page_count / total_pages
@@ -756,7 +822,8 @@ def _strip_text_redaction(doc, report, categories):
     Remove flagged text watermarks/headers using redaction annotations.
     
     Uses normalized text patterns to find matching spans on each page,
-    then redacts them with white fill.
+    then redacts them WITHOUT fill (transparent) — just removes the text
+    operators from the content stream, no white rectangles inserted.
     
     Returns: (modified_pages, spans_redacted)
     """
@@ -840,7 +907,7 @@ def _strip_text_redaction(doc, report, categories):
         
         if rects_to_redact:
             for r in rects_to_redact:
-                page.add_redact_annot(r, fill=(1, 1, 1))
+                page.add_redact_annot(r, fill=None)
             page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE)
             modified_pages += 1
     
@@ -932,10 +999,33 @@ def _strip_recurring_drawings(doc, report):
     if not candidates:
         return 0, 0
     
+    # ── Safety filter: skip drawings that cover too much of the page ──
+    # Redaction removes ALL content in the rect area — using it on a large
+    # frame would wipe out text.  Only remove small decorations (margins,
+    # headers, footers, circles, separator lines).  Large frames are still
+    # reported as detected but not stripped.
+    MAX_AREA_RATIO = 0.30  # skip if drawing covers >30% of page area
+    
     # Build a lookup: page_idx → list of rects to remove
     page_removals = defaultdict(list)
+    skipped = []
     for c in candidates:
+        q_rect = c.get("quantized_rect")
+        if q_rect:
+            dw = q_rect[2] - q_rect[0]
+            dh = q_rect[3] - q_rect[1]
+            draw_area = dw * dh
+        else:
+            draw_area = 0
+        
         for page_idx, rect in c.get("occurrences", []):
+            if draw_area > 0:
+                page = doc[page_idx]
+                page_area = page.rect.width * page.rect.height
+                if page_area > 0 and draw_area / page_area > MAX_AREA_RATIO:
+                    if c not in skipped:
+                        skipped.append(c)
+                    continue
             page_removals[page_idx].append(pymupdf.Rect(rect))
     
     modified_pages = 0
@@ -944,9 +1034,9 @@ def _strip_recurring_drawings(doc, report):
     for page_idx, rects in page_removals.items():
         page = doc[page_idx]
         
-        # Use redaction to white-out the drawing areas
+        # Redact drawing areas (no fill — just remove vector operators)
         for r in rects:
-            page.add_redact_annot(r, fill=(1, 1, 1))
+            page.add_redact_annot(r, fill=None)
         
         # Apply redactions but DON'T affect images
         page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE)
