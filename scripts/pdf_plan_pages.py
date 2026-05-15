@@ -82,7 +82,7 @@ def contiguous_ranges(pages: list[int]) -> list[dict[str, int]]:
     return ranges
 
 
-def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, min_width_pt: float, min_height_pt: float, render_dpi: int, page_analysis_json: Path | None = None) -> dict[str, Any]:
+def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, min_width_pt: float, min_height_pt: float, render_dpi: int, page_analysis_json: Path | None = None, image_area_ratio_threshold: float = 0.4, image_min_width_pct: float = 0.15, max_images_per_candidate_page: int = 4, max_consecutive_image_heavy: int = 5, image_heavy_doc_pct_disable: float = 0.7) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     render_dir = output_dir / f"{stem}_candidate_pages"
     render_dir.mkdir(parents=True, exist_ok=True)
@@ -112,16 +112,18 @@ def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, m
     image_heavy_pages = set()
     for r in rows:
         pa = pa_pages.get(r["page"])
-        if pa and "image_heavy" in pa.get("plan_candidate_signals", []):
+        # Treat as image-heavy for scan filtering if it crosses the configured area threshold,
+        # not only if pdf_image_audit emitted the image_heavy signal.
+        if pa and pa.get("image_area_ratio", 0) >= image_area_ratio_threshold:
             image_heavy_pages.add(r["page"])
 
     # Check if document is predominantly scanned
     total_pages = len(rows)
     image_heavy_doc_pct = len(image_heavy_pages) / total_pages if total_pages else 0
-    disable_image_heavy = image_heavy_doc_pct > 0.7
+    disable_image_heavy = image_heavy_doc_pct > image_heavy_doc_pct_disable
 
     # Find runs of consecutive image_heavy pages > threshold
-    max_consecutive = 5  # configurable via params, hardcoded default
+    max_consecutive = max_consecutive_image_heavy
     consecutive_image_heavy_runs = set()
     if image_heavy_pages and not disable_image_heavy:
         sorted_ih = sorted(image_heavy_pages)
@@ -166,7 +168,7 @@ def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, m
                 if "autocad_like" not in str(reasons):
                     reasons.append("autocad_like")
             # Image_heavy detection with anti-scan and width filters
-            if "image_heavy" in signals and pa.get("image_area_ratio", 0) > 0.4:
+            if pa.get("image_area_ratio", 0) >= image_area_ratio_threshold:
                 # Skip if document is predominantly scanned
                 if disable_image_heavy:
                     pass  # skip image_heavy entirely for scanned docs
@@ -174,7 +176,7 @@ def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, m
                 elif r["page"] in consecutive_image_heavy_runs:
                     pass  # skip, likely scanned pages
                 # Skip if too many images (probably scanned page with segments)
-                elif pa.get("image_count", 0) > 4:
+                elif pa.get("image_count", 0) > max_images_per_candidate_page:
                     pass  # skip, too many images
                 else:
                     # Width filter: each image should be reasonably wide (not marginal)
@@ -188,7 +190,7 @@ def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, m
                                 bbox = b.get("bbox", (0, 0, 0, 0))
                                 img_w = bbox[2] - bbox[0]
                                 page_w = r["width_pt"]
-                                if page_w > 0 and img_w / page_w > 0.15:
+                                if page_w > 0 and img_w / page_w >= image_min_width_pct:
                                     img_blocks.append(bbox)
                     except Exception:
                         img_blocks = []
@@ -228,6 +230,13 @@ def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, m
             "min_width_pt": min_width_pt,
             "min_height_pt": min_height_pt,
             "render_dpi": render_dpi,
+            "image_area_ratio_threshold": image_area_ratio_threshold,
+            "image_min_width_pct": image_min_width_pct,
+            "max_images_per_candidate_page": max_images_per_candidate_page,
+            "max_consecutive_image_heavy": max_consecutive_image_heavy,
+            "image_heavy_doc_pct_disable": image_heavy_doc_pct_disable,
+            "image_heavy_doc_pct": round(image_heavy_doc_pct, 3),
+            "disable_image_heavy": disable_image_heavy,
         },
         "candidate_ranges": contiguous_ranges([c["page"] for c in candidates]),
         "pages": rows,
@@ -306,6 +315,56 @@ def insert_wrapped_text(page: fitz.Page, text: str, margin: float = 54) -> None:
             y += line_h if idx else 18
 
 
+def add_red_page_label(page: fitz.Page, source_page: int) -> None:
+    """Stamp a red source-page label in the upper-right corner."""
+    label = f"pag. {source_page}"
+    w = page.rect.width
+    rect = fitz.Rect(w - 120, 12, w - 12, 48)
+    try:
+        page.wrap_contents()
+    except Exception:
+        pass
+    page.draw_rect(rect, color=(1, 0, 0), fill=(1, 1, 1), width=2)
+    # insert_text is more reliable than insert_textbox for very large/rotated CAD pages.
+    page.insert_text(fitz.Point(rect.x0 + 10, rect.y0 + 22), label, fontsize=13, fontname="helv", color=(1, 0, 0))
+
+
+def image_block_rects(page: fitz.Page) -> list[fitz.Rect]:
+    rects = []
+    try:
+        for b in page.get_text("dict")["blocks"]:
+            if b.get("type") == 1:
+                rects.append(fitz.Rect(b["bbox"]))
+    except Exception:
+        pass
+    return rects
+
+
+def expand_rect_to_intersecting_image_tiles(page: fitz.Page, rect: fitz.Rect, padding: float = 3.0) -> fitz.Rect:
+    """Expand a replacement rect to cover image tiles/fragments it intersects.
+
+    Acrobat and CAD-generated PDFs sometimes split one visual image into vertical
+    strips/tiles. Gemini may mark the visible diagram approximately; this expands
+    to the union of PDF image blocks that intersect/touch the requested region.
+    """
+    expanded = fitz.Rect(rect)
+    changed = True
+    while changed:
+        changed = False
+        padded = fitz.Rect(expanded.x0 - padding, expanded.y0 - padding, expanded.x1 + padding, expanded.y1 + padding)
+        for img_rect in image_block_rects(page):
+            if padded.intersects(img_rect):
+                union = expanded | img_rect
+                if union != expanded:
+                    expanded = union
+                    changed = True
+    expanded.x0 = max(0, expanded.x0)
+    expanded.y0 = max(0, expanded.y0)
+    expanded.x1 = min(page.rect.width, expanded.x1)
+    expanded.y1 = min(page.rect.height, expanded.y1)
+    return expanded
+
+
 def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str, analysis_json: Path) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
     preocr_dir.mkdir(parents=True, exist_ok=True)
@@ -323,14 +382,16 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
     preocr_pdf = preocr_dir / f"{stem}_preocr.pdf"
     md_path = output_dir / f"planos_extraidos_{stem}.md"
 
-    # Extract full pages (replace_page) into separate PDF
+    # Extract affected pages in original document order, with source-page stamp.
     extracted = fitz.open()
-    for page_num in sorted(replace_page_set):
-        extracted.insert_pdf(doc, from_page=page_num - 1, to_page=page_num - 1)
-    # Also extract individual images for replace_images pages
-    # (save the original page so it can be referenced)
-    for page_num in sorted(replace_images_set):
-        extracted.insert_pdf(doc, from_page=page_num - 1, to_page=page_num - 1)
+    affected_pages = sorted(replace_page_set | replace_images_set)
+    for page_num in affected_pages:
+        # Render the original page into a fresh page. This normalizes rotated CAD pages
+        # so the corner label is reliably visible/extractable.
+        src_page = doc[page_num - 1]
+        new_page = extracted.new_page(width=src_page.rect.width, height=src_page.rect.height)
+        new_page.show_pdf_page(new_page.rect, doc, page_num - 1)
+        add_red_page_label(new_page, page_num)
     if extracted.page_count:
         extracted.save(extracted_pdf)
     else:
@@ -362,8 +423,11 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
                 y0 = max(0, (bbox_pct[1] - margin_pct)) * pre_page.rect.height
                 x1 = min(1, (bbox_pct[2] + margin_pct)) * pre_page.rect.width
                 y1 = min(1, (bbox_pct[3] + margin_pct)) * pre_page.rect.height
-                # White rectangle
+                # Expand to any intersecting PDF image blocks/tiles so we do not leave strips.
                 rect = fitz.Rect(x0, y0, x1, y1)
+                rect = expand_rect_to_intersecting_image_tiles(pre_page, rect)
+                x0, y0, x1, y1 = rect.x0, rect.y0, rect.x1, rect.y1
+                # White rectangle
                 pre_page.draw_rect(rect, color=None, fill=(1, 1, 1))
                 # Insert description text
                 desc_lines = []
@@ -459,6 +523,16 @@ def main() -> None:
     p_audit.add_argument("--render-dpi", type=int, default=180)
     p_audit.add_argument("--page-analysis", type=Path, default=None,
                         help="Path to {stem}_page_analysis.json from pdf_image_audit.py (auto-detected if not given)")
+    p_audit.add_argument("--image-area-ratio-threshold", type=float, default=0.4,
+                        help="Minimum image area ratio to consider replace_images visual analysis (default 0.4; try 0.2 for broader detection)")
+    p_audit.add_argument("--image-min-width-pct", type=float, default=0.15,
+                        help="Minimum width fraction for an image block to avoid marginal decorations (default 0.15)")
+    p_audit.add_argument("--max-images-per-candidate-page", type=int, default=4,
+                        help="Skip image-heavy page if it has more images than this (default 4)")
+    p_audit.add_argument("--max-consecutive-image-heavy", type=int, default=5,
+                        help="Skip image-heavy runs longer than this, likely scanned docs (default 5)")
+    p_audit.add_argument("--image-heavy-doc-pct-disable", type=float, default=0.7,
+                        help="Disable image-heavy detection if doc ratio exceeds this (default 0.7)")
 
     p_build = sub.add_parser("build", parents=[common])
     p_build.add_argument("--preocr-dir", type=Path, required=True)
@@ -467,7 +541,16 @@ def main() -> None:
     args = parser.parse_args()
     stem = args.stem or slugify_stem(args.input_pdf)
     if args.cmd == "audit":
-        audit = audit_pdf(args.input_pdf, args.output_dir, stem, args.area_ratio, args.min_width_pt, args.min_height_pt, args.render_dpi, getattr(args, 'page_analysis', None))
+        audit = audit_pdf(
+            args.input_pdf, args.output_dir, stem,
+            args.area_ratio, args.min_width_pt, args.min_height_pt, args.render_dpi,
+            getattr(args, 'page_analysis', None),
+            args.image_area_ratio_threshold,
+            args.image_min_width_pct,
+            args.max_images_per_candidate_page,
+            args.max_consecutive_image_heavy,
+            args.image_heavy_doc_pct_disable,
+        )
         print(json.dumps({"audit_json": str(args.output_dir / f"{stem}_page_size_audit.json"), "candidate_count": len(audit["candidates"]), "candidate_ranges": audit["candidate_ranges"]}, indent=2, ensure_ascii=False))
     elif args.cmd == "build":
         print(json.dumps(build_outputs(args.input_pdf, args.output_dir, args.preocr_dir, stem, args.analysis_json), indent=2, ensure_ascii=False))
