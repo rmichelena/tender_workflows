@@ -53,7 +53,7 @@
 **Owner**: Orquestador (script `scripts/pdf_image_audit.py` o similar)
 **Tarea**: detectar y eliminar zonas repetitivas (headers, footers, watermarks, firmas, sellos, logos decorativos) que aparecen en múltiples páginas. Producir PDF "limpio".
 
-**Output**: `/proyecto/artifacts/step_1_pdfs_clean/{nombre_doc}.pdf`
+**Output**: `/proyecto/artifacts/step_1_pdfs_clean/{nombre_doc}_clean.pdf`
 **Done**: PDFs optimizados sin elementos repetitivos no útiles.
 
 ### 1.3 OCR + parsing a Markdown
@@ -402,7 +402,7 @@ proyecto/
 │   └── decisiones_bom.md                  (decisiones compartidas entre 2.1-2.4)
 ├── artifacts/
 │   ├── step_1_pdfs/                       (DOCX→PDF si aplica)
-│   ├── step_1_pdfs_clean/                 (post optimizer)
+│   ├── step_1_pdfs_clean/                 (post optimizer; PDFs nombrados `{stem}_clean.pdf`)
 │   ├── step_1_normalizados/               (markdowns post-LandingAI)
 │   ├── step_1_aclaradas/                  (docs aclarados + auditoría)
 │   ├── step_2_bom/                        (BOM HL y Exploded en JSON + derivados)

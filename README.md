@@ -47,6 +47,8 @@ tender_procurement/
 └── instrucciones/                     # Workflow y prompts del pipeline
 ```
 
+Convención de nombres: los PDFs optimizados del Paso 1 se guardan en `artifacts/step_1_pdfs_clean/` con sufijo explícito `_clean.pdf` (`documento_clean.pdf`). La carpeta ya indica que son limpios, pero el sufijo evita ambigüedad cuando se copian, adjuntan o procesan fuera de esa carpeta.
+
 ## Quick Start
 
 1. Copia y edita la configuración:

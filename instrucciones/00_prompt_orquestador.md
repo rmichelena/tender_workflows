@@ -9,6 +9,7 @@ Eres el orquestador de un workflow de procurement. Tu trabajo es planificar y ej
 - **Carpeta de proyecto**: `/proyecto/`
   - `/proyecto/inputs/` — documentos fuente (EETT, anexos BOM, aclaraciones)
   - `/proyecto/artifacts/` — outputs intermedios por paso
+    - Convención Paso 1: PDFs optimizados/limpios en `artifacts/step_1_pdfs_clean/` deben llevar sufijo `_clean.pdf` aunque ya estén en carpeta `clean`, para evitar ambigüedad al copiarlos/moverlos.
   - `/proyecto/outputs/` — entregables finales
   - `/proyecto/logs/` — registro de decisiones y reintentos
   - `/proyecto/scratchpad/` — decisiones compartidas entre pasos (naming, abreviaturas, supuestos)

@@ -33,7 +33,7 @@ PDF Image Audit & Strip — Detect and remove repeated/duplicate images and text
     python pdf_image_audit.py input.pdf
 
     # Audit + strip images + text → optimized PDF (usually smaller than original!)
-    python pdf_image_audit.py input.pdf --strip -o cleaned.pdf
+    python pdf_image_audit.py input.pdf --strip -o input_clean.pdf
 
   # Strip only images (skip text watermark removal)
   python pdf_image_audit.py input.pdf --strip --no-text
@@ -1386,7 +1386,7 @@ def main():
         epilog="""
 Examples:
   %(prog)s input.pdf                              # Audit only
-  %(prog)s input.pdf --strip -o cleaned.pdf       # Audit + strip all
+  %(prog)s input.pdf --strip -o input_clean.pdf   # Audit + strip all
   %(prog)s input.pdf --strip --no-text            # Strip images only (skip text)
   %(prog)s input.pdf --strip --text-only          # Strip text only (skip images)
   %(prog)s input.pdf --strip --categories HIGH_FREQ,TEXT_REPEAT
@@ -1423,7 +1423,7 @@ Examples:
     
     if args.strip and not args.output:
         base, ext = os.path.splitext(args.pdf)
-        args.output = f"{base}_cleaned{ext}"
+        args.output = f"{base}_clean{ext}"
     
     # Audit
     report = analyze_pdf_images(args.pdf, min_freq=args.min_freq, 
