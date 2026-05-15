@@ -1,3 +1,6 @@
+#macOS
+.DS_Store
+
 output/
 .env_landingai
 *.json.bak
