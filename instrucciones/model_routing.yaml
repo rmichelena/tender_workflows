@@ -74,6 +74,24 @@ routing:
     function_required: "auditor_revisor"
     handoff_budget: 1  # NO REVERSE EDGE
 
+  # Paso 1.5 — Índice estructural de Markdown (experimental AdP Cableado)
+  paso_1_5_indexador:
+    primary: "zai/glm-5.1"
+    fallback: "openai-codex/gpt-5.4"
+    reason: |
+      Tarea de lectura exhaustiva y reconstrucción estructural con output JSON mediano.
+      En ensayo AdP Cableado, `zai/glm-5.1` funcionó para EETT pero falló en Bases sin producir outputs;
+      `openai-codex/gpt-5.4` completó Bases correctamente. Mantener fallback explícito y validar archivos escritos.
+    function_required: "document_structural_indexing"
+    schema: "schemas/document_index.schema.json"
+    output_validation: "strict_json_schema"
+    tool_budget:
+      chunk_line_count: 200
+      overlap_line_count: 50
+      max_file_reads: 40
+      max_file_writes: 2
+      max_iterations: 1
+
   # Paso 2.1 — BOM High-Level (productor + auditor)
   # CAMBIO v0.2: eliminadas variantes paralelas. 1 productor + 1 auditor.
   paso_2_1_productor:

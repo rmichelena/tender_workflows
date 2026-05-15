@@ -108,6 +108,75 @@
 
 ---
 
+
+## Paso 1.5 — Índice estructural y sugerencias de reparación Markdown
+
+> **Nuevo en v0.3 experimental**: antes de extraer BOM, reconstruir la estructura real de cada documento Markdown mediante lectura completa con overlap. No confiar ciegamente en headings Markdown generados por extractores.
+
+**Tipo**: LLM call / workflow de indexación, una llamada por documento.
+**Owner**: Orquestador → 1 subagente por documento Markdown.
+**Prompt**: `prompts/prompt_document_indexer.md`
+**Schema**: `schemas/document_index.schema.json`
+**Modelo**: `model_routing.yaml → paso_1_5_indexador`
+
+**Inputs** (paths, NO contenido):
+- Documento Markdown fuente:
+  - si Paso 1.4 aplica: `/proyecto/artifacts/step_1_aclaradas/{stem}_aclarada_v1.md`
+  - si no hay aclaraciones: `/proyecto/artifacts/step_1_normalizados/{stem}.md`
+- Schema: `instrucciones/schemas/document_index.schema.json`
+- Prompt: `instrucciones/prompts/prompt_document_indexer.md`
+
+**Outputs** (sin subcarpetas por documento):
+- `/proyecto/artifacts/step_1_index/{stem_original}_index.json`
+- `/proyecto/artifacts/step_1_index/{stem_original}_index.md`
+
+**Método obligatorio**:
+- Leer TODO el Markdown de principio a fin.
+- Ventanas fijas de 200 líneas.
+- Overlap fijo de 50 líneas.
+- Ejemplo: `1-200`, `151-350`, `301-500`, etc.
+- La pasada NO extrae BOM, NO extrae entregables y NO reconcilia fuentes.
+- Reconstruir jerarquía usando señales combinadas: numeración, títulos, tabla de contenido, `CAPITULO`, `FORMATO`, `ANEXO`, `Cláusula`, `Partida`, continuidad temática y cambios de formato.
+
+**Reglas sobre Markdown defectuoso**:
+- El indexador puede detectar errores estructurales del Markdown, pero NO modifica el Markdown fuente.
+- Debe registrar sugerencias de bajo riesgo en `markdown_corrections_suggested`, por ejemplo:
+  - heading falso dentro de lista: `## d)` → `d)`;
+  - lista numerada/alfabética rota;
+  - heading partido;
+  - heading pegado al cuerpo;
+  - header de tabla repetido;
+  - ruido OCR de salto de línea.
+- No se permiten reescrituras semánticas, completado de contenido faltante ni “mejoras” de redacción.
+- Si una corrección no es claramente segura, `safe_auto_apply=false`.
+
+**Validación**:
+- JSON debe parsear con `json.load`.
+- Validar contra schema cuando `jsonschema` esté disponible.
+- Segundo fallo de schema tras retry = falla loud.
+
+### Paso 1.5b — Reparación Markdown opcional y reversible
+
+**Tipo**: workflow determinístico opcional.
+**Owner**: Orquestador.
+**Input**: `{stem_original}_index.json` con `markdown_corrections_suggested`.
+**Tarea**: aplicar únicamente correcciones con `safe_auto_apply=true` y `confidence=high` a una copia del Markdown, nunca al archivo fuente.
+
+**Outputs**:
+- `/proyecto/artifacts/step_1_repaired/{stem_original}_repaired.md`
+- `/proyecto/artifacts/step_1_repaired/{stem_original}_repair.patch`
+- `/proyecto/artifacts/step_1_repaired/{stem_original}_repair_log.json`
+
+**Reglas**:
+- Mantener original intacto.
+- Cambio reversible y auditable.
+- Si hay dudas, no aplicar: dejar como sugerencia para revisión humana.
+
+**Uso downstream**:
+- Paso 2 y Paso 3 deben preferir índices estructurales y rangos/section_ids para seleccionar contexto.
+- Si existe Markdown reparado y fue aprobado, usarlo como fuente textual; si no, usar el normalizado/aclarado original.
+
+---
 ## Paso 2 — Extracción de BOM (con specs en contexto) — **REDISEÑADO v0.2**
 
 > **Cambio principal v0.2**: eliminadas las 3+4 variantes paralelas. Reemplazadas por **1 productor + 1 auditor "ojos frescos"** en cada subpaso, con **scratchpad de decisiones compartido**.
@@ -405,6 +474,8 @@ proyecto/
 │   ├── step_1_pdfs_clean/                 (post optimizer; PDFs nombrados `{stem}_clean.pdf`)
 │   ├── step_1_normalizados/               (markdowns post-LandingAI)
 │   ├── step_1_aclaradas/                  (docs aclarados + auditoría)
+│   ├── step_1_index/                      (`{stem}_index.json/.md`; índice estructural + correcciones Markdown sugeridas)
+│   ├── step_1_repaired/                   (opcional; Markdown reparado, patch y log)
 │   ├── step_2_bom/                        (BOM HL y Exploded en JSON + derivados)
 │   ├── step_2_5_items/                    (1 JSON+MD por ítem)
 │   ├── step_3_specs/                      (ítems verificados + revisión)

@@ -185,6 +185,17 @@ Diez reglas no negociables, destiladas de los patrones anteriores. El orquestado
 - No hay reverse edge: si auditor encuentra problemas mayores, falla loud y escala al humano.
 - Context para auditor: documento original + diff propuesto, NO solo el documento ya mergeado.
 
+### Paso 1.5 — Índice estructural de Markdown
+**Tipo**: prompt chaining / LLM call por documento, con lectura completa secuencial.
+**Patrones**: 2.1 (chaining), 2.7 (write/select), 2.9 (schema validation), 2.10 (tool budget explícito).
+**Reglas**:
+- Leer TODO el Markdown por ventanas de 200 líneas con overlap de 50.
+- No confiar ciegamente en headings Markdown; reconstruir jerarquía real con señales combinadas.
+- No extraer BOM ni entregables en esta pasada.
+- El indexador puede sugerir correcciones Markdown estructurales de bajo riesgo, pero NO modifica el archivo fuente.
+- Outputs planos: `artifacts/step_1_index/{stem_original}_index.json/.md`.
+- JSON contra `schemas/document_index.schema.json`.
+
 ### Paso 2 — BOM HL + Exploded
 **Tipo**: prompt chaining single-shot, sin variantes.
 **Patrones**: 2.1 (chaining), 2.6 (trazas completas / scratchpad), 2.7 (write/select), 2.9 (schema validation).

@@ -21,6 +21,7 @@ instrucciones/
 ├── formato_matriz_cumplimiento.md         ← formato obligatorio de matriz por candidato
 ├── prompts/                               ← plantillas para subagentes
 │   ├── prompt_ocr_vision.md
+│   ├── prompt_document_indexer.md
 │   ├── prompt_merge_aclaraciones_ejecutor.md
 │   ├── prompt_merge_aclaraciones_auditor.md
 │   ├── prompt_bom_highlevel.md
@@ -34,6 +35,7 @@ instrucciones/
 │   ├── prompt_consolidacion_paso7.md
 │   └── prompt_QA_final.md
 └── schemas/                               ← contratos JSON (canónicos máquina)
+    ├── document_index.schema.json
     ├── bom_item.schema.json
     ├── item_specs.schema.json
     ├── candidato_cumplimiento.schema.json
@@ -45,6 +47,7 @@ instrucciones/
 | Tipo de artefacto | Formato canónico (que produce el agente) | Derivados (auto, para humano) |
 |---|---|---|
 | EETT y aclarados (paso 1) | Markdown | — |
+| Índice estructural (paso 1.5) | JSON | MD |
 | BOM (HL, exploded, búsqueda) | JSON | TSV + MD |
 | Item pack (paso 2.5) | JSON por ítem | MD por ítem |
 | Specs por ítem (paso 3) | JSON por ítem | MD por ítem |
@@ -63,8 +66,12 @@ proyecto/
 ├── inputs/                          (EETT, anexos, aclaraciones — read-only)
 ├── overlay_usuario.yaml             (preferencias capturadas en Gate 0)
 ├── artifacts/
+│   ├── step_1_pdfs/                 (PDFs preservados / DOCX→PDF)
+│   ├── step_1_pdfs_clean/           (PDFs optimizados `{stem}_clean.pdf`)
 │   ├── step_1_normalizados/         (markdowns de docs fuente)
 │   ├── step_1_aclaradas/            (docs aclarados + auditoría)
+│   ├── step_1_index/                (`{stem}_index.json/.md`; índice estructural)
+│   ├── step_1_repaired/             (opcional; Markdown reparado, patch y log)
 │   ├── step_2_bom/                  (variantes + consolidados HL y exploded, con specs en contexto)
 │   ├── step_2_5_items/              (1 JSON+MD por ítem, base estructurada)
 │   ├── step_3_specs/                (ítems verificados, con herencia resuelta + revisión)

@@ -45,6 +45,8 @@ tender_procurement/
 │   ├── documentos_muestra/
 │   └── extractor_benchmark/
 └── instrucciones/                     # Workflow y prompts del pipeline
+    ├── prompts/prompt_document_indexer.md
+    └── schemas/document_index.schema.json
 ```
 
 Convención de nombres: los PDFs optimizados del Paso 1 se guardan en `artifacts/step_1_pdfs_clean/` con sufijo explícito `_clean.pdf` (`documento_clean.pdf`). La carpeta ya indica que son limpios, pero el sufijo evita ambigüedad cuando se copian, adjuntan o procesan fuera de esa carpeta.
@@ -80,6 +82,19 @@ pip install requests PyMuPDF google-auth-oauthlib markitdown landingai-ade
 # PDF grande escaneado con DocAI (máxima calidad, lento):
 .venv/bin/python scripts/extractors/docai_batch_gcs.py documento.pdf output/
 ```
+
+## Paso 1.5 experimental: índice estructural de Markdown
+
+Tras convertir documentos a Markdown, el workflow puede ejecutar una pasada de indexación estructural antes de extraer BOM:
+
+- lee TODO el Markdown por ventanas de 200 líneas con overlap de 50;
+- reconstruye secciones reales sin confiar ciegamente en headings Markdown;
+- genera `artifacts/step_1_index/{stem_original}_index.json` y `.md`;
+- usa `instrucciones/schemas/document_index.schema.json`;
+- usa `instrucciones/prompts/prompt_document_indexer.md`;
+- registra `markdown_corrections_suggested` para reparaciones estructurales de bajo riesgo, pero no modifica el Markdown fuente.
+
+La reparación Markdown, si se aplica, debe ser opcional, reversible y sobre una copia (`step_1_repaired/`), no sobre el archivo normalizado original.
 
 ## Extractores
 

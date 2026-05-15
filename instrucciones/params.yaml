@@ -17,6 +17,9 @@ version: 0.2
 # ---------------------------------------------------------------
 
 batching:
+  # Paso 1.5 Índice estructural: lectura secuencial con overlap fijo.
+  document_index_chunk_lines: 200
+  document_index_overlap_lines: 50
   # Paso 2.3 BOM Exploded: si HL tiene >20 items, productor procesa por grupo.
   bom_exploded_partial_threshold_items: 20
   # Paso 3.1 Specs: procesar en batches de 5 items con context selectivo.
@@ -40,6 +43,7 @@ limits:
 
 timeouts:
   default: 300                 # 5 min — pasos estándar (OCR, merge, BOM, specs, QA).
+  document_indexer: 1800       # 30 min — Paso 1.5 lectura completa por documento con overlap.
   bom_productor: 600           # 10 min — paso 2.1 y 2.3 (BOM HL y Exploded).
   bom_auditor: 300             # 5 min — paso 2.2 y 2.4.
   specs_batch: 300             # 5 min por batch de 5 items (paso 3.1).

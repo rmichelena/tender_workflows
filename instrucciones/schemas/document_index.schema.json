@@ -1,0 +1,488 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "document_index.schema.json",
+  "title": "Tender Document Structural Index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "doc_id",
+    "source_md_path",
+    "index_method",
+    "document_stats",
+    "sections",
+    "tables_or_forms",
+    "structural_warnings",
+    "markdown_corrections_suggested",
+    "schema_feedback"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.2"
+    },
+    "doc_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_md_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "index_method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chunk_line_count",
+        "overlap_line_count",
+        "read_order",
+        "notes"
+      ],
+      "properties": {
+        "chunk_line_count": {
+          "type": "integer",
+          "const": 200
+        },
+        "overlap_line_count": {
+          "type": "integer",
+          "const": 50
+        },
+        "read_order": {
+          "type": "string",
+          "const": "sequential_overlapping_line_windows"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "document_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_lines",
+        "total_chars"
+      ],
+      "properties": {
+        "total_lines": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "total_chars": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/section"
+      }
+    },
+    "tables_or_forms": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/table_or_form"
+      }
+    },
+    "structural_warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/warning"
+      }
+    },
+    "schema_feedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sufficient",
+        "insufficient_fields",
+        "excessive_fields",
+        "suggested_changes",
+        "notes"
+      ],
+      "properties": {
+        "sufficient": {
+          "type": "boolean"
+        },
+        "insufficient_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "excessive_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "suggested_changes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "markdown_corrections_suggested": {
+      "type": "array",
+      "description": "Low-risk, suggested Markdown structural corrections detected while indexing. The indexer must not modify the source markdown; a later deterministic repair step may apply safe_auto_apply=true corrections to a separate repaired file.",
+      "items": {
+        "$ref": "#/$defs/markdown_correction"
+      }
+    }
+  },
+  "$defs": {
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "section_id",
+        "parent_section_id",
+        "level",
+        "section_kind",
+        "title",
+        "heading_text_raw",
+        "numbering",
+        "line_start",
+        "line_end",
+        "evidence_lines",
+        "confidence",
+        "inferred_without_heading",
+        "markdown_heading_level_observed",
+        "category_hint",
+        "predominant_content",
+        "summary",
+        "notes"
+      ],
+      "properties": {
+        "section_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "parent_section_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "section_kind": {
+          "type": "string",
+          "enum": [
+            "chapter",
+            "section",
+            "subsection",
+            "clause",
+            "format",
+            "annex",
+            "partida",
+            "toc_entry",
+            "title_page",
+            "table_region",
+            "other",
+            "unknown",
+            "graphic",
+            "exclusion_region"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "heading_text_raw": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Raw heading line/text as observed in markdown, or null when inferred."
+        },
+        "numbering": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line_start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "line_end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "evidence_lines": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 1
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "inferred_without_heading": {
+          "type": "boolean"
+        },
+        "markdown_heading_level_observed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 6
+        },
+        "category_hint": {
+          "type": "string",
+          "enum": [
+            "administrativo",
+            "contractual",
+            "tecnico",
+            "bom_cantidades",
+            "servicios_alcance",
+            "entregables_documentales",
+            "formato_anexo",
+            "legal_compliance",
+            "indice_toc",
+            "otro",
+            "unknown"
+          ]
+        },
+        "predominant_content": {
+          "type": "string",
+          "enum": [
+            "text",
+            "table",
+            "form",
+            "checklist",
+            "budget",
+            "graphic_ocr",
+            "mixed",
+            "unknown"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "table_or_form": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "line_start",
+        "line_end",
+        "section_id",
+        "category_hint",
+        "summary",
+        "confidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "table",
+            "form",
+            "checklist",
+            "budget",
+            "toc",
+            "other"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "line_start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "line_end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "section_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "category_hint": {
+          "type": "string",
+          "enum": [
+            "administrativo",
+            "contractual",
+            "tecnico",
+            "bom_cantidades",
+            "servicios_alcance",
+            "entregables_documentales",
+            "formato_anexo",
+            "legal_compliance",
+            "indice_toc",
+            "otro",
+            "unknown"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        }
+      }
+    },
+    "warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "line_start",
+        "line_end",
+        "section_id",
+        "type",
+        "description",
+        "severity"
+      ],
+      "properties": {
+        "line_start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "line_end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "section_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "extractor_heading_error",
+            "broken_table",
+            "unclear_hierarchy",
+            "duplicated_content",
+            "possible_missing_text",
+            "mixed_section",
+            "graphic_or_ocr_block",
+            "other"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    "markdown_correction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "correction_id",
+        "line_start",
+        "line_end",
+        "section_id",
+        "type",
+        "original_excerpt",
+        "suggested_replacement",
+        "reason",
+        "confidence",
+        "safe_auto_apply",
+        "risk_notes"
+      ],
+      "properties": {
+        "correction_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "line_start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "line_end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "section_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "false_heading_in_list",
+            "broken_numbered_list",
+            "split_heading",
+            "merged_heading_and_body",
+            "table_header_repeated",
+            "ocr_line_break_noise",
+            "other"
+          ]
+        },
+        "original_excerpt": {
+          "type": "string"
+        },
+        "suggested_replacement": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "safe_auto_apply": {
+          "type": "boolean"
+        },
+        "risk_notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
