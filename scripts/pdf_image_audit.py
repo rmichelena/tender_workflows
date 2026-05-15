@@ -123,24 +123,24 @@ def _detect_text_watermarks(doc, header_zone=0.12, footer_zone=0.88,
                            threshold=0.3, min_pages=5):
     """
     Detect text that repeats on many pages in non-content zones.
-    
+
     Zones (any text OUTSIDE these is "content" and ignored):
     - header: top N% of page (y < header_zone * page_height)
     - footer: bottom N% of page (y > footer_zone * page_height)
     - left_margin: left edge (x < left_margin * page_width)
     - right_margin: right edge (x > right_margin * page_width)
-    
+
     The key criterion is SPATIAL REPETITION: same normalized text at the
     same zone on ≥threshold pages = decorative/watermark, regardless of
     whether it's horizontal, rotated, or any other orientation.
-    
+
     Returns list of candidate dicts for removal_candidates.
     """
     total_pages = len(doc)
-    
+
     # Collect lines in non-content zones across ALL pages
     zone_lines = []  # [(page, zone, y, text, norm_text)]
-    
+
     for i in range(total_pages):
         page = doc[i]
         ph = page.rect.height
@@ -149,7 +149,7 @@ def _detect_text_watermarks(doc, header_zone=0.12, footer_zone=0.88,
             blocks = page.get_text("dict")["blocks"]
         except:
             continue
-        
+
         for block in blocks:
             if block["type"] != 0:
                 continue
@@ -160,7 +160,7 @@ def _detect_text_watermarks(doc, header_zone=0.12, footer_zone=0.88,
                 y = line["bbox"][1]
                 x = line["bbox"][0]  # left edge of line
                 norm = _normalize_for_clustering(text)
-                
+
                 # Classify zone: header > footer > margins > content
                 if y < ph * header_zone:
                     zone = "header"
@@ -172,37 +172,37 @@ def _detect_text_watermarks(doc, header_zone=0.12, footer_zone=0.88,
                     zone = "right_margin"
                 else:
                     continue  # content zone — skip
-                
+
                 zone_lines.append((i + 1, zone, y, text, norm))
-    
+
     if not zone_lines:
         return []
-    
+
     # Group by (zone, normalized_text) — this clusters "Página 1 de 106" with
     # "Página 50 de 106" because both normalize to "Página N de N"
     norm_groups = defaultdict(list)
     for pg, zone, y, text, norm in zone_lines:
         norm_groups[(zone, norm)].append((pg, y, text))
-    
+
     # Find groups meeting threshold
     candidates = []
-    
+
     zone_labels = {
         "header": "Header", "footer": "Footer",
         "left_margin": "Left margin", "right_margin": "Right margin"
     }
-    
+
     for (zone, norm), entries in norm_groups.items():
         pages = sorted(set(pg for pg, _, _ in entries))
         page_count = len(pages)
         freq = page_count / total_pages
-        
+
         if page_count < min_pages or freq < threshold:
             continue
-        
+
         # Classify
         sample_texts = [text for _, _, text in entries[:3]]
-        
+
         # Check if it's a page number pattern
         if re.search(r'P[aá]gina|p[aá]gina|Page|page', norm) and re.search(r'N.*de.*N|N.*of.*N|N/N', norm):
             category = "PAGE_NUMBER"
@@ -211,7 +211,7 @@ def _detect_text_watermarks(doc, header_zone=0.12, footer_zone=0.88,
             category = "TEXT_REPEAT"
             zl = zone_labels.get(zone, zone.title())
             label = f'{zl} text: "{sample_texts[0][:50]}" on {page_count}/{total_pages} pages'
-        
+
         candidates.append({
             "text": norm,
             "samples": sample_texts,
@@ -224,7 +224,7 @@ def _detect_text_watermarks(doc, header_zone=0.12, footer_zone=0.88,
             "xrefs": [],
             "width": 0, "height": 0,
         })
-    
+
     # Sort by page_count descending
     candidates.sort(key=lambda x: -x["page_count"])
     return candidates
@@ -235,36 +235,36 @@ def _detect_text_watermarks(doc, header_zone=0.12, footer_zone=0.88,
 def _detect_drawing_watermarks(doc, threshold=0.5, min_pages=10, quantize=1.0):
     """
     Detect vector drawings that repeat at the same position on many pages.
-    
+
     These are typically decorative borders, divider lines, or frames that
     are part of the page template (e.g., a vertical line in the right margin,
     a box around page numbers).
-    
+
     Drawings at the same quantized rect position on ≥threshold pages are
     flagged for removal.
-    
+
     Returns list of candidate dicts for removal_candidates.
     """
     total_pages = len(doc)
     if total_pages < min_pages:
         return []
-    
+
     # Collect all drawings across all pages
     # Key: (quantized_rect, fill_color, item_types) → [page_indices]
     from collections import defaultdict
     drawing_groups = defaultdict(list)  # key → [(page_idx, rect)]
-    
+
     for i in range(total_pages):
         page = doc[i]
         try:
             drawings = page.get_drawings()
         except Exception:
             continue
-        
+
         # Safety: skip pages with excessive drawings (e.g., CAD/blueprint pages)
         if len(drawings) > 500:
             continue
-        
+
         for d in drawings:
             r = d.get("rect")
             if not r:
@@ -280,7 +280,7 @@ def _detect_drawing_watermarks(doc, threshold=0.5, min_pages=10, quantize=1.0):
             color = d.get("color")
             key = (q, fill, color, item_sig)
             drawing_groups[key].append((i, pymupdf.Rect(r)))
-    
+
     # ── Sibling key fusion ──────────────────────────────────────────────
     # Elements that alternate position (e.g., odd/even pages) end up in
     # separate keys that never individually reach the threshold.
@@ -293,7 +293,7 @@ def _detect_drawing_watermarks(doc, threshold=0.5, min_pages=10, quantize=1.0):
     MERGE_TOLERANCE = 2.0  # pt
     keys = list(drawing_groups.keys())
     merged = set()       # keys already absorbed into another
-    
+
     # Safety: skip fusion entirely if too many unique keys (e.g., CAD/blueprint pages)
     # O(n²) fusion with 135K keys would take hours; 5K keys ≈ 25M comparisons is ~2s
     MAX_FUSION_KEYS = 5000
@@ -360,16 +360,16 @@ def _detect_drawing_watermarks(doc, threshold=0.5, min_pages=10, quantize=1.0):
         page_set = set(p[0] for p in occurrences)
         page_count = len(page_set)
         freq = page_count / total_pages
-        
+
         if freq >= threshold and page_count >= min_pages:
             q_rect, fill, color, item_sig = key
             w = q_rect[2] - q_rect[0]
             h = q_rect[3] - q_rect[1]
-            
+
             # Build description
             item_names = {"re": "rectangle", "l": "line", "c": "curve", "qu": "quadratic"}
             item_desc = ", ".join(item_names.get(it, it) for it in item_sig)
-            
+
             if w < 2 and h < 2:
                 size_desc = f"point at ({q_rect[0]:.0f},{q_rect[1]:.0f})"
             elif w < 2:
@@ -378,7 +378,7 @@ def _detect_drawing_watermarks(doc, threshold=0.5, min_pages=10, quantize=1.0):
                 size_desc = f"horizontal line ({w:.0f}pt) at y={q_rect[1]:.0f}"
             else:
                 size_desc = f"rectangle ({w:.0f}x{h:.0f}pt) at ({q_rect[0]:.0f},{q_rect[1]:.0f})"
-            
+
             candidates.append({
                 "category": "DRAWING_REPEAT",
                 "quantized_rect": q_rect,
@@ -391,8 +391,128 @@ def _detect_drawing_watermarks(doc, threshold=0.5, min_pages=10, quantize=1.0):
                 "occurrences": [(p, (r.x0, r.y0, r.x1, r.y1)) for p, r in occurrences],
                 "label": f"{item_desc} {size_desc} on {page_count}/{total_pages} pages"
             })
-    
+
     return candidates
+
+
+# ─── Page content analysis (for plan/diagram detection) ──────────────────────
+
+def analyze_page_contents(pdf_path):
+    """
+    Analyze every page of a PDF and return per-page content metrics:
+    dimensions, text density, image count, vector drawing count/area.
+
+    This is used by the clean step to produce a {stem}_page_analysis.json
+    that downstream plan detection (Paso 1.2b) can consume directly,
+    avoiding a separate pass.
+
+    Returns dict: {"pages": [...], "summary": {...}}
+    """
+    doc = pymupdf.open(pdf_path)
+    pages = []
+    for i in range(len(doc)):
+        page = doc[i]
+        r = page.rect
+        w, h = float(r.width), float(r.height)
+        area = w * h
+
+        # Text metrics
+        text = page.get_text("text")
+        text_chars = len(text)
+        blocks = page.get_text("dict")["blocks"]
+        text_blocks = sum(1 for b in blocks if b["type"] == 0)
+        image_blocks = sum(1 for b in blocks if b["type"] == 1)
+
+        # Image metrics
+        images = page.get_images(full=True)
+        image_count = len(images)
+
+        # Vector drawing metrics
+        drawings = page.get_drawings()
+        drawing_count = len(drawings)
+        drawing_area = sum(
+            (d["rect"].width * d["rect"].height)
+            for d in drawings if d.get("rect")
+        )
+        drawing_area_ratio = round(drawing_area / area, 4) if area > 0 else 0.0
+
+        # Text density
+        text_density = round(text_chars / area, 6) if area > 0 else 0.0
+
+        # Image area coverage (approximate)
+        image_area = 0.0
+        for b in blocks:
+            if b["type"] == 1:  # image block
+                bbox = b.get("bbox", (0, 0, 0, 0))
+                image_area += (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+        image_area_ratio = round(image_area / area, 4) if area > 0 else 0.0
+
+        # Determine content_dominant
+        content_dominant = "text"
+        if drawing_count > 1000 or drawing_area_ratio > 0.3:
+            content_dominant = "vector_drawing"
+        elif image_area_ratio > 0.4 or (image_count > 3 and image_area_ratio > 0.25):
+            content_dominant = "image_heavy"
+        elif drawing_count > 100 and image_count > 2 and text_density < 0.005:
+            content_dominant = "mixed"
+
+        # Plan candidate signals
+        signals = []
+        if drawing_count > 1000:
+            signals.append("high_drawing_count")
+        if drawing_area_ratio > 0.3:
+            signals.append("high_drawing_ratio")
+        if image_area_ratio > 0.4:
+            signals.append("image_heavy")
+        if text_density < 0.002 and area > 100000:
+            signals.append("very_low_text_density")
+        if drawing_count > 5000 and image_count <= 2 and text_density < 0.005:
+            signals.append("autocad_like")
+        if image_count > 5 and text_density < 0.002:
+            signals.append("many_images_low_text")
+
+        pages.append({
+            "page": i + 1,
+            "width_pt": round(w, 2),
+            "height_pt": round(h, 2),
+            "area_pt2": round(area, 2),
+            "orientation": "landscape" if w > h else "portrait",
+            "text_char_count": text_chars,
+            "text_block_count": text_blocks,
+            "image_count": image_count,
+            "image_block_count": image_blocks,
+            "image_area_ratio": image_area_ratio,
+            "drawing_count": drawing_count,
+            "drawing_area_ratio": drawing_area_ratio,
+            "text_density_chars_per_pt2": text_density,
+            "content_dominant": content_dominant,
+            "plan_candidate_signals": signals,
+        })
+
+    # Post-process: add size-based signals against median
+    import statistics
+    if pages:
+        areas = [p["area_pt2"] for p in pages]
+        median_area = statistics.median(areas)
+        for p in pages:
+            ratio = p["area_pt2"] / median_area if median_area > 0 else 1.0
+            if ratio >= 1.4:
+                p["area_ratio_vs_median"] = round(ratio, 3)
+                p["plan_candidate_signals"].append("large_page")
+            # Refresh content_dominant with size context
+            if "large_page" in p["plan_candidate_signals"]:
+                if p["content_dominant"] == "text" and p["text_density_chars_per_pt2"] < 0.01:
+                    p["content_dominant"] = "low_density_large_page"
+
+    summary = {
+        "source_pdf": pdf_path,
+        "page_count": len(pages),
+        "median_area_pt2": round(statistics.median([p["area_pt2"] for p in pages]), 2) if pages else 0,
+        "pages_with_signals": sum(1 for p in pages if p["plan_candidate_signals"]),
+        "signal_types": sorted(set(s for p in pages for s in p["plan_candidate_signals"])),
+    }
+
+    return {"pages": pages, "summary": summary}
 
 
 def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
@@ -401,27 +521,27 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                        left_margin=0.08, right_margin=0.90):
     """
     Scan a PDF and classify images AND text by duplication/repetition patterns.
-    
+
     Args:
         min_freq: Min page count for HIGH_FREQ image category (default 5)
         tiny_max_px: Max dimension for TINY image category (default 20)
         text_threshold: Min % of pages for TEXT_REPEAT/PAGE_NUMBER (default 0.5 = 50%)
         text_min_pages: Min absolute page count for text candidates (default 10)
-    
+
     Returns dict with: summary, removal_candidates (images + text), content_images
     """
     doc = pymupdf.open(pdf_path)
     file_size = os.path.getsize(pdf_path)
-    
+
     xref_hashes = {}
     xref_sizes = {}
     xref_pages = defaultdict(set)
     hash_to_xrefs = defaultdict(list)
     xref_phashes = {}       # perceptual hash for visual dedup
-    
+
     for i in range(len(doc)):
         page = doc[i]
-        
+
         for img in page.get_images(full=True):
             xref = img[0]
             xref_pages[xref].add(i + 1)
@@ -433,7 +553,7 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                     xref_hashes[xref] = h
                     xref_sizes[xref] = (pix.width, pix.height)
                     hash_to_xrefs[h].append(xref)
-                    
+
                     # Compute perceptual hash (catches recompressed/re-encoded duplicates)
                     try:
                         from PIL import Image
@@ -442,19 +562,19 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                         xref_phashes[xref] = imagehash.phash(pil_img, hash_size=16)
                     except Exception:
                         xref_phashes[xref] = None
-                    
+
                     pix = None
                 except Exception as e:
                     xref_hashes[xref] = f"ERROR:{e}"
                     xref_sizes[xref] = (0, 0)
-    
+
     total_img_refs = sum(len(p) for p in xref_pages.values())
     unique_hashes = len(set(xref_hashes.values()) - {h for h in xref_hashes.values() if str(h).startswith("ERROR")})
-    
+
     removal_candidates = []
     dedup_map = {}
     flagged_xrefs = set()
-    
+
     # 1. HIGH_FREQ: Same xref referenced from many pages
     for xr, pages in xref_pages.items():
         if len(pages) >= min_freq:
@@ -469,7 +589,7 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                 "label": _label_for_size(w, h, len(pages))
             })
             flagged_xrefs.add(xr)
-    
+
     # 2. DUPLICATE: Same pixel content, different xrefs
     for h, xrefs in hash_to_xrefs.items():
         if len(xrefs) > 1 and not str(h).startswith("ERROR"):
@@ -477,7 +597,7 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
             for xr in xrefs:
                 if xr != keep:
                     dedup_map[xr] = keep
-            
+
             if not any(xr in flagged_xrefs for xr in xrefs):
                 w, ht = xref_sizes.get(keep, (0, 0))
                 all_pages = set()
@@ -495,19 +615,19 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                     "drop_xrefs": [x for x in xrefs if x != keep]
                 })
                 flagged_xrefs.update(xrefs)
-    
+
     # 2b. PERCEPTUAL_DUP: Visually identical images with different SHA256
     #     (e.g., same logo recompressed as JPEG on some pages, PNG on others)
-    #     Uses perceptual hashing (pHash) — tolerant to recompression, 
+    #     Uses perceptual hashing (pHash) — tolerant to recompression,
     #     minor resize, gamma changes. Hamming distance ≤8 = visually identical.
-    #     
+    #
     #     IMPORTANT: Only flags images where BOTH dimensions are ≤ max_side
     #     (default 300px). Large images are almost always content (photos,
     #     drawings, diagrams), never logos/stamps/signatures.
     try:
         from PIL import Image
         import imagehash
-        
+
         # Group unflagged xrefs by perceptual hash (skip large images)
         phash_groups = defaultdict(list)
         for xr in xref_pages:
@@ -520,12 +640,12 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
             ph = xref_phashes.get(xr)
             if ph is not None:
                 phash_groups[str(ph)].append(xr)
-        
+
         # Check each group: if ≥2 xrefs look identical visually
         for ph_str, xrefs in phash_groups.items():
             if len(xrefs) < 2:
                 continue
-            
+
             # Cross-check: merge groups with Hamming distance ≤ threshold
             # (pHash with hash_size=16 produces 256-bit hash, threshold 12 ≈ 95% similar)
             merged = set(xrefs)
@@ -538,20 +658,20 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                         merged.update(other_xrefs)
                 except Exception:
                     pass
-            
+
             merged = [xr for xr in merged if xr not in flagged_xrefs]
             if len(merged) < 2:
                 continue
-            
+
             w, ht = xref_sizes.get(merged[0], (0, 0))
             all_pages = set()
             for xr in merged:
                 all_pages.update(xref_pages.get(xr, set()))
-            
+
             # Keep the xref used on most pages, flag the rest
             keep = max(merged, key=lambda x: len(xref_pages[x]))
             drops = [x for x in merged if x != keep]
-            
+
             removal_candidates.append({
                 "xrefs": merged,
                 "hash": f"phash:{ph_str[:16]}",
@@ -566,7 +686,7 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
             flagged_xrefs.update(drops)
     except ImportError:
         pass  # imagehash not available, skip perceptual dedup
-    
+
     # 3. TINY: Images below pixel threshold
     for xr in xref_pages:
         w, h = xref_sizes.get(xr, (0, 0))
@@ -581,7 +701,7 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                 "label": f"Decoration ({w}x{h}px)"
             })
             flagged_xrefs.add(xr)
-    
+
     # 4. SIGNATURE/STAMP: Same image on ≥2 pages but < min_freq
     #    These are signatures, stamps, or backgrounds that repeat but not
     #    enough to trigger HIGH_FREQ. Position and size don't matter —
@@ -596,7 +716,7 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
         if c["category"] == "HIGH_FREQ":
             high_freq_hashes.add(c.get("hash"))
             high_freq_by_hash[c.get("hash")] = c
-    
+
     for xr, pages in xref_pages.items():
         if xr in flagged_xrefs:
             continue
@@ -637,7 +757,7 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                     "label": f"Signature/stamp/bg ({w}x{ht}px, same image on {len(all_pages)} pages)"
                 })
                 flagged_xrefs.update(unflagged)
-    
+
     # 5. DIGITAL_SIG: PDF digital signature widgets (appearance streams)
     #    These are Form XObjects attached to Widget annotations, not regular images.
     #    They show as "Firmado Digitalmente por: ..." blocks.
@@ -661,21 +781,21 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                 })
     if digital_sigs:
         removal_candidates.extend(digital_sigs)
-    
+
     # 6. TEXT_REPEAT + PAGE_NUMBER: Text watermarks and headers
     text_candidates = _detect_text_watermarks(doc, header_zone=header_zone,
                                                footer_zone=footer_zone,
                                                left_margin=left_margin,
                                                right_margin=right_margin,
-                                               threshold=text_threshold, 
+                                               threshold=text_threshold,
                                                min_pages=text_min_pages)
     removal_candidates.extend(text_candidates)
-    
+
     # 7. DRAWING_REPEAT: Vector drawings (rectangles, lines) at same position on many pages
     drawing_candidates = _detect_drawing_watermarks(doc, threshold=text_threshold,
                                                      min_pages=text_min_pages)
     removal_candidates.extend(drawing_candidates)
-    
+
     # Content images (NOT flagged)
     content_images = []
     for xr in xref_pages:
@@ -687,16 +807,16 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
                 "width": w, "height": h,
                 "pages": sorted(xref_pages[xr])
             })
-    
+
     cat_counts = defaultdict(int)
     for c in removal_candidates:
         if c["category"] in ("TEXT_REPEAT", "PAGE_NUMBER", "DRAWING_REPEAT"):
             cat_counts[c["category"]] += 1
         else:
             cat_counts[c["category"]] += len(c["xrefs"])
-    
+
     text_flagged = len([c for c in removal_candidates if c["category"] in ("TEXT_REPEAT", "PAGE_NUMBER")])
-    
+
     summary = {
         "file": os.path.basename(pdf_path),
         "file_size_bytes": file_size,
@@ -716,14 +836,15 @@ def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,
             "right_margin": right_margin
         }
     }
-    
+
     doc.close()
-    
+
     return {
         "summary": summary,
         "removal_candidates": removal_candidates,
         "dedup_map": {str(k): v for k, v in dedup_map.items()},
-        "content_images": content_images
+        "content_images": content_images,
+        "page_analysis": analyze_page_contents(pdf_path) if 'analyze_page_contents' in globals() else None,
     }
 
 
@@ -741,33 +862,33 @@ def _label_for_size(w, h, page_count):
 def _strip_images_content_stream(doc, report, categories):
     """
     Remove flagged images by editing page content streams.
-    
+
     For each page, resolves which resource names point to flagged xrefs
     ON THAT PAGE using page.get_images(full=True), then removes only
     those /Name Do operators from the content stream.
-    
+
     This is page-aware: the same resource name (e.g. "Xop1") may point
     to a flagged xref on one page but a content image on another.
-    
+
     Returns: (modified_pages, operators_removed)
     """
     xrefs_to_strip = set()
     for c in report["removal_candidates"]:
         if c["category"] in categories and c["category"] not in ("TEXT_REPEAT", "PAGE_NUMBER", "DRAWING_REPEAT"):
             xrefs_to_strip.update(c["xrefs"])
-    
+
     if not xrefs_to_strip:
         return 0, 0
-    
+
     modified_pages = 0
     operators_removed = 0
-    
+
     for page in doc:
         try:
             contents = page.get_contents()
             if not contents:
                 continue
-            
+
             # Build name→xref mapping for THIS page using PyMuPDF structured API
             # (fixes H5: no regex on resource dictionaries — handles nested dicts correctly)
             page_name_to_xref = {}
@@ -780,16 +901,16 @@ def _strip_images_content_stream(doc, report, categories):
                         page_name_to_xref[img_name] = img_xref
             except Exception:
                 continue
-            
+
             # Which names on THIS page point to flagged xrefs?
             names_to_remove = set()
             for name, xref in page_name_to_xref.items():
                 if xref in xrefs_to_strip:
                     names_to_remove.add(name)
-            
+
             if not names_to_remove:
                 continue
-            
+
             # Remove /Name Do operators from content streams AND nested Form XObjects.
             # Images may be nested inside Form XObjects (e.g. NxFm5 → /NxImage Do),
             # so we must recurse into Form XObject streams too.
@@ -814,55 +935,55 @@ def _strip_images_content_stream(doc, report, categories):
                     stream = doc.xref_stream(c_xref)
                     if not stream:
                         continue
-                    
+
                     new_stream = stream
                     for name in names_to_remove:
                         pattern = re.compile(
                             rb'/\s*' + re.escape(name.encode('latin-1')) + rb'\s+Do\b'
                         )
                         new_stream = pattern.sub(b'', new_stream)
-                    
+
                     if new_stream != stream:
                         doc.update_stream(c_xref, new_stream)
                         page_modified = True
                         operators_removed += 1
                 except Exception:
                     continue
-            
+
             if page_modified:
                 modified_pages += 1
         except Exception:
             continue
-    
+
     return modified_pages, operators_removed
 
 
 def _strip_text_redaction(doc, report, categories):
     """
     Remove flagged text watermarks/headers using redaction annotations.
-    
+
     Uses normalized text patterns to find matching spans on each page,
     then redacts them WITHOUT fill (transparent) — just removes the text
     operators from the content stream, no white rectangles inserted.
-    
+
     Zone thresholds are read from report["summary"]["zones"] (set during
     analysis) so strip uses the same zones as detection.
-    
+
     Returns: (modified_pages, spans_redacted)
     """
     text_candidates = [c for c in report["removal_candidates"]
                        if c["category"] in categories and c["category"] in ("TEXT_REPEAT", "PAGE_NUMBER")]
-    
+
     if not text_candidates:
         return 0, 0
-    
+
     # Read zone thresholds from report (M1: consistent with detection)
     zones = report.get("summary", {}).get("zones", {})
     header_zone = zones.get("header_zone", 0.12)
     footer_zone = zones.get("footer_zone", 0.88)
     left_margin = zones.get("left_margin", 0.08)
     right_margin = zones.get("right_margin", 0.90)
-    
+
     # Build set of normalized patterns to redact
     patterns_to_redact = []
     for c in text_candidates:
@@ -877,19 +998,19 @@ def _strip_text_redaction(doc, report, categories):
             sig_words = set(w for w in norm.split() if len(w) > 2 and w != "N")
             zone = c.get("zone")  # "header" or "footer"
             patterns_to_redact.append(("TEXT_REPEAT", norm, sig_words, zone))
-    
+
     modified_pages = 0
     spans_redacted = 0
-    
+
     for page_idx in range(len(doc)):
         page = doc[page_idx]
         try:
             blocks = page.get_text("dict")["blocks"]
         except:
             continue
-        
+
         rects_to_redact = []
-        
+
         for block in blocks:
             if block["type"] != 0:
                 continue
@@ -897,10 +1018,10 @@ def _strip_text_redaction(doc, report, categories):
                 line_text = "".join(span["text"] for span in line["spans"]).strip()
                 if not line_text:
                     continue
-                
+
                 should_redact = False
                 line_norm = _normalize_for_clustering(line_text)
-                
+
                 for ptype, pattern, sig_words, pattern_zone in patterns_to_redact:
                     if ptype == "PAGE_NUMBER":
                         if _PAGE_NUMBER_RE.match(line_text):
@@ -947,44 +1068,44 @@ def _strip_text_redaction(doc, report, categories):
                                     continue  # Skip: different zone
                             should_redact = True
                             break
-                
+
                 if should_redact:
                     # Redact the entire line bbox
                     bbox = pymupdf.Rect(line["bbox"])
                     rects_to_redact.append(bbox)
                     spans_redacted += 1
-        
+
         if rects_to_redact:
             for r in rects_to_redact:
                 page.add_redact_annot(r, fill=None)
             page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE)
             modified_pages += 1
-    
+
     return modified_pages, spans_redacted
 
 
 def _strip_digital_signatures(doc, report):
     """
     Remove digital signature widgets by deleting them from the page's /Annots
-    array and the document's /AcroForm/Fields. Also nulls out the signature 
+    array and the document's /AcroForm/Fields. Also nulls out the signature
     value objects to reclaim space.
-    
+
     This does NOT use redaction (white rectangles) — it removes the annotation
     objects entirely, preserving any page content that was under the signature.
-    
+
     Returns: number of signatures removed
     """
     sig_candidates = [c for c in report.get("removal_candidates", [])
                       if c["category"] == "DIGITAL_SIG"]
     if not sig_candidates:
         return 0
-    
+
     import re as _re
-    
+
     # Collect widget xrefs and their value/appearance xrefs
     sig_widget_xrefs = set()
     sig_value_xrefs = set()
-    
+
     for page_idx in set(c["page_idx"] for c in sig_candidates):
         page = doc[page_idx]
         for w in (page.widgets() or []):
@@ -994,9 +1115,9 @@ def _strip_digital_signatures(doc, report):
                 v = doc.xref_get_key(w.xref, "V")
                 if v[0] == 'xref':
                     sig_value_xrefs.add(int(_re.search(r'(\d+)\s+\d+\s+R', v[1]).group(1)))
-    
+
     count = len(sig_widget_xrefs)
-    
+
     # 1. Remove widgets from page /Annots arrays
     for page_idx in set(c["page_idx"] for c in sig_candidates):
         page = doc[page_idx]
@@ -1005,16 +1126,16 @@ def _strip_digital_signatures(doc, report):
             arr = [int(x) for x in _re.findall(r'(\d+)\s+\d+\s+R', annots_key[1])]
             remaining = [x for x in arr if x not in sig_widget_xrefs]
             doc.xref_set_key(page.xref, "Annots",
-                            "null" if not remaining else 
+                            "null" if not remaining else
                             "[" + " ".join(f"{x} 0 R" for x in remaining) + "]")
-    
+
     # 2. Remove from /AcroForm/Fields in document catalog
     catalog_xref = doc.pdf_catalog()
     af_key = doc.xref_get_key(catalog_xref, "AcroForm")
     if af_key[0] == 'dict':
         new_af = _re.sub(r'/Fields\s*\[[^\]]*\]', '/Fields[]', af_key[1])
         doc.xref_set_key(catalog_xref, "AcroForm", new_af)
-    
+
     # 3. Null out widget objects (AP, V, etc.)
     for xref in sig_widget_xrefs:
         try:
@@ -1022,7 +1143,7 @@ def _strip_digital_signatures(doc, report):
             doc.xref_set_key(xref, "V", "null")
         except Exception:
             pass
-    
+
     # 4. Shrink signature value objects (empty Contents, minimal ByteRange)
     for xref in sig_value_xrefs:
         try:
@@ -1030,31 +1151,31 @@ def _strip_digital_signatures(doc, report):
             doc.xref_set_key(xref, "ByteRange", "[0 0 0 0]")
         except Exception:
             pass
-    
+
     return count
 
 
 def _strip_recurring_drawings(doc, report):
     """
     Remove vector drawings that repeat at the same position on many pages.
-    
+
     Uses content stream surgery: replaces the drawing operators (re, l, m, etc.)
     within the flagged rect area with whitespace/nothing.
-    
+
     Returns: (modified_pages, drawings_removed)
     """
     candidates = [c for c in report.get("removal_candidates", [])
                   if c["category"] == "DRAWING_REPEAT"]
     if not candidates:
         return 0, 0
-    
+
     # ── Safety filter: skip drawings that cover too much of the page ──
     # Redaction removes ALL content in the rect area — using it on a large
     # frame would wipe out text.  Only remove small decorations (margins,
     # headers, footers, circles, separator lines).  Large frames are still
     # reported as detected but not stripped.
     MAX_AREA_RATIO = 0.30  # skip if drawing covers >30% of page area
-    
+
     # Build a lookup: page_idx → list of rects to remove
     page_removals = defaultdict(list)
     skipped = []
@@ -1066,7 +1187,7 @@ def _strip_recurring_drawings(doc, report):
             draw_area = dw * dh
         else:
             draw_area = 0
-        
+
         for page_idx, rect in c.get("occurrences", []):
             if draw_area > 0:
                 page = doc[page_idx]
@@ -1076,45 +1197,45 @@ def _strip_recurring_drawings(doc, report):
                         skipped.append(c)
                     continue
             page_removals[page_idx].append(pymupdf.Rect(rect))
-    
+
     modified_pages = 0
     drawings_removed = 0
-    
+
     for page_idx, rects in page_removals.items():
         page = doc[page_idx]
-        
+
         # Redact drawing areas with white fill to cover vector drawings.
         # fill=None does NOT affect vector drawings (only text spans).
         # True removal requires content-stream surgery (pikepdf roadmap).
         for r in rects:
             page.add_redact_annot(r, fill=(1, 1, 1))
-        
+
         # Apply redactions but DON'T affect images
         page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE)
         modified_pages += 1
         drawings_removed += len(rects)
-    
+
     return modified_pages, drawings_removed
 
 
 def strip_pdf(pdf_path, output_path, report, categories=None):
     """
     Remove flagged images and text watermarks from PDF.
-    
+
     WARNING: Modifying PDFs (especially linearized ones) causes file size growth
     (10-150% depending on content). For the pipeline use case, prefer using
     the audit report with extract_clean_text() instead — it produces markdown
     with noise filtered out, without modifying the PDF.
-    
+
     Image removal: content stream surgery (removes /Name Do operators)
     Text removal: redaction with white fill
-    
+
     Args:
         pdf_path: Input PDF path
         output_path: Output PDF path
         report: Dict from analyze_pdf_images()
         categories: Categories to strip. Default: all
-    
+
     Returns:
         dict with stats
     """
@@ -1122,35 +1243,35 @@ def strip_pdf(pdf_path, output_path, report, categories=None):
         categories = {'HIGH_FREQ', 'DUPLICATE', 'PERCEPTUAL_DUP', 'TINY', 'SIGNATURE', 'DIGITAL_SIG', 'TEXT_REPEAT', 'PAGE_NUMBER', 'DRAWING_REPEAT'}
     elif isinstance(categories, str):
         categories = set(categories.split(','))
-    
+
     img_categories = categories - {'TEXT_REPEAT', 'PAGE_NUMBER', 'DIGITAL_SIG', 'DRAWING_REPEAT'}
     txt_categories = categories & {'TEXT_REPEAT', 'PAGE_NUMBER'}
     sig_categories = categories & {'DIGITAL_SIG'}
     draw_categories = categories & {'DRAWING_REPEAT'}
-    
+
     # Open source PDF
     doc = pymupdf.open(pdf_path)
-    
+
     # Strip images
     img_pages, img_xrefs = 0, 0
     if img_categories:
         img_pages, img_xrefs = _strip_images_content_stream(doc, report, img_categories)
-    
+
     # Strip digital signatures (redact visual + neutralize widget)
     sig_count = 0
     if sig_categories:
         sig_count = _strip_digital_signatures(doc, report)
-    
+
     # Strip text
     txt_pages, txt_spans = 0, 0
     if txt_categories:
         txt_pages, txt_spans = _strip_text_redaction(doc, report, txt_categories)
-    
+
     # Strip recurring drawings (vector decorations)
     draw_pages, draw_removed = 0, 0
     if draw_categories:
         draw_pages, draw_removed = _strip_recurring_drawings(doc, report)
-    
+
     # Full re-optimization: garbage collect + deflate.
     # Current MuPDF/PyMuPDF builds no longer support linearisation on save,
     # so keep optimization but disable linear=True to avoid FzErrorArgument.
@@ -1160,10 +1281,10 @@ def strip_pdf(pdf_path, output_path, report, categories=None):
              clean=True,      # sanitize content streams
              linear=False)    # linearisation unsupported by current MuPDF
     doc.close()
-    
+
     orig_size = os.path.getsize(pdf_path)
     out_size = os.path.getsize(output_path)
-    
+
     return {
         "image_pages_modified": img_pages,
         "image_operators_removed": img_xrefs,
@@ -1185,16 +1306,16 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
                        skip_page_numbers=True, skip_text_repeat=True):
     """
     Extract text from PDF, filtering out flagged noise (headers, footers, logos).
-    
+
     This is the recommended approach for the tender pipeline: produces clean
     markdown without modifying the source PDF at all.
-    
+
     Filtering:
     - Page numbering lines ("Página N de M") are excluded
-    - TEXT_REPEAT lines (header/footer text) are excluded  
+    - TEXT_REPEAT lines (header/footer text) are excluded
     - Content from pages with only flagged images is still extracted
     - All other text is preserved verbatim
-    
+
     Args:
         pdf_path: Input PDF path
         report: Dict from analyze_pdf_images()
@@ -1202,7 +1323,7 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
         skip_images: If True, note pages with only flagged images
         skip_page_numbers: If True, exclude page numbering lines
         skip_text_repeat: If True, exclude repeated header/footer text
-    
+
     Returns:
         str: Clean markdown text
     """
@@ -1211,7 +1332,7 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
     page_number_zones = {}  # norm → zone ("header"/"footer"/etc) — M2
     text_repeat_norms = set()
     text_repeat_zones = {}  # norm → zone ("header"/"footer")
-    
+
     for c in report.get("removal_candidates", []):
         if c["category"] == "PAGE_NUMBER" and skip_page_numbers:
             page_number_norms.add(c["text"])
@@ -1221,17 +1342,17 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
             text_repeat_norms.add(c["text"])
             if "zone" in c:
                 text_repeat_zones[c["text"]] = c["zone"]
-    
+
     doc = pymupdf.open(pdf_path)
     pages_text = []
-    
+
     # Read zone thresholds from report (M1: consistent with detection)
     zones = report.get("summary", {}).get("zones", {})
     _header_zone = zones.get("header_zone", 0.12)
     _footer_zone = zones.get("footer_zone", 0.88)
     _left_margin = zones.get("left_margin", 0.08)
     _right_margin = zones.get("right_margin", 0.90)
-    
+
     for i in range(len(doc)):
         page = doc[i]
         h = page.rect.height
@@ -1240,7 +1361,7 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
             blocks = page.get_text("dict")["blocks"]
         except:
             continue
-        
+
         page_lines = []
         for block in blocks:
             if block["type"] != 0:
@@ -1249,7 +1370,7 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
                 line_text = "".join(span["text"] for span in line["spans"]).strip()
                 if not line_text:
                     continue
-                
+
                 # Filter: page numbers (M2: only skip if in header/footer/margin zone)
                 if skip_page_numbers and _PAGE_NUMBER_RE.match(line_text):
                     # M2: check if this page number pattern has a detected zone
@@ -1274,7 +1395,7 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
                             continue
                     else:
                         continue  # No zone info — skip (backward compatible)
-                
+
                 # Filter: repeated header/footer/margin text (normalized match + zone check)
                 if skip_text_repeat:
                     norm = _normalize_for_clustering(line_text)
@@ -1299,26 +1420,26 @@ def extract_clean_text(pdf_path, report, output_path=None, skip_images=True,
                             # Line is in a different zone — don't remove
                         else:
                             continue
-                
+
                 page_lines.append(line_text)
-        
+
         if page_lines:
             page_text = "\n".join(page_lines)
             pages_text.append(f"## Página {i + 1}\n\n{page_text}")
-    
+
     doc.close()
-    
+
     result = f"# {report['summary']['file']}\n\n"
     result += f"Extraído con filtrado de ruido: {len(page_number_norms)} patrones de paginación, "
     result += f"{len(text_repeat_norms)} patrones de header/footer removidos.\n\n"
     result += "---\n\n"
     result += "\n\n---\n\n".join(pages_text)
-    
+
     if output_path:
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(result)
-    
+
     return result
 
 
@@ -1335,36 +1456,36 @@ def print_report(report):
     print(f"  Unique image hashes: {s['unique_image_hashes']}")
     print(f"  Images flagged: {s['images_flagged']} | Text flagged: {s['text_flagged']}")
     print(f"  Content images remaining: {s['content_images_remaining']}")
-    
+
     cats = s.get('categories', {})
     if cats:
         print(f"  Categories: {', '.join(f'{k}={v}' for k,v in cats.items())}")
-    
+
     if not report["removal_candidates"]:
         print("\n  No removal candidates found. PDF is clean.")
         return
-    
+
     # Separate image, text and drawing candidates for display
-    img_cands = [c for c in report["removal_candidates"] 
+    img_cands = [c for c in report["removal_candidates"]
                  if c["category"] not in ("TEXT_REPEAT", "PAGE_NUMBER", "DRAWING_REPEAT")]
-    txt_cands = [c for c in report["removal_candidates"] 
+    txt_cands = [c for c in report["removal_candidates"]
                  if c["category"] in ("TEXT_REPEAT", "PAGE_NUMBER")]
     draw_cands = [c for c in report["removal_candidates"]
                   if c["category"] == "DRAWING_REPEAT"]
-    
+
     if img_cands:
         print(f"\n  {'Category':<12} {'Size':<12} {'Pages':>5}  Description")
         print(f"  {'─'*12} {'─'*12} {'─'*5}  {'─'*40}")
         for c in sorted(img_cands, key=lambda x: (-x["page_count"], x["category"])):
             sz = f"{c['width']}x{c['height']}"
             print(f"  {c['category']:<12} {sz:<12} {c['page_count']:>5}  {c['label']}")
-    
+
     if txt_cands:
         print(f"\n  {'Category':<14} Description")
         print(f"  {'─'*14} {'─'*48}")
         for c in txt_cands:
             print(f"  {c['category']:<14} {c['label']}")
-    
+
     if draw_cands:
         print(f"\n  {'Category':<16} {'Pages':>5}  Description")
         print(f"  {'─'*16} {'─'*5}  {'─'*45}")
@@ -1415,7 +1536,7 @@ Examples:
     parser.add_argument("--report", "-r", help="Save JSON report to this path")
     parser.add_argument("--min-freq", type=int, default=5, help="Min pages for HIGH_FREQ (default 5)")
     parser.add_argument("--tiny-max", type=int, default=20, help="Max px for TINY (default 20)")
-    parser.add_argument("--text-threshold", type=float, default=0.3, 
+    parser.add_argument("--text-threshold", type=float, default=0.3,
                         help="Min frequency for TEXT_REPEAT (default 0.3 = 30%%)")
     parser.add_argument("--text-min-pages", type=int, default=5,
                         help="Min pages for TEXT_REPEAT (default 5)")
@@ -1428,20 +1549,21 @@ Examples:
     parser.add_argument("--right-margin", type=float, default=0.90,
                         help="Right %% of page for margin zone (default 0.90)")
     parser.add_argument("--categories", help="Comma-separated categories to strip (default: all)")
-    parser.add_argument("--no-text", action="store_true", help="Skip text watermark removal")
     parser.add_argument("--text-only", action="store_true", help="Only remove text watermarks")
+    parser.add_argument("--page-analysis", action="store_true",
+                        help="Produce {stem}_page_analysis.json with per-page content metrics (size, text, images, drawings)")
     args = parser.parse_args()
-    
+
     if not os.path.exists(args.pdf):
         print(f"Error: {args.pdf} not found", file=sys.stderr)
         sys.exit(1)
-    
+
     if args.strip and not args.output:
         base, ext = os.path.splitext(args.pdf)
         args.output = f"{base}_clean{ext}"
-    
+
     # Audit
-    report = analyze_pdf_images(args.pdf, min_freq=args.min_freq, 
+    report = analyze_pdf_images(args.pdf, min_freq=args.min_freq,
                                  tiny_max_px=args.tiny_max,
                                  text_threshold=args.text_threshold,
                                  text_min_pages=args.text_min_pages,
@@ -1450,13 +1572,26 @@ Examples:
                                  left_margin=args.left_margin,
                                  right_margin=args.right_margin)
     print_report(report)
-    
+
     # Save report
     if args.report:
         with open(args.report, "w") as f:
             json.dump(report, f, indent=2, default=str)
         print(f"\n  Report saved to: {args.report}")
-    
+
+    # Save page analysis separately if requested (or if present in report)
+    if report.get("page_analysis") and (args.page_analysis or args.report):
+        base, ext = os.path.splitext(args.pdf)
+        pa_path = f"{base}_page_analysis.json"
+        with open(pa_path, "w") as f:
+            json.dump(report["page_analysis"], f, indent=2, default=str)
+        pa = report["page_analysis"]
+        n_candidates = sum(1 for p in pa["pages"] if p.get("plan_candidate_signals"))
+        print(f"\n  Page analysis saved to: {pa_path}")
+        print(f"  Pages with plan candidate signals: {n_candidates}/{pa['summary']['page_count']}")
+        if pa['summary']['signal_types']:
+            print(f"  Signal types: {', '.join(pa['summary']['signal_types'])}")
+
     # Extract clean text (recommended for pipeline)
     if args.extract:
         out_path = args.output or args.pdf.rsplit(".", 1)[0] + "_clean.md"
@@ -1464,7 +1599,7 @@ Examples:
         total_chars = len(md)
         lines = md.count("\n")
         print(f"\n  Extracted: {total_chars:,} chars, {lines:,} lines → {out_path}")
-    
+
     # Strip PDF (modifies file, causes size growth on linearized PDFs)
     if args.strip:
         if args.categories:
@@ -1475,7 +1610,7 @@ Examples:
             cats = {'TEXT_REPEAT', 'PAGE_NUMBER'}
         else:
             cats = None  # all
-        
+
         result = strip_pdf(args.pdf, args.output, report, categories=cats)
         print_strip_result(result)
         print(f"\n  Output: {args.output}")

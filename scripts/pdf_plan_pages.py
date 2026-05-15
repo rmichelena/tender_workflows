@@ -82,10 +82,20 @@ def contiguous_ranges(pages: list[int]) -> list[dict[str, int]]:
     return ranges
 
 
-def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, min_width_pt: float, min_height_pt: float, render_dpi: int) -> dict[str, Any]:
+def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, min_width_pt: float, min_height_pt: float, render_dpi: int, page_analysis_json: Path | None = None) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     render_dir = output_dir / f"{stem}_candidate_pages"
     render_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load existing page analysis if available (from pdf_image_audit.py --page-analysis)
+    existing_pa = None
+    if page_analysis_json and page_analysis_json.exists():
+        existing_pa = json.loads(page_analysis_json.read_text())
+    elif not page_analysis_json:
+        # Auto-detect: look for {stem}_clean_page_analysis.json next to the input PDF
+        auto = input_pdf.parent / f"{input_pdf.stem}_page_analysis.json"
+        if auto.exists():
+            existing_pa = json.loads(auto.read_text())
 
     doc = fitz.open(input_pdf)
     rows = page_records(doc)
@@ -93,20 +103,52 @@ def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, m
     median_area = statistics.median(r["area_pt2"] for r in rows)
 
     candidates = []
+    pa_pages = {}
+    if existing_pa:
+        pa_pages = {p["page"]: p for p in existing_pa.get("pages", [])}
+
     for r in rows:
         ratio = r["area_pt2"] / median_area if median_area else 1
         reasons = []
+
+        # Size-based detection (original)
         if ratio >= area_ratio:
             reasons.append(f"area_ratio>={area_ratio:g}")
         if r["width_pt"] >= min_width_pt:
             reasons.append(f"width_pt>={min_width_pt:g}")
         if r["height_pt"] >= min_height_pt:
             reasons.append(f"height_pt>={min_height_pt:g}")
+
+        # Content-based detection from page analysis
+        pa = pa_pages.get(r["page"])
+        if pa:
+            signals = pa.get("plan_candidate_signals", [])
+            # Strong signals that indicate plan/diagram regardless of page size
+            if "high_drawing_count" in signals and pa.get("drawing_count", 0) > 5000:
+                if "high_drawing_count" not in str(reasons):
+                    reasons.append(f"drawing_count={pa['drawing_count']}")
+            if "high_drawing_ratio" in signals and pa.get("drawing_area_ratio", 0) > 0.3:
+                if "high_drawing_ratio" not in str(reasons):
+                    reasons.append(f"drawing_area_ratio={pa['drawing_area_ratio']}")
+            if "autocad_like" in signals:
+                if "autocad_like" not in str(reasons):
+                    reasons.append("autocad_like")
+            if "image_heavy" in signals and pa.get("image_area_ratio", 0) > 0.4:
+                if "image_heavy" not in str(reasons):
+                    reasons.append(f"image_area_ratio={pa['image_area_ratio']}")
+
         if reasons:
             item = dict(r)
             item["area_ratio_vs_median"] = round(ratio, 3)
             item["candidate_reasons"] = reasons
             item["rendered_image"] = str(render_dir / f"page_{r['page']:04d}.png")
+            # Include content metrics from page analysis if available
+            if pa:
+                for key in ["text_char_count", "text_block_count", "image_count", "image_block_count",
+                            "image_area_ratio", "drawing_count", "drawing_area_ratio",
+                            "text_density_chars_per_pt2", "content_dominant", "plan_candidate_signals"]:
+                    if key in pa:
+                        item[f"pa_{key}"] = pa[key]
             candidates.append(item)
 
     matrix = fitz.Matrix(render_dpi / POINTS_PER_INCH, render_dpi / POINTS_PER_INCH)
@@ -281,6 +323,8 @@ def main() -> None:
     p_audit.add_argument("--min-width-pt", type=float, default=700)
     p_audit.add_argument("--min-height-pt", type=float, default=1000)
     p_audit.add_argument("--render-dpi", type=int, default=180)
+    p_audit.add_argument("--page-analysis", type=Path, default=None,
+                        help="Path to {stem}_page_analysis.json from pdf_image_audit.py (auto-detected if not given)")
 
     p_build = sub.add_parser("build", parents=[common])
     p_build.add_argument("--preocr-dir", type=Path, required=True)
@@ -289,7 +333,7 @@ def main() -> None:
     args = parser.parse_args()
     stem = args.stem or slugify_stem(args.input_pdf)
     if args.cmd == "audit":
-        audit = audit_pdf(args.input_pdf, args.output_dir, stem, args.area_ratio, args.min_width_pt, args.min_height_pt, args.render_dpi)
+        audit = audit_pdf(args.input_pdf, args.output_dir, stem, args.area_ratio, args.min_width_pt, args.min_height_pt, args.render_dpi, getattr(args, 'page_analysis', None))
         print(json.dumps({"audit_json": str(args.output_dir / f"{stem}_page_size_audit.json"), "candidate_count": len(audit["candidates"]), "candidate_ranges": audit["candidate_ranges"]}, indent=2, ensure_ascii=False))
     elif args.cmd == "build":
         print(json.dumps(build_outputs(args.input_pdf, args.output_dir, args.preocr_dir, stem, args.analysis_json), indent=2, ensure_ascii=False))
