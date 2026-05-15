@@ -55,21 +55,28 @@ cp scripts/extractors/extractors.conf.example scripts/extractors/extractors.conf
 # Edita extractors.conf con tus valores
 ```
 
-2. Instala dependencias:
+2. Instala dependencias en un entorno virtual local:
 ```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install --upgrade pip
 pip install requests PyMuPDF google-auth-oauthlib markitdown landingai-ade
 ```
+
+> Nota para agentes futuros: en hosts Debian/Ubuntu modernos, Python puede estar en modo PEP 668 (`externally-managed-environment`), por lo que `pip install` contra el Python global puede fallar o ser mala idea. Usar `.venv/` por proyecto evita tocar paquetes administrados por `apt`.
+>
+> Versiones instaladas y verificadas el 2026-05-15 en la corrida AdP Cableado: `PyMuPDF==1.27.2.3`, `landingai-ade==1.12.0`, `markitdown==0.1.5`. Eran las versiones actuales instaladas por `pip` ese día; si un extractor o script deja de funcionar por cambios upstream, intentar primero pinear estas versiones o revisar compatibilidad de PyMuPDF/MuPDF.
 
 3. Ejecuta un extractor:
 ```bash
 # PDF mixto/escaneado (recomendado):
-python3 scripts/extractors/landingai_extract.py documento.pdf
+.venv/bin/python scripts/extractors/landingai_extract.py documento.pdf
 
 # PDF vectorial puro o DOCX (rápido, sin OCR):
-python3 scripts/extractors/markitdown_extract.py documento.pdf output/
+.venv/bin/python scripts/extractors/markitdown_extract.py documento.pdf output/
 
 # PDF grande escaneado con DocAI (máxima calidad, lento):
-python3 scripts/extractors/docai_batch_gcs.py documento.pdf output/
+.venv/bin/python scripts/extractors/docai_batch_gcs.py documento.pdf output/
 ```
 
 ## Extractores
