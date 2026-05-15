@@ -144,10 +144,11 @@ def convert_async(file_path, include_images=False):
         with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
             status_data = json.loads(resp.read().decode())
 
-        status = status_data.get("status", "unknown")
+        # Docling Serve versions differ: some return `status`, current service returns `task_status`.
+        status = status_data.get("status") or status_data.get("task_status", "unknown")
         print(f"  [{elapsed}s] Status: {status}", file=sys.stderr)
 
-        if status == "success":
+        if status in ("success", "completed"):
             # Get result
             result_url = f"{DOCLING_BASE}/v1/result/{task_id}"
             req = urllib.request.Request(result_url)
@@ -163,12 +164,22 @@ def convert_async(file_path, include_images=False):
 
 def extract_markdown(result):
     """Extract markdown content from Docling API response."""
-    if not result or not isinstance(result, list) or len(result) == 0:
+    if not result:
         raise ValueError(f"Unexpected response format: {json.dumps(result)[:500]}")
 
-    doc = result[0]
-    if doc.get("status") != "success":
-        raise RuntimeError(f"Conversion status: {doc.get('status')}, errors: {doc.get('errors', [])}")
+    # Docling Serve may return either a list of file results or a single result object.
+    if isinstance(result, list):
+        if len(result) == 0:
+            raise ValueError(f"Unexpected response format: {json.dumps(result)[:500]}")
+        doc = result[0]
+    elif isinstance(result, dict):
+        doc = result
+    else:
+        raise ValueError(f"Unexpected response format: {json.dumps(result)[:500]}")
+
+    status = doc.get("status") or doc.get("task_status") or "success"
+    if status not in ("success", "completed"):
+        raise RuntimeError(f"Conversion status: {status}, errors: {doc.get('errors', [])}")
 
     md_content = doc.get("document", {}).get("md_content")
     if not md_content:
