@@ -15,3 +15,6 @@ proyecto/outputs/*.xlsx
 
 # Weird artifact from a script bug
 5}x{p[height:
+
+# Local Python environment
+.venv/

@@ -55,7 +55,7 @@ cp scripts/extractors/extractors.conf.example scripts/extractors/extractors.conf
 # Edita extractors.conf con tus valores
 ```
 
-2. Instala dependencias en un entorno virtual local:
+2. Desde la raíz de este repo (`tender_procurement/`), instala dependencias en un entorno virtual local del tooling:
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
@@ -63,7 +63,7 @@ pip install --upgrade pip
 pip install requests PyMuPDF google-auth-oauthlib markitdown landingai-ade
 ```
 
-> Nota para agentes futuros: en hosts Debian/Ubuntu modernos, Python puede estar en modo PEP 668 (`externally-managed-environment`), por lo que `pip install` contra el Python global puede fallar o ser mala idea. Usar `.venv/` por proyecto evita tocar paquetes administrados por `apt`.
+> Nota para agentes futuros: en hosts Debian/Ubuntu modernos, Python puede estar en modo PEP 668 (`externally-managed-environment`), por lo que `pip install` contra el Python global puede fallar o ser mala idea. Usar `.venv/` en la raíz de este repo evita tocar paquetes administrados por `apt` y evita crear miles de archivos por cada carpeta de licitación/Dropbox. `.venv/` está gitignored.
 >
 > Versiones instaladas y verificadas el 2026-05-15 en la corrida AdP Cableado: `PyMuPDF==1.27.2.3`, `landingai-ade==1.12.0`, `markitdown==0.1.5`. Eran las versiones actuales instaladas por `pip` ese día; si un extractor o script deja de funcionar por cambios upstream, intentar primero pinear estas versiones o revisar compatibilidad de PyMuPDF/MuPDF.
 
