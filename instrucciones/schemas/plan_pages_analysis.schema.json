@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "source_pdf", "model", "pages"],
   "properties": {
-    "schema_version": { "const": "0.2" },
+    "schema_version": { "const": "0.3" },
     "source_pdf": { "type": "string" },
     "model": { "type": "string" },
     "pages": {
@@ -24,7 +24,7 @@
         "identifier_or_title",
         "visual_type",
         "summary",
-        "procurement_relevant_info",
+        "technical_observations",
         "visible_text_or_codes",
         "limitations",
         "confidence"
@@ -47,7 +47,7 @@
           "description": "Only for action=replace_images. Regions to replace with text descriptions.",
           "items": { "$ref": "#/$defs/image_replacement" }
         },
-        "procurement_relevant_info": {
+        "technical_observations": {
           "type": "array",
           "items": { "type": "string" }
         },
@@ -65,7 +65,7 @@
     "image_replacement": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["region_id", "bbox_pct", "description", "visible_text_or_codes", "procurement_relevant_info"],
+      "required": ["region_id", "bbox_pct", "description", "visible_text_or_codes", "technical_observations"],
       "properties": {
         "region_id": { "type": "integer", "minimum": 1 },
         "bbox_pct": {
@@ -84,10 +84,10 @@
           "items": { "type": "string" },
           "description": "Text, labels, codes visible in this region."
         },
-        "procurement_relevant_info": {
+        "technical_observations": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Information potentially useful for procurement/BOM."
+          "description": "Information potentially useful for contexto técnico."
         }
       }
     }

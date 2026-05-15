@@ -58,7 +58,7 @@ Campo `action` obligatorio (reemplaza los antiguos `is_plan_or_diagram` + `exclu
   "identifier_or_title": "SPUR-SV-T-0301 — Distribución de datos y voz",
   "visual_type": "Plano técnico compuesto",
   "summary": "Descripción del contenido del plano...",
-  "procurement_relevant_info": ["..."],
+  "technical_observations": ["..."],
   "visible_text_or_codes": ["..."],
   "limitations": ["..."],
   "confidence": "high"
@@ -80,10 +80,10 @@ Campo `action` obligatorio (reemplaza los antiguos `is_plan_or_diagram` + `exclu
       "bbox_pct": [0.10, 0.25, 0.90, 0.70],
       "description": "Diagrama de topología de red con switches y firewalls",
       "visible_text_or_codes": ["SW-Core", "FW-01", "LAN"],
-      "procurement_relevant_info": ["Switch core visible en diagrama"]
+      "technical_observations": ["Switch core visible en diagrama"]
     }
   ],
-  "procurement_relevant_info": ["..."],
+  "technical_observations": ["..."],
   "visible_text_or_codes": ["..."],
   "limitations": ["..."],
   "confidence": "high"
@@ -101,7 +101,7 @@ Campo `action` obligatorio (reemplaza los antiguos `is_plan_or_diagram` + `exclu
   "identifier_or_title": "Anexo Nº 01 — Ubicación técnica",
   "visual_type": "Tabla/anexo textual",
   "summary": "Tabla de inventario...",
-  "procurement_relevant_info": [],
+  "technical_observations": [],
   "visible_text_or_codes": ["..."],
   "limitations": ["..."],
   "confidence": "high"
@@ -123,10 +123,14 @@ Ejemplos:
 
 Si no hay identificador visible: `null`.
 
+## Regla anti-sesgo de suministro
+
+No asumas que equipos, modelos o componentes visibles en diagramas/fotos son parte del suministro requerido. Con frecuencia muestran infraestructura existente, contexto, referencias o estado actual. Describe solo lo visible como `technical_observations`; no lo llames procurement, BOM, requerimiento, cantidad requerida ni equipo a suministrar salvo que el propio documento lo diga explícitamente.
+
 ## Reglas generales
 
 - Devuelve solo JSON, sin Markdown alrededor.
 - No inventes cantidades, códigos, modelos ni textos.
 - Si algo no es legible, dilo en `limitations`.
-- `procurement_relevant_info` solo con información explícitamente visible.
+- `technical_observations` solo con información explícitamente visible.
 - Si la página es un documento escaneado (foto de texto), siempre `leave_for_ocr`.

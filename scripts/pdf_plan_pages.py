@@ -266,14 +266,14 @@ def page_summary_text(page_analysis: dict[str, Any], source_page: int, extracted
         "Resumen visual:",
         page_analysis.get("summary", ""),
         "",
-        "Información potencialmente útil para procurement:",
+        "Información técnica visible:",
     ]
-    useful = page_analysis.get("procurement_relevant_info") or []
+    useful = page_analysis.get("technical_observations") or []
     if useful:
         for item in useful:
             lines.append(f"- {item}")
     else:
-        lines.append("- No se identificó información explícita útil para procurement.")
+        lines.append("- No se identificó información técnica explícita visible.")
     lines += ["", "Texto/códigos visibles:"]
     visible = page_analysis.get("visible_text_or_codes") or []
     if visible:
@@ -437,9 +437,9 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
                 codes = repl.get("visible_text_or_codes", [])
                 if codes:
                     desc_lines.append("Códigos/texto visible: " + ", ".join(str(c) for c in codes[:10]))
-                infos = repl.get("procurement_relevant_info", [])
+                infos = repl.get("technical_observations", [])
                 if infos:
-                    desc_lines.append("Info procurement: " + "; ".join(str(i) for i in infos[:5]))
+                    desc_lines.append("Info técnica visible: " + "; ".join(str(i) for i in infos[:5]))
                 text_to_insert = "\n".join(desc_lines)
                 # Insert text inside the rect
                 fs = 8
@@ -488,11 +488,11 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
                 codes = repl.get("visible_text_or_codes", [])
                 if codes:
                     md_lines.append(f"Códigos: {', '.join(str(c) for c in codes)}")
-                infos = repl.get("procurement_relevant_info", [])
+                infos = repl.get("technical_observations", [])
                 if infos:
-                    md_lines.append(f"Procurement: {'; '.join(str(i) for i in infos)}")
+                    md_lines.append(f"Info técnica visible: {'; '.join(str(i) for i in infos)}")
                 md_lines.append("")
-        infos = p.get("procurement_relevant_info") or []
+        infos = p.get("technical_observations") or []
         if infos:
             md_lines.append("Información útil:")
             md_lines.extend(f"- {x}" for x in infos)
