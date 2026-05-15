@@ -1136,14 +1136,14 @@ def strip_pdf(pdf_path, output_path, report, categories=None):
     if draw_categories:
         draw_pages, draw_removed = _strip_recurring_drawings(doc, report)
     
-    # Full re-optimization: garbage collect + deflate + re-linearize
-    # This eliminates any bloat from modifications and often produces
-    # a SMALLER file than the original (stripped content is removed).
-    doc.save(output_path, 
+    # Full re-optimization: garbage collect + deflate.
+    # Current MuPDF/PyMuPDF builds no longer support linearisation on save,
+    # so keep optimization but disable linear=True to avoid FzErrorArgument.
+    doc.save(output_path,
              garbage=4,       # max GC: remove unused objects, merge duplicate streams
              deflate=True,    # re-compress all streams
              clean=True,      # sanitize content streams
-             linear=True)     # re-linearize for fast web view
+             linear=False)    # linearisation unsupported by current MuPDF
     doc.close()
     
     orig_size = os.path.getsize(pdf_path)
