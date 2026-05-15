@@ -107,6 +107,38 @@ def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, m
     if existing_pa:
         pa_pages = {p["page"]: p for p in existing_pa.get("pages", [])}
 
+    # Anti-scan filter: if too many consecutive pages are image_heavy, it's a scanned doc.
+    # Also: if >70% of all pages are image_heavy, disable image_heavy detection entirely.
+    image_heavy_pages = set()
+    for r in rows:
+        pa = pa_pages.get(r["page"])
+        if pa and "image_heavy" in pa.get("plan_candidate_signals", []):
+            image_heavy_pages.add(r["page"])
+
+    # Check if document is predominantly scanned
+    total_pages = len(rows)
+    image_heavy_doc_pct = len(image_heavy_pages) / total_pages if total_pages else 0
+    disable_image_heavy = image_heavy_doc_pct > 0.7
+
+    # Find runs of consecutive image_heavy pages > threshold
+    max_consecutive = 5  # configurable via params, hardcoded default
+    consecutive_image_heavy_runs = set()
+    if image_heavy_pages and not disable_image_heavy:
+        sorted_ih = sorted(image_heavy_pages)
+        run_start = sorted_ih[0]
+        run_prev = sorted_ih[0]
+        for p in sorted_ih[1:]:
+            if p == run_prev + 1:
+                run_prev = p
+            else:
+                if (run_prev - run_start + 1) > max_consecutive:
+                    for pp in range(run_start, run_prev + 1):
+                        consecutive_image_heavy_runs.add(pp)
+                run_start = run_prev = p
+        if (run_prev - run_start + 1) > max_consecutive:
+            for pp in range(run_start, run_prev + 1):
+                consecutive_image_heavy_runs.add(pp)
+
     for r in rows:
         ratio = r["area_pt2"] / median_area if median_area else 1
         reasons = []
@@ -133,9 +165,38 @@ def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, m
             if "autocad_like" in signals:
                 if "autocad_like" not in str(reasons):
                     reasons.append("autocad_like")
+            # Image_heavy detection with anti-scan and width filters
             if "image_heavy" in signals and pa.get("image_area_ratio", 0) > 0.4:
-                if "image_heavy" not in str(reasons):
-                    reasons.append(f"image_area_ratio={pa['image_area_ratio']}")
+                # Skip if document is predominantly scanned
+                if disable_image_heavy:
+                    pass  # skip image_heavy entirely for scanned docs
+                # Skip if in a long consecutive run
+                elif r["page"] in consecutive_image_heavy_runs:
+                    pass  # skip, likely scanned pages
+                # Skip if too many images (probably scanned page with segments)
+                elif pa.get("image_count", 0) > 4:
+                    pass  # skip, too many images
+                else:
+                    # Width filter: each image should be reasonably wide (not marginal)
+                    # We check if the largest image block covers >15% of page width
+                    img_blocks = []
+                    try:
+                        p_doc = doc[r["page"] - 1]
+                        blocks_data = p_doc.get_text("dict")["blocks"]
+                        for b in blocks_data:
+                            if b["type"] == 1:
+                                bbox = b.get("bbox", (0, 0, 0, 0))
+                                img_w = bbox[2] - bbox[0]
+                                page_w = r["width_pt"]
+                                if page_w > 0 and img_w / page_w > 0.15:
+                                    img_blocks.append(bbox)
+                    except Exception:
+                        img_blocks = []
+                    if img_blocks:
+                        if "image_heavy" not in str(reasons):
+                            reasons.append(f"image_area_ratio={pa['image_area_ratio']}")
+                    # If no image passes width filter, skip
+                    # (marginal decoration not caught by cleaner)
 
         if reasons:
             item = dict(r)
@@ -251,49 +312,122 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
     analysis = load_analysis(analysis_json)
     doc = fitz.open(input_pdf)
 
-    confirmed = {int(p["page"]): p for p in analysis["pages"] if p.get("is_plan_or_diagram") and p.get("exclude_from_ocr")}
+    # Build lookup by page number
+    pages_by_num = {int(p["page"]): p for p in analysis["pages"]}
+    # replace_page: entire page replaced (old exclude_from_ocr)
+    replace_page_set = {n for n, p in pages_by_num.items() if p.get("action") == "replace_page"}
+    # replace_images: only regions replaced
+    replace_images_set = {n for n, p in pages_by_num.items() if p.get("action") == "replace_images"}
+
     extracted_pdf = output_dir / f"planos_extraidos_{stem}.pdf"
     preocr_pdf = preocr_dir / f"{stem}_preocr.pdf"
     md_path = output_dir / f"planos_extraidos_{stem}.md"
 
+    # Extract full pages (replace_page) into separate PDF
     extracted = fitz.open()
-    for page_num in sorted(confirmed):
+    for page_num in sorted(replace_page_set):
+        extracted.insert_pdf(doc, from_page=page_num - 1, to_page=page_num - 1)
+    # Also extract individual images for replace_images pages
+    # (save the original page so it can be referenced)
+    for page_num in sorted(replace_images_set):
         extracted.insert_pdf(doc, from_page=page_num - 1, to_page=page_num - 1)
     if extracted.page_count:
         extracted.save(extracted_pdf)
     else:
-        # create an empty marker PDF with one page rather than failing callers expecting path
         p = extracted.new_page(width=595.3, height=841.9)
         p.insert_text((54, 54), "No se confirmaron planos/diagramas para extraer.", fontsize=11)
         extracted.save(extracted_pdf)
 
-    # Dominant page size for replacement pages.
+    # Build pre-OCR PDF
     dom = dominant_size(page_records(doc))
     repl_w, repl_h = float(dom["width_pt"]), float(dom["height_pt"])
     pre = fitz.open()
     extracted_pdf_name = extracted_pdf.name
+
     for idx in range(1, doc.page_count + 1):
-        if idx in confirmed:
+        if idx in replace_page_set:
+            # Entire page replaced with text summary
             page = pre.new_page(width=repl_w, height=repl_h)
-            insert_wrapped_text(page, page_summary_text(confirmed[idx], idx, extracted_pdf_name))
+            insert_wrapped_text(page, page_summary_text(pages_by_num[idx], idx, extracted_pdf_name))
+        elif idx in replace_images_set:
+            # Copy original page, then white-out replaced regions and insert text
+            pre.insert_pdf(doc, from_page=idx - 1, to_page=idx - 1)
+            pre_page = pre[pre.page_count - 1]
+            pa = pages_by_num[idx]
+            for repl in pa.get("image_replacements", []):
+                bbox_pct = repl.get("bbox_pct", [0, 0, 1, 1])
+                # Convert pct to pt with 2% margin
+                margin_pct = 0.02
+                x0 = max(0, (bbox_pct[0] - margin_pct)) * pre_page.rect.width
+                y0 = max(0, (bbox_pct[1] - margin_pct)) * pre_page.rect.height
+                x1 = min(1, (bbox_pct[2] + margin_pct)) * pre_page.rect.width
+                y1 = min(1, (bbox_pct[3] + margin_pct)) * pre_page.rect.height
+                # White rectangle
+                rect = fitz.Rect(x0, y0, x1, y1)
+                pre_page.draw_rect(rect, color=None, fill=(1, 1, 1))
+                # Insert description text
+                desc_lines = []
+                desc_lines.append(f"[Diagrama/imagen reemplazado — ver planos_extraidos]")
+                if repl.get("description"):
+                    desc_lines.append(repl["description"])
+                codes = repl.get("visible_text_or_codes", [])
+                if codes:
+                    desc_lines.append("Códigos/texto visible: " + ", ".join(str(c) for c in codes[:10]))
+                infos = repl.get("procurement_relevant_info", [])
+                if infos:
+                    desc_lines.append("Info procurement: " + "; ".join(str(i) for i in infos[:5]))
+                text_to_insert = "\n".join(desc_lines)
+                # Insert text inside the rect
+                fs = 8
+                max_w = x1 - x0 - 8
+                if max_w < 50:
+                    max_w = 50
+                max_chars = max(30, int(max_w / (fs * 0.45)))
+                ty = y0 + 12
+                for raw_line in text_to_insert.split("\n"):
+                    wrapped = textwrap.wrap(raw_line, width=max_chars) or [raw_line]
+                    for wl in wrapped:
+                        if ty > y1 - 8:
+                            break
+                        pre_page.insert_text(fitz.Point(x0 + 4, ty), wl, fontsize=fs, fontname="helv", color=(0, 0, 0))
+                        ty += fs * 1.3
         else:
+            # leave_for_ocr or not in analysis: copy as-is
             pre.insert_pdf(doc, from_page=idx - 1, to_page=idx - 1)
     pre.save(preocr_pdf)
 
+    # Build MD report
     md_lines = [f"# Planos/diagramas extraídos — {stem}", ""]
     md_lines.append(f"PDF fuente: `{input_pdf}`")
     md_lines.append(f"PDF extraído: `{extracted_pdf}`")
     md_lines.append(f"PDF pre-OCR: `{preocr_pdf}`")
     md_lines.append("")
-    for page_num in sorted(confirmed):
-        p = confirmed[page_num]
-        md_lines.append(f"## Página {page_num} — {p.get('identifier_or_title') or 'Sin identificador/título visible'}")
+    for page_num in sorted(pages_by_num.keys()):
+        p = pages_by_num[page_num]
+        action = p.get("action", "leave_for_ocr")
+        if action == "leave_for_ocr":
+            continue
+        title = p.get('identifier_or_title') or 'Sin identificador/título visible'
+        md_lines.append(f"## Página {page_num} — {title}")
         md_lines.append("")
+        md_lines.append(f"- Acción: {action}")
         md_lines.append(f"- Tipo: {p.get('visual_type', '')}")
         md_lines.append(f"- Confianza: {p.get('confidence', '')}")
         md_lines.append("")
         md_lines.append(p.get("summary", ""))
         md_lines.append("")
+        if action == "replace_images" and p.get("image_replacements"):
+            md_lines.append("### Regiones reemplazadas")
+            for repl in p["image_replacements"]:
+                md_lines.append(f"\n**Región {repl.get('region_id', '?')}** (bbox: {repl.get('bbox_pct')})")
+                md_lines.append(f"> {repl.get('description', '')}")
+                codes = repl.get("visible_text_or_codes", [])
+                if codes:
+                    md_lines.append(f"Códigos: {', '.join(str(c) for c in codes)}")
+                infos = repl.get("procurement_relevant_info", [])
+                if infos:
+                    md_lines.append(f"Procurement: {'; '.join(str(i) for i in infos)}")
+                md_lines.append("")
         infos = p.get("procurement_relevant_info") or []
         if infos:
             md_lines.append("Información útil:")

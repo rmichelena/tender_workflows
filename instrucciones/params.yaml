@@ -22,6 +22,12 @@ batching:
   plan_pages_min_width_pt: 700
   plan_pages_min_height_pt: 1000
   plan_pages_render_dpi: 150
+  # 1.2b image_heavy detection thresholds
+  plan_pages_image_area_ratio_threshold: 0.4
+  plan_pages_image_min_width_pct: 0.15
+  plan_pages_max_images_per_candidate_page: 4
+  plan_pages_max_consecutive_image_heavy: 5
+  plan_pages_image_heavy_doc_pct_disable: 0.7
   # Paso 1.5 Índice estructural: lectura secuencial con overlap fijo.
   document_index_chunk_lines: 200
   document_index_overlap_lines: 50

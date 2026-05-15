@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "source_pdf", "model", "pages"],
   "properties": {
-    "schema_version": { "const": "0.1" },
+    "schema_version": { "const": "0.2" },
     "source_pdf": { "type": "string" },
     "model": { "type": "string" },
     "pages": {
@@ -20,8 +20,7 @@
       "additionalProperties": false,
       "required": [
         "page",
-        "is_plan_or_diagram",
-        "exclude_from_ocr",
+        "action",
         "identifier_or_title",
         "visual_type",
         "summary",
@@ -32,17 +31,22 @@
       ],
       "properties": {
         "page": { "type": "integer", "minimum": 1 },
-        "is_plan_or_diagram": { "type": "boolean" },
-        "exclude_from_ocr": {
-          "type": "boolean",
-          "description": "True only when the page should be replaced by a text summary before the generic OCR/Markdown converter. Keep false for large tables or pages whose normal OCR is preferable."
+        "action": {
+          "type": "string",
+          "enum": ["replace_page", "replace_images", "leave_for_ocr"],
+          "description": "replace_page: entire page is a plan/diagram, substitute with text summary. replace_images: page has text + embedded diagrams/photos that OCR cannot read; replace only the identified regions. leave_for_ocr: page is text/table/scanned-doc, let normal OCR handle it."
         },
         "identifier_or_title": {
           "type": ["string", "null"],
-          "description": "Visible plan/page identifier or title, e.g. 'Plano instalaciones eléctricas página 1', 'SPYL-SV-T-0300', or the title block text."
+          "description": "Visible plan/page identifier or title."
         },
         "visual_type": { "type": "string" },
         "summary": { "type": "string" },
+        "image_replacements": {
+          "type": "array",
+          "description": "Only for action=replace_images. Regions to replace with text descriptions.",
+          "items": { "$ref": "#/$defs/image_replacement" }
+        },
         "procurement_relevant_info": {
           "type": "array",
           "items": { "type": "string" }
@@ -56,6 +60,35 @@
           "items": { "type": "string" }
         },
         "confidence": { "type": "string", "enum": ["high", "medium", "low"] }
+      }
+    },
+    "image_replacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["region_id", "bbox_pct", "description", "visible_text_or_codes", "procurement_relevant_info"],
+      "properties": {
+        "region_id": { "type": "integer", "minimum": 1 },
+        "bbox_pct": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 4,
+          "maxItems": 4,
+          "description": "[x0, y0, x1, y1] as fractions of page dimensions (0.0-1.0)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the diagram/photo content."
+        },
+        "visible_text_or_codes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Text, labels, codes visible in this region."
+        },
+        "procurement_relevant_info": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Information potentially useful for procurement/BOM."
+        }
       }
     }
   }
