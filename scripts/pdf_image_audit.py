@@ -1549,6 +1549,7 @@ Examples:
     parser.add_argument("--right-margin", type=float, default=0.90,
                         help="Right %% of page for margin zone (default 0.90)")
     parser.add_argument("--categories", help="Comma-separated categories to strip (default: all)")
+    parser.add_argument("--no-text", action="store_true", help="Skip text watermark removal")
     parser.add_argument("--text-only", action="store_true", help="Only remove text watermarks")
     parser.add_argument("--page-analysis", action="store_true",
                         help="Produce {stem}_page_analysis.json with per-page content metrics (size, text, images, drawings)")
