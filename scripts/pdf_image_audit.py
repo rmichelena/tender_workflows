@@ -790,11 +790,26 @@ def _strip_images_content_stream(doc, report, categories):
             if not names_to_remove:
                 continue
             
-            # Remove only those /Name Do operators from content streams
+            # Remove /Name Do operators from content streams AND nested Form XObjects.
+            # Images may be nested inside Form XObjects (e.g. NxFm5 → /NxImage Do),
+            # so we must recurse into Form XObject streams too.
             # (fixes H4: regex is name-specific and only targets known flagged names,
             #  not a general /Name Do pattern — safe for well-formed names from get_images)
             page_modified = False
-            for c_xref in contents:
+
+            # Collect all streams to process: page content streams + Form XObject streams
+            streams_to_process = list(contents)  # top-level page content streams
+            try:
+                for xo in page.get_xobjects():
+                    # xo tuple: (xref, name, ...)
+                    xo_xref = xo[0]
+                    xo_stream = doc.xref_stream(xo_xref)
+                    if xo_stream and b' Do' in xo_stream:
+                        streams_to_process.append(xo_xref)
+            except Exception:
+                pass
+
+            for c_xref in streams_to_process:
                 try:
                     stream = doc.xref_stream(c_xref)
                     if not stream:
