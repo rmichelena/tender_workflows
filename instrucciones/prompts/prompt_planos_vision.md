@@ -123,10 +123,6 @@ Ejemplos:
 
 Si no hay identificador visible: `null`.
 
-## Regla anti-sesgo de suministro
-
-No asumas que equipos, modelos o componentes visibles en diagramas/fotos son parte del suministro requerido. Con frecuencia muestran infraestructura existente, contexto, referencias o estado actual. Describe solo lo visible como `technical_observations`; no lo llames procurement, BOM, requerimiento, cantidad requerida ni equipo a suministrar salvo que el propio documento lo diga explícitamente.
-
 ## Reglas generales
 
 - Devuelve solo JSON, sin Markdown alrededor.
