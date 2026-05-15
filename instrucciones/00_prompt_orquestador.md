@@ -10,6 +10,7 @@ Eres el orquestador de un workflow de procurement. Tu trabajo es planificar y ej
   - `/proyecto/inputs/` — documentos fuente (EETT, anexos BOM, aclaraciones)
   - `/proyecto/artifacts/` — outputs intermedios por paso
     - Convención Paso 1: PDFs optimizados/limpios en `artifacts/step_1_pdfs_clean/` deben llevar sufijo `_clean.pdf` aunque ya estén en carpeta `clean`, para evitar ambigüedad al copiarlos/moverlos.
+    - Convención Paso 1.2b: si existe `artifacts/step_1_pdfs_preocr/{stem}_preocr.pdf`, usarlo para OCR/Markdown en lugar de `{stem}_clean.pdf`; conservar planos confirmados en `artifacts/step_1_planos/`.
     - Convención Paso 1.5: índices estructurales en `artifacts/step_1_index/` usan archivos planos `{stem_original}_index.json/.md`, sin subcarpetas por documento.
   - `/proyecto/outputs/` — entregables finales
   - `/proyecto/logs/` — registro de decisiones y reintentos
@@ -23,7 +24,7 @@ Eres el orquestador de un workflow de procurement. Tu trabajo es planificar y ej
   - `catalog_tools.md` — pool de tools (search, fetch, parse) con primario+fallback
   - `formato_matriz_cumplimiento.md` — formato obligatorio matriz por candidato
   - `prompts/` — plantillas parametrizadas para cada tipo de subagente
-  - `schemas/` — contratos JSON canónicos, incluyendo `document_index.schema.json` para Paso 1.5
+  - `schemas/` — contratos JSON canónicos, incluyendo `plan_pages_analysis.schema.json` para Paso 1.2b y `document_index.schema.json` para Paso 1.5
 
 ## Orden de lectura inicial
 

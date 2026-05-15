@@ -56,6 +56,46 @@
 **Output**: `/proyecto/artifacts/step_1_pdfs_clean/{nombre_doc}_clean.pdf`
 **Done**: PDFs optimizados sin elementos repetitivos no útiles.
 
+
+### 1.2b Detección, análisis y sustitución de planos/diagramas grandes
+
+**Owner**: Orquestador + subagente visual barato.
+**Script**: `scripts/pdf_plan_pages.py`
+**Prompt visual**: `prompts/prompt_planos_vision.md`
+**Schema**: `schemas/plan_pages_analysis.schema.json`
+**Modelo**: `model_routing.yaml → paso_1_2b_planos_vision` (primary: `google/gemini-2.5-flash`).
+
+**Tarea**: después del PDF limpio y antes de LandingAI/OCR, detectar páginas con tamaño anómalo respecto al tamaño dominante del documento. Estas páginas suelen ser planos, diagramas o anexos tabulares grandes. El tamaño solo genera candidatos; la confirmación la hace un modelo visual.
+
+**Método**:
+1. Auditar tamaño de páginas del PDF limpio.
+2. Calcular tamaño dominante y área mediana.
+3. Marcar candidatos por área/aspect ratio/tamaño absoluto, agrupando rangos consecutivos.
+4. Rasterizar candidatos a resolución moderada.
+5. Pedir al modelo visual confirmar si son planos/diagramas.
+6. Si una página confirmada es plano/diagrama:
+   - extraer `identifier_or_title` visible, ej. `Plano instalaciones eléctricas página 1`, `SPYL-SV-T-0300`, `SPUR-SV-T-0301 — Distribución de datos y voz en el terminal`;
+   - describirla brevemente;
+   - extraer información explícitamente visible útil para procurement;
+   - marcar `exclude_from_ocr=true` salvo que OCR genérico sea claramente preferible.
+7. Extraer páginas confirmadas a PDF separado.
+8. Generar un PDF pre-OCR donde las páginas confirmadas son sustituidas por páginas textuales estándar con el análisis visual. Páginas candidatas no confirmadas, como tablas grandes, quedan intactas.
+
+**Outputs**:
+- `/proyecto/artifacts/step_1_planos/{stem}_page_size_audit.json`
+- `/proyecto/artifacts/step_1_planos/{stem}_candidate_pages/page_XXXX.png` (temporales/auditables)
+- `/proyecto/artifacts/step_1_planos/planos_extraidos_{stem}.pdf`
+- `/proyecto/artifacts/step_1_planos/planos_extraidos_{stem}.json`
+- `/proyecto/artifacts/step_1_planos/planos_extraidos_{stem}.md`
+- `/proyecto/artifacts/step_1_pdfs_preocr/{stem}_preocr.pdf`
+
+**Reglas**:
+- No borrar nunca páginas del PDF limpio; solo crear derivados.
+- No excluir por tamaño únicamente: requiere confirmación visual.
+- No inventar cantidades ni códigos no legibles.
+- Si una página grande es tabla/anexo textual, dejarla en el flujo OCR normal (`exclude_from_ocr=false`).
+- LandingAI/OCR debe consumir `{stem}_preocr.pdf` si existe; si no existe, consumir `{stem}_clean.pdf`.
+
 ### 1.3 OCR + parsing a Markdown
 
 **Owner**: Orquestador (script `scripts/extractors/landingai_extract.py`)
@@ -472,7 +512,9 @@ proyecto/
 ├── artifacts/
 │   ├── step_1_pdfs/                       (DOCX→PDF si aplica)
 │   ├── step_1_pdfs_clean/                 (post optimizer; PDFs nombrados `{stem}_clean.pdf`)
-│   ├── step_1_normalizados/               (markdowns post-LandingAI)
+│   ├── step_1_planos/                     (planos detectados, análisis visual, páginas extraídas)
+│   ├── step_1_pdfs_preocr/                (PDFs con planos sustituidos por resumen textual)
+│   ├── step_1_normalizados/               (markdowns post-LandingAI/preocr)
 │   ├── step_1_aclaradas/                  (docs aclarados + auditoría)
 │   ├── step_1_index/                      (`{stem}_index.json/.md`; índice estructural + correcciones Markdown sugeridas)
 │   ├── step_1_repaired/                   (opcional; Markdown reparado, patch y log)

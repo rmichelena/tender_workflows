@@ -65,6 +65,19 @@ El espacio se consolidó en cuatro categorías:
 
 ### Capa C — PDF fetch + parse
 
+
+### C0 — PDF pre-OCR local para planos/diagramas (Paso 1.2b)
+
+| Rol | Tool | Justificación |
+|---|---|---|
+| **Auditor geométrico + rasterizador** | `scripts/pdf_plan_pages.py audit` (PyMuPDF) | Detecta páginas anómalas por tamaño/área y genera PNGs candidatos sin consumir créditos OCR. |
+| **Clasificador visual** | `google/gemini-2.5-flash` con `prompts/prompt_planos_vision.md` | Barato y suficiente para confirmar planos/diagramas, extraer título/número de plano y resumen útil. |
+| **Constructor pre-OCR** | `scripts/pdf_plan_pages.py build` (PyMuPDF) | Extrae planos confirmados a PDF separado y genera `{stem}_preocr.pdf` con páginas sustitutas textuales. |
+
+Regla: LandingAI/ADE debe recibir `{stem}_preocr.pdf` si existe; si no, `{stem}_clean.pdf`.
+
+
+
 | Rol | Tool | Justificación |
 |---|---|---|
 | **Descarga directa** | HTTP `curl` / `requests` | Cuando el href termina en `.pdf` y es público. **No consumir créditos de Firecrawl para esto** — fue el error caro de ICAO |

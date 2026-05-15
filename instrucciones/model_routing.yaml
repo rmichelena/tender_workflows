@@ -74,6 +74,23 @@ routing:
     function_required: "auditor_revisor"
     handoff_budget: 1  # NO REVERSE EDGE
 
+  # Paso 1.2b — Análisis visual de planos/diagramas grandes
+  paso_1_2b_planos_vision:
+    primary: "google/gemini-2.5-flash"
+    fallback: "openai/gpt-5.4-mini"
+    reason: |
+      Clasificación y resumen visual barato de páginas candidatas por tamaño. El detector geométrico
+      solo propone candidatos; el modelo visual confirma plano/diagrama, extrae identificador/título
+      visible y decide si se sustituye antes de OCR.
+    function_required: "vision_plan_page_analysis"
+    schema: "schemas/plan_pages_analysis.schema.json"
+    output_validation: "strict_json_schema"
+    tool_budget:
+      max_candidate_pages_per_call: 5
+      render_dpi_default: 150
+      render_dpi_high_detail: 250
+      max_iterations: 1
+
   # Paso 1.5 — Índice estructural de Markdown (experimental AdP Cableado)
   paso_1_5_indexador:
     primary: "zai/glm-5.1"

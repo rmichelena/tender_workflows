@@ -17,6 +17,11 @@ version: 0.2
 # ---------------------------------------------------------------
 
 batching:
+  # Paso 1.2b Planos/diagramas: detección geométrica y rasterización.
+  plan_pages_area_ratio_threshold: 1.4
+  plan_pages_min_width_pt: 700
+  plan_pages_min_height_pt: 1000
+  plan_pages_render_dpi: 150
   # Paso 1.5 Índice estructural: lectura secuencial con overlap fijo.
   document_index_chunk_lines: 200
   document_index_overlap_lines: 50
@@ -43,6 +48,7 @@ limits:
 
 timeouts:
   default: 300                 # 5 min — pasos estándar (OCR, merge, BOM, specs, QA).
+  plan_pages_vision: 900       # 15 min — Paso 1.2b análisis visual de páginas candidatas.
   document_indexer: 1800       # 30 min — Paso 1.5 lectura completa por documento con overlap.
   bom_productor: 600           # 10 min — paso 2.1 y 2.3 (BOM HL y Exploded).
   bom_auditor: 300             # 5 min — paso 2.2 y 2.4.

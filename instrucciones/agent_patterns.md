@@ -177,6 +177,15 @@ Diez reglas no negociables, destiladas de los patrones anteriores. El orquestado
 2. PDF → pasar por optimizador (`pdf_image_audit.py`: quita headers/footers/firmas/sellos/decorativos).
 3. PDF optimizado → LandingAI ADE → markdown.
 
+### Paso 1.2b — Planos/diagramas pre-OCR
+**Tipo**: workflow no-LLM determinístico + LLM call visual selectiva.
+**Patrones**: 2.1 (chaining), 2.7 (select), 2.9 (schema validation), 2.10 (tool budget).
+**Reglas**:
+- Detector geométrico solo propone páginas candidatas; no decide eliminación.
+- Modelo visual confirma plano/diagrama y extrae `identifier_or_title` visible.
+- Páginas confirmadas se extraen a PDF aparte y se sustituyen por resumen textual en `{stem}_preocr.pdf`.
+- Páginas grandes que son tablas/anexos textuales quedan en OCR normal.
+
 ### Paso 1.4 — Merge aclaraciones (ejecutor + auditor)
 **Tipo**: evaluator-optimizer bounded.
 **Patrones**: 2.2 (evaluator-optimizer), 2.5 (handoff), 2.9 (schema validation).

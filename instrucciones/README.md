@@ -21,6 +21,7 @@ instrucciones/
 ├── formato_matriz_cumplimiento.md         ← formato obligatorio de matriz por candidato
 ├── prompts/                               ← plantillas para subagentes
 │   ├── prompt_ocr_vision.md
+│   ├── prompt_planos_vision.md
 │   ├── prompt_document_indexer.md
 │   ├── prompt_merge_aclaraciones_ejecutor.md
 │   ├── prompt_merge_aclaraciones_auditor.md
@@ -35,6 +36,7 @@ instrucciones/
 │   ├── prompt_consolidacion_paso7.md
 │   └── prompt_QA_final.md
 └── schemas/                               ← contratos JSON (canónicos máquina)
+    ├── plan_pages_analysis.schema.json
     ├── document_index.schema.json
     ├── bom_item.schema.json
     ├── item_specs.schema.json
@@ -47,6 +49,7 @@ instrucciones/
 | Tipo de artefacto | Formato canónico (que produce el agente) | Derivados (auto, para humano) |
 |---|---|---|
 | EETT y aclarados (paso 1) | Markdown | — |
+| Planos/diagramas extraídos (paso 1.2b) | JSON + PDF extraído + PDF pre-OCR | MD |
 | Índice estructural (paso 1.5) | JSON | MD |
 | BOM (HL, exploded, búsqueda) | JSON | TSV + MD |
 | Item pack (paso 2.5) | JSON por ítem | MD por ítem |
@@ -68,7 +71,9 @@ proyecto/
 ├── artifacts/
 │   ├── step_1_pdfs/                 (PDFs preservados / DOCX→PDF)
 │   ├── step_1_pdfs_clean/           (PDFs optimizados `{stem}_clean.pdf`)
-│   ├── step_1_normalizados/         (markdowns de docs fuente)
+│   ├── step_1_planos/               (planos detectados/análisis visual)
+│   ├── step_1_pdfs_preocr/          (PDFs con planos sustituidos por texto)
+│   ├── step_1_normalizados/         (markdowns de docs fuente/preocr)
 │   ├── step_1_aclaradas/            (docs aclarados + auditoría)
 │   ├── step_1_index/                (`{stem}_index.json/.md`; índice estructural)
 │   ├── step_1_repaired/             (opcional; Markdown reparado, patch y log)

@@ -45,7 +45,9 @@ tender_procurement/
 │   ├── documentos_muestra/
 │   └── extractor_benchmark/
 └── instrucciones/                     # Workflow y prompts del pipeline
+    ├── prompts/prompt_planos_vision.md
     ├── prompts/prompt_document_indexer.md
+    ├── schemas/plan_pages_analysis.schema.json
     └── schemas/document_index.schema.json
 ```
 
@@ -82,6 +84,29 @@ pip install requests PyMuPDF google-auth-oauthlib markitdown landingai-ade
 # PDF grande escaneado con DocAI (máxima calidad, lento):
 .venv/bin/python scripts/extractors/docai_batch_gcs.py documento.pdf output/
 ```
+
+## Paso 1.2b experimental: planos/diagramas antes de OCR
+
+Después de limpiar PDFs y antes de LandingAI/OCR, el workflow puede detectar páginas de tamaño anómalo —frecuentemente planos— para evitar costo/ruido en conversores Markdown.
+
+Herramienta:
+
+```bash
+.venv/bin/python scripts/pdf_plan_pages.py audit input_clean.pdf --output-dir artifacts/step_1_planos
+# analizar imágenes candidatas con prompts/prompt_planos_vision.md
+.venv/bin/python scripts/pdf_plan_pages.py build input_clean.pdf \
+  --output-dir artifacts/step_1_planos \
+  --preocr-dir artifacts/step_1_pdfs_preocr \
+  --analysis-json artifacts/step_1_planos/planos_extraidos_DOC.json
+```
+
+Outputs principales:
+
+- `artifacts/step_1_planos/{stem}_page_size_audit.json`
+- `artifacts/step_1_planos/planos_extraidos_{stem}.pdf/.json/.md`
+- `artifacts/step_1_pdfs_preocr/{stem}_preocr.pdf`
+
+El análisis visual debe extraer `identifier_or_title` cuando exista: número de plano, título del cajetín, o ambos.
 
 ## Paso 1.5 experimental: índice estructural de Markdown
 
