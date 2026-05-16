@@ -365,6 +365,43 @@ def expand_rect_to_intersecting_image_tiles(page: fitz.Page, rect: fitz.Rect, pa
     return expanded
 
 
+
+
+def make_replacement_image_stream(width_pt: float, height_pt: float, text: str, scale: float = 2.0) -> bytes:
+    """Render replacement text into a PNG image sized to the target PDF rect.
+
+    The image is inserted back into the PDF so downstream OCR sees a normal image,
+    not PDF overlay text. Background is 15% gray (0.85 RGB) to make it obvious
+    that an original image/diagram was replaced.
+    """
+    width_pt = max(72.0, float(width_pt))
+    height_pt = max(36.0, float(height_pt))
+    tmp = fitz.open()
+    page = tmp.new_page(width=width_pt, height=height_pt)
+    page.draw_rect(page.rect, color=(0.55, 0.55, 0.55), fill=(0.85, 0.85, 0.85), width=1)
+
+    margin = max(6.0, min(width_pt, height_pt) * 0.035)
+    fontsize = max(5.5, min(10.0, height_pt / 18.0))
+    line_h = fontsize * 1.28
+    max_chars = max(24, int((width_pt - 2 * margin) / (fontsize * 0.48)))
+    y = margin + fontsize
+    for raw in text.split("\n"):
+        wrapped = textwrap.wrap(raw, width=max_chars, replace_whitespace=False) or [raw]
+        for line in wrapped:
+            if y > height_pt - margin:
+                page.insert_text(fitz.Point(margin, y), "[continúa en JSON de análisis]", fontsize=fontsize, fontname="helv", color=(0, 0, 0))
+                pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                data = pix.tobytes("png")
+                tmp.close()
+                return data
+            page.insert_text(fitz.Point(margin, y), line, fontsize=fontsize, fontname="helv", color=(0, 0, 0))
+            y += line_h
+        y += line_h * 0.35
+    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+    data = pix.tobytes("png")
+    tmp.close()
+    return data
+
 def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str, analysis_json: Path) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
     preocr_dir.mkdir(parents=True, exist_ok=True)
@@ -415,23 +452,20 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
             pre.insert_pdf(doc, from_page=idx - 1, to_page=idx - 1)
             pre_page = pre[pre.page_count - 1]
             pa = pages_by_num[idx]
+            replacement_jobs = []
             for repl in pa.get("image_replacements", []):
                 bbox_pct = repl.get("bbox_pct", [0, 0, 1, 1])
-                # Convert pct to pt with 2% margin
+                # Convert pct to pt with 2% margin.
                 margin_pct = 0.02
                 x0 = max(0, (bbox_pct[0] - margin_pct)) * pre_page.rect.width
                 y0 = max(0, (bbox_pct[1] - margin_pct)) * pre_page.rect.height
                 x1 = min(1, (bbox_pct[2] + margin_pct)) * pre_page.rect.width
                 y1 = min(1, (bbox_pct[3] + margin_pct)) * pre_page.rect.height
-                # Expand to any intersecting PDF image blocks/tiles so we do not leave strips.
                 rect = fitz.Rect(x0, y0, x1, y1)
+                # Expand to any intersecting PDF image blocks/tiles so we do not leave strips.
                 rect = expand_rect_to_intersecting_image_tiles(pre_page, rect)
-                x0, y0, x1, y1 = rect.x0, rect.y0, rect.x1, rect.y1
-                # White rectangle
-                pre_page.draw_rect(rect, color=None, fill=(1, 1, 1))
-                # Insert description text
-                desc_lines = []
-                desc_lines.append(f"[Diagrama/imagen reemplazado — ver planos_extraidos]")
+
+                desc_lines = ["[Diagrama/imagen reemplazado — ver planos_extraidos]"]
                 if repl.get("description"):
                     desc_lines.append(repl["description"])
                 codes = repl.get("visible_text_or_codes", [])
@@ -440,21 +474,18 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
                 infos = repl.get("technical_observations", [])
                 if infos:
                     desc_lines.append("Info técnica visible: " + "; ".join(str(i) for i in infos[:5]))
-                text_to_insert = "\n".join(desc_lines)
-                # Insert text inside the rect
-                fs = 8
-                max_w = x1 - x0 - 8
-                if max_w < 50:
-                    max_w = 50
-                max_chars = max(30, int(max_w / (fs * 0.45)))
-                ty = y0 + 12
-                for raw_line in text_to_insert.split("\n"):
-                    wrapped = textwrap.wrap(raw_line, width=max_chars) or [raw_line]
-                    for wl in wrapped:
-                        if ty > y1 - 8:
-                            break
-                        pre_page.insert_text(fitz.Point(x0 + 4, ty), wl, fontsize=fs, fontname="helv", color=(0, 0, 0))
-                        ty += fs * 1.3
+                text_to_render = "\n".join(desc_lines)
+                png_stream = make_replacement_image_stream(rect.width, rect.height, text_to_render)
+                replacement_jobs.append((rect, png_stream))
+
+            # Redact all target rects first, then insert replacement images.
+            # This removes original image tiles/strips cleanly while avoiding PDF text overlays.
+            for rect, _png_stream in replacement_jobs:
+                pre_page.add_redact_annot(rect, fill=(1, 1, 1))
+            if replacement_jobs:
+                pre_page.apply_redactions()
+            for rect, png_stream in replacement_jobs:
+                pre_page.insert_image(rect, stream=png_stream, keep_proportion=False)
         else:
             # leave_for_ocr or not in analysis: copy as-is
             pre.insert_pdf(doc, from_page=idx - 1, to_page=idx - 1)
