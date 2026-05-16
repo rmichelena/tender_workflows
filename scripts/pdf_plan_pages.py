@@ -397,19 +397,24 @@ def make_replacement_image_stream(width_pt: float, height_pt: float, text: str, 
     fontsize = max(5.5, min(10.0, height_pt / 18.0))
     line_h = fontsize * 1.28
     max_chars = max(24, int((width_pt - 2 * margin) / (fontsize * 0.48)))
-    y = margin + fontsize
+    lines: list[str] = []
     for raw in text.split("\n"):
         wrapped = textwrap.wrap(raw, width=max_chars, replace_whitespace=False) or [raw]
-        for line in wrapped:
-            if y > height_pt - margin:
-                page.insert_text(fitz.Point(margin, y), "[continúa en JSON de análisis]", fontsize=fontsize, fontname="helv", color=(0, 0, 0))
-                pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-                data = pix.tobytes("png")
-                tmp.close()
-                return data
-            page.insert_text(fitz.Point(margin, y), line, fontsize=fontsize, fontname="helv", color=(0, 0, 0))
-            y += line_h
-        y += line_h * 0.35
+        lines.extend(wrapped)
+        lines.append("")
+    if lines and lines[-1] == "":
+        lines.pop()
+
+    max_lines = max(1, int((height_pt - 2 * margin) / line_h))
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] = "[continúa en JSON de análisis]"
+
+    text_height = max(0.0, (len(lines) - 1) * line_h + fontsize)
+    y = max(margin + fontsize, (height_pt - text_height) / 2 + fontsize)
+    for line in lines:
+        page.insert_text(fitz.Point(margin, y), line, fontsize=fontsize, fontname="helv", color=(0, 0, 0))
+        y += line_h
     pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
     data = pix.tobytes("png")
     tmp.close()
