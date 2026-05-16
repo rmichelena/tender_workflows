@@ -97,3 +97,15 @@ proyecto/
 └── logs/
     └── decision_log.md              (modelos usados, reintentos, escalamientos)
 ```
+
+## Paso 2A schemas por eje
+
+Además del shape común `schemas/thematic_extraction.schema.json`, usar contratos especializados por eje:
+
+- `schemas/axis_0_main_tender_data.schema.json`
+- `schemas/axis_1_proposal_signature_documents.schema.json`
+- `schemas/axis_2_execution_documentary_deliverables.schema.json`
+- `schemas/axis_3_execution_services_obligations.schema.json`
+- `schemas/axis_4_goods_licenses_equipment.schema.json`
+
+Los schemas por eje restringen `entry_type`, `phase` y `source_context_type` a valores semánticamente válidos para cada tarea.

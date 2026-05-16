@@ -144,3 +144,28 @@ Checks mínimos con `scripts/validate_thematic_extraction.py`:
 - líneas válidas contra Markdown fuente;
 - cobertura reportada compatible con `chunk_plan_path`;
 - `entry_id` único.
+
+## Paso 2A — Schemas específicos por eje
+
+Decisión: el schema genérico `thematic_extraction.schema.json` es útil como base común, pero no debe ser el contrato directo para subagentes cuando el eje es semánticamente estrecho.
+
+Problema observado:
+
+- En eje 4, modelos podían usar `phase=proposal` o `entry_type` libre/incorrecto aunque los bienes no se entregan en fase de propuesta.
+- El schema genérico permitía `source_context_type=other` y `entry_type` arbitrario, abriendo la puerta a sobre-inclusión.
+
+Solución:
+
+- Mantener `thematic_extraction.schema.json` como shape común.
+- Usar schemas especializados por eje con enums cerrados:
+  - `axis_0_main_tender_data.schema.json`
+  - `axis_1_proposal_signature_documents.schema.json`
+  - `axis_2_execution_documentary_deliverables.schema.json`
+  - `axis_3_execution_services_obligations.schema.json`
+  - `axis_4_goods_licenses_equipment.schema.json`
+
+Regla importante para eje 4:
+
+- `phase` se refiere a cuándo se entrega/usa el bien, no dónde aparece mencionado.
+- Por tanto, `phase=proposal` no está permitido para bienes/licencias/equipamiento.
+- Si el bien aparece en un formato/presupuesto de propuesta, eso va en `source_context_type`, no en `phase`.

@@ -265,3 +265,15 @@ El flujo experimental actual para extracción temprana usa lectores temáticos p
 4. El orquestador renderiza Markdown humano con `scripts/render_thematic_md.py`.
 
 No pedir Markdown a los subagentes; es derivado determinístico.
+
+### Schemas por eje
+
+Paso 2A usa un shape común (`thematic_extraction.schema.json`), pero los subagentes deben recibir el schema específico del eje para restringir enums y evitar sobre-inclusión:
+
+- `instrucciones/schemas/axis_0_main_tender_data.schema.json`
+- `instrucciones/schemas/axis_1_proposal_signature_documents.schema.json`
+- `instrucciones/schemas/axis_2_execution_documentary_deliverables.schema.json`
+- `instrucciones/schemas/axis_3_execution_services_obligations.schema.json`
+- `instrucciones/schemas/axis_4_goods_licenses_equipment.schema.json`
+
+Ejemplo: en eje 4 no existe `phase=proposal`; una mención en formato/presupuesto de propuesta sigue siendo un bien de ejecución, con `source_context_type` adecuado.

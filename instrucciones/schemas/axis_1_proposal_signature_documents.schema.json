@@ -1,0 +1,323 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "axis_1_proposal_signature_documents.schema.json",
+  "title": "Axis 1 - Proposal and contract-signature documents",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document_id",
+    "axis_id",
+    "axis_name",
+    "source_md_path",
+    "document_index_path",
+    "method",
+    "chunk_plan_path",
+    "entries",
+    "coverage",
+    "uncertainties",
+    "schema_feedback"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.3"
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "axis_id": {
+      "type": "string",
+      "const": "axis_1_proposal_signature_documents"
+    },
+    "axis_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_md_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "document_index_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chunking_strategy",
+        "target_chunk_lines",
+        "read_order",
+        "notes"
+      ],
+      "properties": {
+        "chunking_strategy": {
+          "type": "string"
+        },
+        "target_chunk_lines": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "read_order": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sections_read",
+        "line_ranges_read",
+        "coverage_notes"
+      ],
+      "properties": {
+        "sections_read": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "line_ranges_read": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/line_range"
+          }
+        },
+        "coverage_notes": {
+          "type": "string"
+        }
+      }
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/uncertainty"
+      }
+    },
+    "schema_feedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sufficient",
+        "suggested_changes",
+        "notes"
+      ],
+      "properties": {
+        "sufficient": {
+          "type": "boolean"
+        },
+        "suggested_changes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "chunk_plan_path": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "line_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "line_start",
+        "line_end"
+      ],
+      "properties": {
+        "line_start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "line_end": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry_id",
+        "entry_type",
+        "mention_type",
+        "phase",
+        "description",
+        "source_line_start",
+        "source_line_end",
+        "section_path",
+        "evidence_excerpt",
+        "evidence_is_verbatim",
+        "interpretation_notes",
+        "dedupe_context",
+        "cross_axis_notes",
+        "confidence",
+        "source_context_type",
+        "is_primary_requirement",
+        "conditional_applicability"
+      ],
+      "properties": {
+        "entry_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry_type": {
+          "type": "string",
+          "enum": [
+            "proposal_form",
+            "proposal_letter",
+            "declaration",
+            "certificate",
+            "legal_document",
+            "power_of_attorney",
+            "consortium_document",
+            "technical_support_document",
+            "experience_support_document",
+            "financial_or_risk_report",
+            "bid_bond_or_guarantee_document",
+            "signed_bases_or_annex",
+            "contract_signature_document",
+            "payment_proof",
+            "provider_registration_form",
+            "notary_submission_document",
+            "other_proposal_signature_document"
+          ]
+        },
+        "mention_type": {
+          "type": "string",
+          "enum": [
+            "explicit",
+            "implied"
+          ]
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "proposal",
+            "contract_signature",
+            "unclear"
+          ],
+          "description": "Only proposal or contract_signature unless unclear; execution documents belong to axis 2."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_line_start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source_line_end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "section_path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence_excerpt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400,
+          "description": "Short literal or near-literal quote from the source, max 400 chars. Truncate with ellipsis if needed."
+        },
+        "interpretation_notes": {
+          "type": "string"
+        },
+        "dedupe_context": {
+          "type": "string"
+        },
+        "cross_axis_notes": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "source_context_type": {
+          "type": "string",
+          "enum": [
+            "proposal_requirement",
+            "signature_requirement",
+            "contract_clause",
+            "form",
+            "annex",
+            "checklist",
+            "other"
+          ]
+        },
+        "is_primary_requirement": {
+          "type": "boolean"
+        },
+        "conditional_applicability": {
+          "type": "string",
+          "enum": [
+            "always",
+            "conditional",
+            "if_applicable",
+            "unclear"
+          ]
+        },
+        "evidence_is_verbatim": {
+          "type": "boolean"
+        }
+      }
+    },
+    "uncertainty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "line_start",
+        "line_end",
+        "description",
+        "severity"
+      ],
+      "properties": {
+        "line_start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "line_end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        }
+      }
+    }
+  }
+}

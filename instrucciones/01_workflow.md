@@ -241,7 +241,16 @@
 
 **Owner**: Orquestador → subagentes especializados.
 **Prompt**: `prompts/prompt_thematic_reader.md`
-**Schema**: `schemas/thematic_extraction.schema.json` v0.3
+**Schema base**: `schemas/thematic_extraction.schema.json` v0.3
+**Schemas por eje**:
+- `schemas/axis_0_main_tender_data.schema.json`
+- `schemas/axis_1_proposal_signature_documents.schema.json`
+- `schemas/axis_2_execution_documentary_deliverables.schema.json`
+- `schemas/axis_3_execution_services_obligations.schema.json`
+- `schemas/axis_4_goods_licenses_equipment.schema.json`
+
+Usar el schema específico del eje al llamar subagentes; el schema base queda como shape común/referencia.
+
 **Modelo piloto**: `openai/gpt-5.4-mini`.
 
 **Inputs por subagente**:
