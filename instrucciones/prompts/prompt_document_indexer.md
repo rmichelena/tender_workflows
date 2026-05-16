@@ -19,6 +19,8 @@ Esta pasada solo debe responder:
 - ¿Qué problemas estructurales produjo el extractor?
 - ¿Qué correcciones Markdown de bajo riesgo convendría aplicar después, sin modificar todavía el archivo fuente?
 
+**No conviertas el índice en un resumen factual del documento.** Evita extraer valores, requisitos, montos, plazos, cantidades, porcentajes, nombres de entidades/personas o condiciones de participación salvo que sean indispensables para identificar estructuralmente una sección o tabla. El índice debe decir “sección de monto máximo”, no “monto máximo: US$ ...”; “sección de consorcios”, no listar sus requisitos.
+
 ## Inputs
 
 Recibirás por contexto **solo rutas**, no contenido:
@@ -36,7 +38,9 @@ Debes leer el archivo Markdown por tu cuenta usando herramientas de archivo/term
 1. JSON canónico válido contra:
    - `instrucciones/schemas/document_index.schema.json`
 
-2. Resumen humano Markdown.
+2. Resumen humano Markdown estructural.
+
+El Markdown humano debe ser un índice navegable, no una ficha factual. Para cada sección, incluye título, líneas, tipo y contenido predominante; evita datos específicos como montos, plazos, porcentajes, cantidades o requisitos detallados.
 
 Los nombres de salida deben ser planos en `artifacts/step_1_index/`:
 
@@ -86,7 +90,8 @@ Usa señales combinadas:
 - `inferred_without_heading`: `true` si reconstruiste una sección real sin heading Markdown confiable.
 - `section_kind`: capítulo, sección, cláusula, formato, anexo, partida, región gráfica, etc.
 - `predominant_content`: texto, tabla, formulario, checklist, presupuesto, gráfico/OCR, mixto.
-- `category_hint`: pista de contenido para pasos posteriores; no es extracción BOM.
+- `category_hint`: pista de contenido para pasos posteriores; no es extracción BOM ni extracción factual.
+- `summary`: debe ser una descripción estructural breve del tipo de contenido, no una síntesis factual. Máximo recomendado: 12-18 palabras.
 
 ## Markdown corrections suggested
 

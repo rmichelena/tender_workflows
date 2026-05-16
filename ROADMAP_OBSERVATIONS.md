@@ -77,3 +77,29 @@ Campos que sí podrían agregarse después:
 - `markdown_artifact_type`: para clasificar artifacts de Docling, OCR o reemplazos visuales.
 - `repair_confidence` / `repair_scope`: separar reparación determinística segura de inferencia semántica.
 - `source_page_start` / `source_page_end`: solo si los provee el pipeline, no si los infiere el LLM.
+
+### Paso 1.5 — Evitar extracción factual accidental
+
+Hallazgo: el resumen Markdown del índice puede tender a incluir datos factuales (montos, plazos, requisitos de consorcio, cantidades) porque el schema tiene campos `summary`/`notes` y el prompt pide un resumen humano.
+
+Decisión:
+
+- El índice estructural no debe convertirse en mini-resumen del documento.
+- `summary` debe describir la función estructural de la sección, no sus datos.
+- Evitar valores específicos salvo que sean necesarios para distinguir una sección/tabla.
+
+Ejemplo preferido:
+
+```text
+8. Monto Máximo — sección de presupuesto/monto referencial
+2. Condiciones de Consorcios — sección de requisitos de participación en consorcio
+```
+
+Evitar:
+
+```text
+8. Monto Máximo — US$ 1,327,351.76 incl. IGV
+2. Condiciones de Consorcios — máximo 2 integrantes, mínimo 40% participación
+```
+
+Si después se necesita extracción factual, debe ser otro paso con schema propio y control de evidencia.
