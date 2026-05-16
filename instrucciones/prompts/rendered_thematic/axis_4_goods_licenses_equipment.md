@@ -10,7 +10,7 @@ Tu función aquí es identificar bienes, licencias, equipos, materiales y acceso
 
 Lee el documento completo y extrae menciones a bienes/licencias/equipamiento de ejecución como ledger evidenciado para futura consolidación BOM-HL. No consolides ni dedupes; conserva contexto.
 
-No consolides entre documentos. No dedupes globalmente. No produzcas BOM final. No completes información faltante. Registra menciones con evidencia.
+No consolides entre documentos. No dedupes globalmente. Trabaja de manera sistemática, progresando linealmente a lo largo del documento, manteniendo el contexto para mejor entendimiento. No completes información faltante. Registra menciones con evidencia.
 
 ## Inputs
 
@@ -108,7 +108,7 @@ Cada entrada debe incluir todos los campos requeridos por `schema_path`. En part
 - `description`: descripción corta y fiel.
 - `source_line_start` / `source_line_end`.
 - `section_path`: jerarquía textual/numeral reconstruida.
-- `evidence_excerpt`: cita textual breve literal o casi literal, máximo 400 caracteres. Si el fragmento original es largo, recorta con `…` conservando la parte verificable.
+- `evidence_excerpt`: cita textual breve literal o casi literal, máximo 400 caracteres. Si el fragmento original es largo, recorta con `…` conservando la parte verificable. Hazla lo suficientemente larga para identificar el ítem y el motivo de inclusión, sin exceder el límite.
 - `evidence_is_verbatim`: `true` si la cita es literal exacta; `false` si normalizaste espacios/acentos o hiciste recorte casi literal.
 - `source_context_type`: usa solo valores permitidos por el schema del eje.
 - `is_primary_requirement`.
@@ -127,13 +127,13 @@ Campos adicionales específicos del eje, si el schema los exige:
 ## Reglas de calidad
 
 - Toda entrada debe tener evidencia de líneas y `evidence_excerpt` verificable.
-- No uses `evidence_excerpt` como resumen; debe ser cita textual corta.
+- No uses `evidence_excerpt` como resumen; debe ser cita textual corta, pero lo suficientemente larga para identificar el item y el motivo de su inclusión.
 - `evidence_excerpt` debe ser <= 400 caracteres.
 - No inventes obligaciones.
 - Si algo parece homónimo de otra cosa, NO dedupes; registra contexto en `dedupe_context`.
 - Si una mención pertenece a varios ejes, registra solo si es relevante para tu eje y anota el cruce en `cross_axis_notes`.
 - Si detectas texto contradictorio o una frase que parece usar el actor/fase equivocada, puedes incluirla solo si cumple el gate del eje y debes advertirlo en `interpretation_notes` o `uncertainties`.
-- Si no hay menciones en un rango, no inventes.
+- Si no hay menciones en un rango, no inventes. Perfectamente puede ser que para el eje que estés analizando, un determinado documento tenga muy poco material.
 
 ## Output obligatorio
 

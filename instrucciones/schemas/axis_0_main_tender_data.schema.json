@@ -199,8 +199,17 @@
             "contract_condition",
             "insurance_requirement",
             "legal_or_compliance_condition",
-            "other_main_data"
-          ]
+            "other_main_data",
+            "tender_process_schedule",
+            "tender_classification",
+            "delivery_deadline_or_milestone",
+            "advance_payment_condition",
+            "evaluation_scoring_factor",
+            "post_sale_support_condition",
+            "maintenance_condition",
+            "warranty_condition"
+          ],
+          "description": "Axis 0 commercial/contractual main-data category. Use specific values for schedule, classification, delivery deadlines, scoring factors, payment/advance, guarantees/warranties and qualification requirements."
         },
         "mention_type": {
           "type": "string",
@@ -271,8 +280,18 @@
             "contract_clause",
             "presupuesto",
             "toc",
-            "other"
-          ]
+            "other",
+            "evaluation_criteria",
+            "qualification_requirement",
+            "payment_terms",
+            "penalty_clause",
+            "guarantee_clause",
+            "experience_requirement",
+            "personnel_requirement",
+            "certification_requirement",
+            "scope_clause"
+          ],
+          "description": "Where the main datum appears: schedule, scope, qualification, evaluation, payment, penalties, guarantees, contract clause, etc."
         },
         "is_primary_requirement": {
           "type": "boolean"

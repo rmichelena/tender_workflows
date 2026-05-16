@@ -80,7 +80,7 @@ Cada entrada debe incluir todos los campos requeridos por `schema_path`. En part
 - `description`: descripción corta y fiel.
 - `source_line_start` / `source_line_end`.
 - `section_path`: jerarquía textual/numeral reconstruida.
-- `evidence_excerpt`: cita textual breve literal o casi literal, máximo 400 caracteres. Si el fragmento original es largo, recorta con `…` conservando la parte verificable. Hazla lo suficiente
+- `evidence_excerpt`: cita textual breve literal o casi literal, máximo 400 caracteres. Si el fragmento original es largo, recorta con `…` conservando la parte verificable. Hazla lo suficientemente larga para identificar el ítem y el motivo de inclusión, sin exceder el límite.
 - `evidence_is_verbatim`: `true` si la cita es literal exacta; `false` si normalizaste espacios/acentos o hiciste recorte casi literal.
 - `source_context_type`: usa solo valores permitidos por el schema del eje.
 - `is_primary_requirement`.

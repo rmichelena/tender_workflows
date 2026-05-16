@@ -221,3 +221,14 @@ Payload por eje incluye:
 - `axis_specific_fields`
 
 Esto evita divergencia accidental en el contrato común, pero permite adherencia fuerte por tarea.
+
+### Axis 0 schema refinement after prompt edits
+
+Axis 0 now covers broader bid-decision data beyond the original generic commercial fields:
+
+- tender classification (service/supply/supply+installation/support);
+- delivery deadlines and milestones;
+- advance/payment conditions;
+- evaluation scoring factors;
+- post-sale support, maintenance, warranty conditions;
+- more precise source contexts for evaluation, qualification, payment, penalties, guarantees, experience, personnel, certifications and scope.
