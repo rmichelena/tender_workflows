@@ -159,6 +159,10 @@
       "required": [
         "entry_id",
         "entry_type",
+        "custom_spec_relevance",
+        "supply_model",
+        "item_family",
+        "item_name",
         "mention_type",
         "phase",
         "description",
@@ -189,17 +193,12 @@
             "material",
             "accessory",
             "spare_part",
-            "network_component",
-            "cabling_component",
-            "cabinet_or_rack",
-            "power_component",
-            "mounting_component",
-            "control_access_component",
-            "telephony_component",
-            "wireless_component",
+            "consumable",
+            "civil_works_material",
             "secondary_evidence_group",
             "other_good_component"
-          ]
+          ],
+          "description": "Generic procurement category, not product family. Do not encode specific equipment names here."
         },
         "mention_type": {
           "type": "string",
@@ -271,6 +270,8 @@
             "scope_table",
             "executive_summary",
             "contract_clause",
+            "format",
+            "checklist",
             "other"
           ],
           "description": "Use spec for primary technical requirement; metrado/presupuesto/apu/anexo/plano/topology/scope_table/executive_summary for secondary evidence."
@@ -289,6 +290,38 @@
         },
         "evidence_is_verbatim": {
           "type": "boolean"
+        },
+        "item_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Free-text normalized item name as found/interpreted from source, e.g. Switch Core, baggage claim carousel, gateway de voz."
+        },
+        "item_family": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Free-text reusable family/category for dedupe/search. Not schema-enumerated because families vary by tender."
+        },
+        "supply_model": {
+          "type": "string",
+          "enum": [
+            "cots",
+            "custom_made",
+            "configured_cots",
+            "mixed",
+            "unclear"
+          ],
+          "description": "Whether the item is off-the-shelf, custom-built for the client/project, configured COTS, mixed, or unclear."
+        },
+        "custom_spec_relevance": {
+          "type": "string",
+          "enum": [
+            "datasheet_match_expected",
+            "project_specific_specs_matter",
+            "both",
+            "unclear",
+            "not_applicable"
+          ],
+          "description": "Whether specifications should be checked mainly against vendor datasheets, project-specific/custom design requirements, both, or not applicable."
         }
       }
     },

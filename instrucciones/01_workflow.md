@@ -281,6 +281,11 @@ Usar el schema específico del eje al llamar subagentes; el schema base queda co
 - `conditional_applicability`;
 - `dedupe_context` / `cross_axis_notes`.
 
+Para eje 4, además:
+- `item_name` / `item_family` libres para dedupe/búsqueda;
+- `supply_model`: COTS, custom-made, configured COTS, mixed, unclear;
+- `custom_spec_relevance`: si la verificación debe mirar ficha técnica, specs de proyecto, ambos, etc.
+
 ### 2A.2 Validación y Markdown derivado
 
 **Owner**: Orquestador / scripts determinísticos.

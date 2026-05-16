@@ -169,3 +169,32 @@ Regla importante para eje 4:
 - `phase` se refiere a cuándo se entrega/usa el bien, no dónde aparece mencionado.
 - Por tanto, `phase=proposal` no está permitido para bienes/licencias/equipamiento.
 - Si el bien aparece en un formato/presupuesto de propuesta, eso va en `source_context_type`, no en `phase`.
+
+### Eje 4 — COTS vs custom-made
+
+Decisión: no enumerar familias específicas de equipos en el schema. Hacerlo obligaría a crear un schema diferente por licitación y sería frágil.
+
+`entry_type` debe ser una categoría genérica de procurement:
+
+- `equipment`
+- `software_license`
+- `hardware_license`
+- `material`
+- `accessory`
+- `spare_part`
+- `consumable`
+- `civil_works_material`
+- `secondary_evidence_group`
+- `other_good_component`
+
+Para dedupe/búsqueda, usar campos libres:
+
+- `item_name`: nombre normalizado del ítem.
+- `item_family`: familia reusable libre, sin enum cerrado.
+
+Agregar distinción de estrategia de suministro/verificación:
+
+- `supply_model`: `cots`, `custom_made`, `configured_cots`, `mixed`, `unclear`.
+- `custom_spec_relevance`: `datasheet_match_expected`, `project_specific_specs_matter`, `both`, `unclear`, `not_applicable`.
+
+Ejemplo: un switch de red normalmente será `cots`/`datasheet_match_expected`; un carrusel de reclamo de equipaje puede ser `custom_made` o `mixed`, donde dimensiones/capacidad/layout del proyecto pesan más que una ficha técnica estándar.

@@ -277,3 +277,12 @@ Paso 2A usa un shape común (`thematic_extraction.schema.json`), pero los subage
 - `instrucciones/schemas/axis_4_goods_licenses_equipment.schema.json`
 
 Ejemplo: en eje 4 no existe `phase=proposal`; una mención en formato/presupuesto de propuesta sigue siendo un bien de ejecución, con `source_context_type` adecuado.
+
+#### Eje 4: COTS vs custom-made
+
+El schema de bienes no enumera familias específicas de equipamiento. En su lugar:
+
+- `entry_type` = categoría genérica de procurement.
+- `item_name` / `item_family` = texto libre para dedupe/búsqueda.
+- `supply_model` distingue COTS, custom-made, configured COTS, mixed o unclear.
+- `custom_spec_relevance` indica si la validación debe esperar match de ficha técnica o requisitos de diseño del proyecto.
