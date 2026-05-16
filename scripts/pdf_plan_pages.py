@@ -340,29 +340,42 @@ def image_block_rects(page: fitz.Page) -> list[fitz.Rect]:
     return rects
 
 
-def expand_rect_to_intersecting_image_tiles(page: fitz.Page, rect: fitz.Rect, padding: float = 3.0) -> fitz.Rect:
-    """Expand a replacement rect to cover image tiles/fragments it intersects.
+def resolve_rendered_image_rect(page: fitz.Page, candidate: fitz.Rect) -> fitz.Rect:
+    """Resolve an approximate visual bbox to the actual rendered image rect.
 
-    Acrobat and CAD-generated PDFs sometimes split one visual image into vertical
-    strips/tiles. Gemini may mark the visible diagram approximately; this expands
-    to the union of PDF image blocks that intersect/touch the requested region.
+    The analysis bbox is only a locator. For redaction we must use the final
+    rendered image position from the PDF page, otherwise we can erase surrounding
+    text. PyMuPDF image blocks already include page transforms / masks in page
+    coordinates, so we select the intersecting rendered image blocks and return
+    their union. If no image block matches, fall back to the candidate without
+    adding any margin.
     """
-    expanded = fitz.Rect(rect)
-    changed = True
-    while changed:
-        changed = False
-        padded = fitz.Rect(expanded.x0 - padding, expanded.y0 - padding, expanded.x1 + padding, expanded.y1 + padding)
-        for img_rect in image_block_rects(page):
-            if padded.intersects(img_rect):
-                union = expanded | img_rect
-                if union != expanded:
-                    expanded = union
-                    changed = True
-    expanded.x0 = max(0, expanded.x0)
-    expanded.y0 = max(0, expanded.y0)
-    expanded.x1 = min(page.rect.width, expanded.x1)
-    expanded.y1 = min(page.rect.height, expanded.y1)
-    return expanded
+    selected: list[fitz.Rect] = []
+    for img_rect in image_block_rects(page):
+        inter = candidate & img_rect
+        if inter.is_empty:
+            continue
+        img_area = max(1.0, img_rect.width * img_rect.height)
+        cand_area = max(1.0, candidate.width * candidate.height)
+        # Strong overlap with the rendered image, or image center inside the
+        # candidate. The center rule catches small tiles/fragments wholly inside
+        # a larger region; the overlap rule handles near-exact bboxes.
+        center = fitz.Point((img_rect.x0 + img_rect.x1) / 2, (img_rect.y0 + img_rect.y1) / 2)
+        if (inter.get_area() / img_area) >= 0.35 or (inter.get_area() / cand_area) >= 0.35 or candidate.contains(center):
+            selected.append(img_rect)
+
+    if not selected:
+        resolved = fitz.Rect(candidate)
+    else:
+        resolved = fitz.Rect(selected[0])
+        for img_rect in selected[1:]:
+            resolved |= img_rect
+
+    resolved.x0 = max(0, resolved.x0)
+    resolved.y0 = max(0, resolved.y0)
+    resolved.x1 = min(page.rect.width, resolved.x1)
+    resolved.y1 = min(page.rect.height, resolved.y1)
+    return resolved
 
 
 
@@ -455,15 +468,14 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
             replacement_jobs = []
             for repl in pa.get("image_replacements", []):
                 bbox_pct = repl.get("bbox_pct", [0, 0, 1, 1])
-                # Convert pct to pt with 2% margin.
-                margin_pct = 0.02
-                x0 = max(0, (bbox_pct[0] - margin_pct)) * pre_page.rect.width
-                y0 = max(0, (bbox_pct[1] - margin_pct)) * pre_page.rect.height
-                x1 = min(1, (bbox_pct[2] + margin_pct)) * pre_page.rect.width
-                y1 = min(1, (bbox_pct[3] + margin_pct)) * pre_page.rect.height
-                rect = fitz.Rect(x0, y0, x1, y1)
-                # Expand to any intersecting PDF image blocks/tiles so we do not leave strips.
-                rect = expand_rect_to_intersecting_image_tiles(pre_page, rect)
+                # Convert pct locator to page coordinates without margin. Then resolve
+                # to the actual rendered image rect before redaction/replacement.
+                x0 = max(0, bbox_pct[0]) * pre_page.rect.width
+                y0 = max(0, bbox_pct[1]) * pre_page.rect.height
+                x1 = min(1, bbox_pct[2]) * pre_page.rect.width
+                y1 = min(1, bbox_pct[3]) * pre_page.rect.height
+                candidate_rect = fitz.Rect(x0, y0, x1, y1)
+                rect = resolve_rendered_image_rect(pre_page, candidate_rect)
 
                 desc_lines = ["[Diagrama/imagen reemplazado — ver planos_extraidos]"]
                 if repl.get("description"):
@@ -483,7 +495,11 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
             for rect, _png_stream in replacement_jobs:
                 pre_page.add_redact_annot(rect, fill=(1, 1, 1))
             if replacement_jobs:
-                pre_page.apply_redactions()
+                pre_page.apply_redactions(
+                    images=fitz.PDF_REDACT_IMAGE_REMOVE,
+                    graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED,
+                    text=fitz.PDF_REDACT_TEXT_NONE,
+                )
             for rect, png_stream in replacement_jobs:
                 pre_page.insert_image(rect, stream=png_stream, keep_proportion=False)
         else:
