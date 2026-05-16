@@ -217,10 +217,87 @@
 - Si existe Markdown reparado y fue aprobado, usarlo como fuente textual; si no, usar el normalizado/aclarado original.
 
 ---
-## Paso 2 — Extracción de BOM (con specs en contexto) — **REDISEÑADO v0.2**
+## Paso 2A — Lectura temática lineal por documento — **v0.3**
 
-> **Cambio principal v0.2**: eliminadas las 3+4 variantes paralelas. Reemplazadas por **1 productor + 1 auditor "ojos frescos"** en cada subpaso, con **scratchpad de decisiones compartido**.
-> Razón: las variantes generaron inconsistencias por decisiones implícitas distintas (naming, agrupación). La consolidación posterior perdió requisitos. Aplicar Cognition #1 ("share context, share full agent traces, not just individual messages").
+> Giro de diseño: antes de construir BOM consolidado, lanzar lectores especializados por eje y documento. Cada subagente produce **solo JSON canónico**; el orquestador valida y renderiza Markdown determinísticamente.
+
+### 2A.0 Construir chunk plans determinísticos
+
+**Owner**: Orquestador / script determinístico.
+**Script**: `scripts/build_section_chunks.py`
+**Inputs**:
+- Markdown normalizado del documento.
+- Índice estructural Paso 1.5 `{stem}_index.json`.
+**Output**:
+- `/proyecto/artifacts/step_2_chunks/{stem}_chunks.json`
+
+**Reglas**:
+- Target aproximado: 500 líneas.
+- Cortar preferentemente en boundaries de sección/numeral del índice.
+- Absorber gaps pequeños para cobertura total.
+- El subagente debe seguir `chunks[]` en orden; no inventa ventanas propias.
+
+### 2A.1 Lectores temáticos JSON-only
+
+**Owner**: Orquestador → subagentes especializados.
+**Prompt**: `prompts/prompt_thematic_reader.md`
+**Schema**: `schemas/thematic_extraction.schema.json` v0.3
+**Modelo piloto**: `openai/gpt-5.4-mini`.
+
+**Inputs por subagente**:
+- `source_md_path`
+- `document_index_path`
+- `chunk_plan_path`
+- `axis_id` / `axis_name` / `axis_definition`
+- `schema_path`
+- `output_json_path`
+
+**Output del subagente**:
+- Solo JSON canónico en `output_json_path`.
+- No escribir Markdown ni otros derivados.
+
+**Ejes**:
+0. Datos principales comerciales/contractuales.
+1. Documentos de propuesta y firma/formalización.
+2. Entregables documentales de ejecución.
+3. Servicios/obligaciones de ejecución y post-entrega.
+4. Bienes, licencias y equipamiento (BOM-HL como menciones evidenciadas, no consolidado final).
+
+**Campos clave**:
+- líneas fuente y `evidence_excerpt` obligatorio (cita corta <=400 chars);
+- `mention_type`: explicit/implied;
+- `phase`;
+- `source_context_type`;
+- `is_primary_requirement`;
+- `conditional_applicability`;
+- `dedupe_context` / `cross_axis_notes`.
+
+### 2A.2 Validación y Markdown derivado
+
+**Owner**: Orquestador / scripts determinísticos.
+**Scripts**:
+- `scripts/validate_thematic_extraction.py`
+- `scripts/render_thematic_md.py`
+
+**Validación mínima**:
+- JSON parse + schema.
+- `evidence_excerpt` presente y <=400 chars.
+- rangos de líneas válidos y dentro del Markdown fuente.
+- cobertura reportada contiene los chunks del `chunk_plan_path`.
+
+**Derivado humano**:
+- El Markdown `{document}_{axis}.md` se genera desde JSON validado.
+- Si cambia el formato de revisión, se regenera Markdown sin relanzar LLM.
+
+### 2A.3 Consolidación posterior
+
+No deduplicar dentro de los lectores. La consolidación/clustering se hace después, preservando `source_mentions[]` y evitando fusionar homónimos si difieren documento, fase, sistema, partida, aeropuerto, propósito o contexto.
+
+---
+
+## Paso 2B — Extracción de BOM consolidado (posterior a ledgers temáticos) — **pendiente de rediseño**
+
+> El diseño previo de BOM HL/Exploded queda subordinado a Paso 2A. Usar ledgers temáticos como evidencia antes de consolidar.
 
 ### 2.0 Inicializar scratchpad compartido
 

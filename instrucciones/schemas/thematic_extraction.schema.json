@@ -21,7 +21,7 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "0.2"
+      "const": "0.3"
     },
     "document_id": {
       "type": "string",
@@ -166,6 +166,7 @@
         "source_line_end",
         "section_path",
         "evidence_excerpt",
+        "evidence_is_verbatim",
         "interpretation_notes",
         "dedupe_context",
         "cross_axis_notes",
@@ -221,7 +222,9 @@
         },
         "evidence_excerpt": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 400,
+          "description": "Short literal or near-literal quote from the source, max 400 chars. Truncate with ellipsis if needed."
         },
         "interpretation_notes": {
           "type": "string"
@@ -269,6 +272,9 @@
             "if_applicable",
             "unclear"
           ]
+        },
+        "evidence_is_verbatim": {
+          "type": "boolean"
         }
       }
     },

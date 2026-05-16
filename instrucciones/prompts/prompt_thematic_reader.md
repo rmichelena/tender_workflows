@@ -19,7 +19,8 @@ Recibirás solo rutas y parámetros:
 - `axis_definition`
 - `schema_path`
 - `output_json_path`
-- `output_md_path`
+
+El subagente produce **solo JSON canónico**. No escribas Markdown. El orquestador renderiza Markdown después con un script determinístico.
 
 Debes leer archivos por tu cuenta.
 
@@ -63,7 +64,8 @@ Cada entrada debe incluir:
 - `description`: descripción corta y fiel.
 - `source_line_start` / `source_line_end`.
 - `section_path`: jerarquía textual/numeral reconstruida.
-- `evidence_excerpt`: fragmento breve literal o casi literal.
+- `evidence_excerpt`: cita textual breve literal o casi literal, máximo 400 caracteres. Si el fragmento original es largo, recorta con `…` conservando la parte verificable.
+- `evidence_is_verbatim`: `true` si la cita es literal exacta; `false` si normalizaste espacios/acentos o hiciste recorte casi literal.
 - `source_context_type`: contexto donde aparece la mención (`spec`, `metrado`, `presupuesto`, `apu`, `anexo_ubicacion`, `plano`, `topology`, `schedule`, `contract_clause`, `proposal_requirement`, `signature_requirement`, `general_context`, `other`).
 - `is_primary_requirement`: `true` si la fuente formula el requisito principal; `false` si es evidencia secundaria/repetición/lista de presupuesto/metrado/APU/anexo.
 - `conditional_applicability`: `always`, `conditional`, `if_applicable` o `unclear`.
@@ -72,7 +74,9 @@ Cada entrada debe incluir:
 
 ## Reglas de calidad
 
-- Toda entrada debe tener evidencia de líneas.
+- Toda entrada debe tener evidencia de líneas y `evidence_excerpt` verificable.
+- No uses `evidence_excerpt` como resumen; debe ser cita textual corta.
+- `evidence_excerpt` debe ser <= 400 caracteres.
 - No inventes obligaciones.
 - Si algo parece homónimo de otra cosa, NO dedupes; registra contexto en `dedupe_context`.
 - En eje de bienes/licencias/equipamiento, no conviertas plazos, garantías, condiciones de pago o penalidades en bienes. Si aparecen conectados a un bien, anótalos en `cross_axis_notes` o `interpretation_notes`, no como entrada independiente del eje 4.
@@ -82,12 +86,9 @@ Cada entrada debe incluir:
 
 ## Output obligatorio
 
-1. JSON válido contra `schema_path`.
-2. Resumen Markdown humano con:
-   - número de entradas;
-   - entradas agrupadas por fase/tipo;
-   - incertidumbres;
-   - cobertura de secciones/rangos.
+1. JSON válido contra `schema_path` escrito en `output_json_path`.
+
+No produzcas Markdown, CSV ni otros derivados. El orquestador generará Markdown desde el JSON validado.
 
 Valida JSON parse y schema antes de terminar.
 
@@ -95,7 +96,7 @@ Valida JSON parse y schema antes de terminar.
 
 Responde brevemente:
 
-- rutas escritas;
+- ruta JSON escrita;
 - número de entries;
 - conteo por phase;
 - conteo por mention_type;

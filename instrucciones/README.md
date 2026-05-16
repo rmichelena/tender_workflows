@@ -51,6 +51,8 @@ instrucciones/
 | EETT y aclarados (paso 1) | Markdown | — |
 | Planos/diagramas extraídos (paso 1.2b) | JSON + PDF extraído + PDF pre-OCR | MD |
 | Índice estructural (paso 1.5) | JSON | MD |
+| Lecturas temáticas Paso 2A | JSON (subagente) | MD (orquestador) |
+| Chunk plans Paso 2A | JSON (orquestador) | — |
 | BOM (HL, exploded, búsqueda) | JSON | TSV + MD |
 | Item pack (paso 2.5) | JSON por ítem | MD por ítem |
 | Specs por ítem (paso 3) | JSON por ítem | MD por ítem |
@@ -77,7 +79,9 @@ proyecto/
 │   ├── step_1_aclaradas/            (docs aclarados + auditoría)
 │   ├── step_1_index/                (`{stem}_index.json/.md`; índice estructural)
 │   ├── step_1_repaired/             (opcional; Markdown reparado, patch y log)
-│   ├── step_2_bom/                  (variantes + consolidados HL y exploded, con specs en contexto)
+│   ├── step_2_chunks/               (`{stem}_chunks.json`; chunks determinísticos por índice)
+│   ├── step_2_thematic/             (lecturas temáticas JSON canónico + MD derivado)
+│   ├── step_2_bom/                  (consolidados HL y exploded posteriores a ledgers temáticos)
 │   ├── step_2_5_items/              (1 JSON+MD por ítem, base estructurada)
 │   ├── step_3_specs/                (ítems verificados, con herencia resuelta + revisión)
 │   ├── step_4_busqueda/             (BOM búsqueda — solo bienes, sin cantidades)

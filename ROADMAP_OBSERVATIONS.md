@@ -124,3 +124,23 @@ Campos útiles del chunk plan:
 - `section_titles`
 - `split_from_section_id` / `split_part` si hubo split mecánico
 - `coverage.missing_ranges` debe quedar vacío para documentos listos para Paso 2A.
+
+## Paso 2A — JSON canónico, Markdown derivado
+
+Decisión: los subagentes temáticos producen solo JSON validado. El orquestador genera Markdown con `scripts/render_thematic_md.py`.
+
+Motivos:
+
+- Menos carga cognitiva para el subagente.
+- Formato humano consistente entre ejes/documentos.
+- Las citas textuales (`evidence_excerpt`) se presentan siempre de la misma manera.
+- Cambios de formato Markdown no requieren relanzar LLM.
+- QA más simple: si el JSON cumple schema y checks adicionales, el derivado es mecánico.
+
+Checks mínimos con `scripts/validate_thematic_extraction.py`:
+
+- schema v0.3;
+- `evidence_excerpt` obligatorio y <=400 caracteres;
+- líneas válidas contra Markdown fuente;
+- cobertura reportada compatible con `chunk_plan_path`;
+- `entry_id` único.

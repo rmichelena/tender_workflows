@@ -254,3 +254,14 @@ El texto viene como lista de chunks con tipo:
 - `logo` — logos (eliminados por `clean_ade_output`)
 - `figure` — figuras/diagramas
 - `marginalia` — notas marginales
+
+## Paso 2A — Lectores temáticos
+
+El flujo experimental actual para extracción temprana usa lectores temáticos por documento/eje:
+
+1. `scripts/build_section_chunks.py` genera `artifacts/step_2_chunks/{stem}_chunks.json` desde el índice Paso 1.5.
+2. Cada subagente lee un documento + índice + chunk plan y escribe solo JSON canónico (`thematic_extraction.schema.json`).
+3. El orquestador valida con `scripts/validate_thematic_extraction.py`.
+4. El orquestador renderiza Markdown humano con `scripts/render_thematic_md.py`.
+
+No pedir Markdown a los subagentes; es derivado determinístico.
