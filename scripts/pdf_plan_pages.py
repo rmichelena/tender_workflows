@@ -448,11 +448,11 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
         new_page.show_pdf_page(new_page.rect, doc, page_num - 1)
         add_red_page_label(new_page, page_num)
     if extracted.page_count:
-        extracted.save(extracted_pdf)
+        extracted.save(extracted_pdf, garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True)
     else:
         p = extracted.new_page(width=595.3, height=841.9)
         p.insert_text((54, 54), "No se confirmaron planos/diagramas para extraer.", fontsize=11)
-        extracted.save(extracted_pdf)
+        extracted.save(extracted_pdf, garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True)
 
     # Build pre-OCR PDF
     dom = dominant_size(page_records(doc))
@@ -510,7 +510,7 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
         else:
             # leave_for_ocr or not in analysis: copy as-is
             pre.insert_pdf(doc, from_page=idx - 1, to_page=idx - 1)
-    pre.save(preocr_pdf)
+    pre.save(preocr_pdf, garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True)
 
     # Build MD report
     md_lines = [f"# Planos/diagramas extraídos — {stem}", ""]
