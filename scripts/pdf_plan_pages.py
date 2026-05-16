@@ -482,15 +482,15 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
                 candidate_rect = fitz.Rect(x0, y0, x1, y1)
                 rect = resolve_rendered_image_rect(pre_page, candidate_rect)
 
-                desc_lines = ["[Diagrama/imagen reemplazado — ver planos_extraidos]"]
+                desc_lines = ["[imagen reemplazada] ver planos_extraidos"]
                 if repl.get("description"):
-                    desc_lines.append(repl["description"])
+                    desc_lines.append("[resumen] " + repl["description"])
                 codes = repl.get("visible_text_or_codes", [])
                 if codes:
-                    desc_lines.append("Códigos/texto visible: " + ", ".join(str(c) for c in codes[:10]))
+                    desc_lines.append("[texto visible] " + ", ".join(str(c) for c in codes[:10]))
                 infos = repl.get("technical_observations", [])
                 if infos:
-                    desc_lines.append("Info técnica visible: " + "; ".join(str(i) for i in infos[:5]))
+                    desc_lines.append("[notas] " + "; ".join(str(i) for i in infos[:5]))
                 text_to_render = "\n".join(desc_lines)
                 png_stream = make_replacement_image_stream(rect.width, rect.height, text_to_render)
                 replacement_jobs.append((rect, png_stream))
