@@ -13,6 +13,7 @@ Recibirás solo rutas y parámetros:
 - `document_id`
 - `source_md_path`
 - `document_index_path`
+- `chunk_plan_path`
 - `axis_id`
 - `axis_name`
 - `axis_definition`
@@ -24,12 +25,12 @@ Debes leer archivos por tu cuenta.
 
 ## Método obligatorio
 
-1. Lee el índice estructural para construir chunks por secciones.
-2. Agrupa secciones consecutivas en chunks aproximados de 500 líneas, pero corta siempre que puedas en cambio real de sección/numeral.
-3. Si una sección supera ~500 líneas, subdivídela por subsecciones si el índice lo permite; si no, usa rangos con overlap.
-4. Lee el Markdown completo de principio a fin siguiendo esos chunks.
-5. Para cada mención relevante al eje temático, registra una entrada con líneas y evidencia.
-6. Mantén cobertura: qué secciones/rangos leíste.
+1. Lee el índice estructural como mapa de secciones.
+2. Lee `chunk_plan_path`. Este archivo contiene los chunks determinísticos precomputados por el orquestador.
+3. No inventes tus propias ventanas lineales salvo que el chunk plan esté ausente o inválido. Sigue `chunks[]` en orden.
+4. Para cada chunk, lee exactamente el rango indicado del Markdown y analiza menciones relevantes al eje.
+5. Para cada mención relevante, registra una entrada con líneas y evidencia.
+6. Mantén cobertura: `coverage.line_ranges_read` debe reflejar los chunks leídos.
 
 ## Qué extraer
 
@@ -63,6 +64,9 @@ Cada entrada debe incluir:
 - `source_line_start` / `source_line_end`.
 - `section_path`: jerarquía textual/numeral reconstruida.
 - `evidence_excerpt`: fragmento breve literal o casi literal.
+- `source_context_type`: contexto donde aparece la mención (`spec`, `metrado`, `presupuesto`, `apu`, `anexo_ubicacion`, `plano`, `topology`, `schedule`, `contract_clause`, `proposal_requirement`, `signature_requirement`, `general_context`, `other`).
+- `is_primary_requirement`: `true` si la fuente formula el requisito principal; `false` si es evidencia secundaria/repetición/lista de presupuesto/metrado/APU/anexo.
+- `conditional_applicability`: `always`, `conditional`, `if_applicable` o `unclear`.
 - `interpretation_notes`: solo si hay inferencia/duda.
 - `confidence`.
 
@@ -71,6 +75,8 @@ Cada entrada debe incluir:
 - Toda entrada debe tener evidencia de líneas.
 - No inventes obligaciones.
 - Si algo parece homónimo de otra cosa, NO dedupes; registra contexto en `dedupe_context`.
+- En eje de bienes/licencias/equipamiento, no conviertas plazos, garantías, condiciones de pago o penalidades en bienes. Si aparecen conectados a un bien, anótalos en `cross_axis_notes` o `interpretation_notes`, no como entrada independiente del eje 4.
+- Distingue menciones primarias de evidencia secundaria: especificación técnica principal vs metrado/presupuesto/APU/anexo/plano/topología.
 - Si una mención pertenece a varios ejes, registra solo si es relevante para tu eje y anota el cruce en `cross_axis_notes`.
 - Si no hay menciones en un rango, no inventes.
 

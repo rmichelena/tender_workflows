@@ -103,3 +103,24 @@ Evitar:
 ```
 
 Si después se necesita extracción factual, debe ser otro paso con schema propio y control de evidencia.
+
+## Paso 2A — Chunk plan determinístico
+
+Decisión: los subagentes temáticos no deben inventar ventanas de lectura. El orquestador precomputa un `{basename}_chunks.json` por documento a partir del índice estructural de Paso 1.5.
+
+Reglas:
+
+- Target aproximado: 500 líneas.
+- Cortar preferentemente en boundaries de sección/numeral del índice.
+- Si una sección grande no tiene subdivisión fina, se conserva como chunk grande antes que cortar arbitrariamente.
+- Gaps pequeños del índice se absorben en chunks vecinos para garantizar cobertura total del Markdown.
+- El subagente recibe `chunk_plan_path` y debe leer `chunks[]` en orden.
+
+Campos útiles del chunk plan:
+
+- `chunk_id`
+- `line_start` / `line_end`
+- `section_ids`
+- `section_titles`
+- `split_from_section_id` / `split_part` si hubo split mecánico
+- `coverage.missing_ranges` debe quedar vacío para documentos listos para Paso 2A.
