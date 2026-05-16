@@ -286,3 +286,27 @@ El schema de bienes no enumera familias específicas de equipamiento. En su luga
 - `item_name` / `item_family` = texto libre para dedupe/búsqueda.
 - `supply_model` distingue COTS, custom-made, configured COTS, mixed o unclear.
 - `custom_spec_relevance` indica si la validación debe esperar match de ficha técnica o requisitos de diseño del proyecto.
+
+### Prompt template + payload por eje
+
+No usar un único prompt genérico para todos los ejes. El contrato común vive en:
+
+- `instrucciones/prompts/prompt_thematic_reader.template.md`
+
+La misión/adherencia de cada eje vive en payloads JSON:
+
+- `instrucciones/payloads/thematic_axes/axis_0_main_tender_data.json`
+- `instrucciones/payloads/thematic_axes/axis_1_proposal_signature_documents.json`
+- `instrucciones/payloads/thematic_axes/axis_2_execution_documentary_deliverables.json`
+- `instrucciones/payloads/thematic_axes/axis_3_execution_services_obligations.json`
+- `instrucciones/payloads/thematic_axes/axis_4_goods_licenses_equipment.json`
+
+Renderizar prompts con:
+
+```bash
+python3 scripts/render_thematic_prompt.py \
+  --payload instrucciones/payloads/thematic_axes/axis_4_goods_licenses_equipment.json \
+  --output instrucciones/prompts/rendered_thematic/axis_4_goods_licenses_equipment.md
+```
+
+Los subagentes deben recibir el prompt renderizado y el schema específico del eje.

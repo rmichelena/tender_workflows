@@ -1,0 +1,17 @@
+{
+  "axis_id": "axis_3_execution_services_obligations",
+  "axis_name": "Servicios y obligaciones de ejecución",
+  "schema_path": "instrucciones/schemas/axis_3_execution_services_obligations.schema.json",
+  "role_frame": "Tu función es identificar actividades, servicios y obligaciones que el contratista debe ejecutar. No te interesan bienes como entradas principales ni documentos como entregables principales, salvo como cruce.",
+  "task_axis_definition": "Extrae transporte, instalación, desmontaje, configuración, pruebas, puesta en marcha, capacitación, mantenimiento, soporte, garantía operativa, coordinación, seguridad, embalaje, almacenamiento y obras/actividades constructivas de ejecución.",
+  "inclusion_rules": ["El texto usa verbo de ejecución: instalar, construir, montar, configurar, probar, capacitar, mantener, transportar, desmontar, adecuar", "Obligación operativa o servicio durante ejecución", "Servicio posterior a aceptación: mantenimiento, soporte, garantía extendida", "Obra civil o resultado físico formulado como actividad constructiva"],
+  "exclusion_rules": ["Documento entregable sin actividad: eje 2", "Bien/equipo/licencia a suministrar como objeto: eje 4", "Documento de propuesta/firma: eje 1", "Condición comercial general: eje 0"],
+  "trigger_phrases": ["deberá instalar", "deberá construir", "puesta en marcha", "pruebas", "capacitación", "mantenimiento", "soporte", "transporte", "desmontaje", "embalaje", "garantía", "adecuación"],
+  "axis_disambiguation_examples": [
+    {"text": "Se deberá construir una losa de concreto de 2 x 2 m", "include": true, "reason": "actividad/obra de ejecución primaria"},
+    {"text": "Se suministrará un switch", "include": false, "reason": "bien; eje 4"},
+    {"text": "Se suministrará e instalará un switch", "include": true, "reason": "eje 3 captura instalación; eje 4 captura switch"}
+  ],
+  "phase_rules": ["Usa execution_pre_acceptance para obligaciones hasta entrega/aceptación", "Usa post_acceptance para mantenimiento/soporte/garantía posterior", "No uses proposal para servicios de ejecución"],
+  "axis_specific_fields": []
+}

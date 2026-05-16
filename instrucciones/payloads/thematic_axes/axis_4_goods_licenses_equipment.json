@@ -1,0 +1,42 @@
+{
+  "axis_id": "axis_4_goods_licenses_equipment",
+  "axis_name": "Bienes, licencias y equipamiento de ejecución",
+  "schema_path": "instrucciones/schemas/axis_4_goods_licenses_equipment.schema.json",
+  "role_frame": "Tu función aquí es identificar bienes, licencias, equipos, materiales y accesorios que deberán suministrarse o quedar como parte del resultado entregable. No te interesan costos, cronogramas, documentos, servicios, transporte ni garantías como entradas independientes, salvo como contexto cruzado.",
+  "task_axis_definition": "Lee el documento completo y extrae menciones a bienes/licencias/equipamiento de ejecución como ledger evidenciado para futura consolidación BOM-HL. No consolides ni dedupes; conserva contexto.",
+  "inclusion_rules": [
+    "El texto identifica u obliga la entrega, suministro, adquisición, instalación como parte de suministro, o incorporación de un bien, equipo, licencia, material o accesorio concreto.",
+    "Incluye accesorios/licencias explícitos: mounts/racks, regletas, transceivers, patch cords, licencias por equipo/interfaz, repuestos, materiales nombrados.",
+    "Incluye evidencia secundaria de metrado, presupuesto, anexo, plano o tabla de alcance si identifica bienes concretos; marca is_primary_requirement=false.",
+    "Incluye resultados físicos custom-made solo si deben quedar como activo/elemento entregable o si el schema permite clasificarlos como material/constructed component; anota supply_model/custom_spec_relevance."
+  ],
+  "exclusion_rules": [
+    "Antecedentes, cronograma/programación, valor referencial, costos, pagos, penalidades o cláusulas generales sin bien concreto.",
+    "Servicios puros: transporte, instalación como actividad, desmontaje, capacitación, mantenimiento, soporte; van al eje 3.",
+    "Documentos, planos, manuales, certificados o informes como entregables; van al eje 2.",
+    "Topologías o inventarios de equipos existentes si no indican suministro nuevo.",
+    "Obras formuladas solo como verbo de ejecución (construir, demoler, adecuar) sin material/componente inventariable; normalmente eje 3 primary, eje 4 solo secondary si corresponde."
+  ],
+  "trigger_phrases": [
+    "se suministrará", "incluye", "deberá contar con", "se entregará", "equipamiento", "licencia", "material", "accesorio", "repuesto", "suministro e instalación", "metrado", "presupuesto", "partida", "unidad", "cantidad"
+  ],
+  "axis_disambiguation_examples": [
+    {"text": "Se deberá construir una losa de concreto de 2 x 2 m", "include": false, "reason": "obra/actividad constructiva primaria del eje 3; eje 4 solo si se decide inventariar resultado físico como secondary"},
+    {"text": "Se suministrará e instalará una losa prefabricada de concreto 2 x 2 m", "include": true, "reason": "bien/componente prefabricado + servicio de instalación; eje 4 para la losa, eje 3 para instalación"},
+    {"text": "El gabinete deberá incluir regletas C13/C19", "include": true, "reason": "accesorio explícito"},
+    {"text": "Transporte hasta el aeropuerto", "include": false, "reason": "servicio/logística; eje 3"},
+    {"text": "Programación mensual de adquisición de equipamiento", "include": false, "reason": "antecedente/programación; no identifica suministro concreto"}
+  ],
+  "phase_rules": [
+    "La fase se refiere a cuándo se entrega/usa el bien, no dónde aparece mencionado.",
+    "No uses proposal para eje 4. Si aparece en formato/presupuesto de propuesta, usa source_context_type apropiado y phase=execution_pre_acceptance.",
+    "Usa post_acceptance solo para licencias/repuestos/componentes explícitamente posteriores a aceptación.",
+    "Usa unclear si no se puede determinar cuándo se entrega/usa."
+  ],
+  "axis_specific_fields": [
+    "item_name: nombre normalizado libre del ítem.",
+    "item_family: familia reusable libre, no enum de producto.",
+    "supply_model: cots/custom_made/configured_cots/mixed/unclear.",
+    "custom_spec_relevance: datasheet_match_expected/project_specific_specs_matter/both/unclear/not_applicable."
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "axis_id": "axis_0_main_tender_data",
+  "axis_name": "Datos principales comerciales y contractuales",
+  "schema_path": "instrucciones/schemas/axis_0_main_tender_data.schema.json",
+  "role_frame": "Tu función es construir una matriz de datos principales para decidir si participar y cómo preparar la oferta. Te interesan condiciones comerciales, contractuales y de calificación, no el detalle técnico de bienes/servicios salvo como objeto general.",
+  "task_axis_definition": "Extrae cronograma, valor referencial, objeto general, condiciones/requisitos del postor, garantías/fianzas, pagos, penalidades, personal clave, experiencia, certificaciones y condiciones contractuales principales.",
+  "inclusion_rules": ["Dato comercial/contractual principal", "Requisito de calificación o participación", "Condición de pago, garantía, penalidad, experiencia, certificación o personal clave", "Hito de cronograma o condición de adjudicación/firma"],
+  "exclusion_rules": ["Documentos específicos de propuesta/firma como objetos documentales: eje 1", "Entregables documentales de ejecución: eje 2", "Servicios/obligaciones de ejecución detalladas: eje 3", "Bienes/licencias/equipos concretos: eje 4"],
+  "trigger_phrases": ["valor referencial", "cronograma", "objeto", "postor", "experiencia", "garantía", "penalidad", "forma de pago", "personal clave", "certificación", "consorcio"],
+  "axis_disambiguation_examples": [
+    {"text": "Valor referencial asciende a...", "include": true, "reason": "dato principal"},
+    {"text": "El postor deberá presentar Anexo X", "include": false, "reason": "documento de propuesta; eje 1"},
+    {"text": "Switch Core 48 puertos", "include": false, "reason": "bien/equipo; eje 4"}
+  ],
+  "phase_rules": ["Usa general para datos transversales", "Usa proposal para condiciones de oferta/participación", "Usa contract_signature para formalización", "Usa execution_pre_acceptance/post_acceptance solo para condiciones contractuales principales de esas fases"],
+  "axis_specific_fields": []
+}

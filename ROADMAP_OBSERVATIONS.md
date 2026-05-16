@@ -198,3 +198,26 @@ Agregar distinción de estrategia de suministro/verificación:
 - `custom_spec_relevance`: `datasheet_match_expected`, `project_specific_specs_matter`, `both`, `unclear`, `not_applicable`.
 
 Ejemplo: un switch de red normalmente será `cots`/`datasheet_match_expected`; un carrusel de reclamo de equipaje puede ser `custom_made` o `mixed`, donde dimensiones/capacidad/layout del proyecto pesan más que una ficha técnica estándar.
+
+## Paso 2A — Prompt template + payload por eje
+
+Hallazgo: un único prompt `thematic_reader` genérico no da suficiente adherencia. Aunque el schema sea específico, el subagente necesita una identidad de rol y reglas de inclusión/exclusión propias del eje.
+
+Decisión:
+
+- Mantener un template común para inputs, método, output JSON-only, evidencia y validación.
+- Construir la parte semántica desde payload JSON por eje.
+- Renderizar prompts antes de llamar subagentes.
+
+Payload por eje incluye:
+
+- `role_frame`
+- `task_axis_definition`
+- `inclusion_rules`
+- `exclusion_rules`
+- `trigger_phrases`
+- `axis_disambiguation_examples`
+- `phase_rules`
+- `axis_specific_fields`
+
+Esto evita divergencia accidental en el contrato común, pero permite adherencia fuerte por tarea.

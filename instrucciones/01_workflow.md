@@ -240,7 +240,10 @@
 ### 2A.1 Lectores temáticos JSON-only
 
 **Owner**: Orquestador → subagentes especializados.
-**Prompt**: `prompts/prompt_thematic_reader.md`
+**Prompt template**: `prompts/prompt_thematic_reader.template.md`
+**Axis payloads**: `payloads/thematic_axes/{axis_id}.json`
+**Rendered prompts**: `prompts/rendered_thematic/{axis_id}.md`
+**Renderer**: `scripts/render_thematic_prompt.py`
 **Schema base**: `schemas/thematic_extraction.schema.json` v0.3
 **Schemas por eje**:
 - `schemas/axis_0_main_tender_data.schema.json`
@@ -254,11 +257,13 @@ Usar el schema específico del eje al llamar subagentes; el schema base queda co
 **Modelo piloto**: `openai/gpt-5.4-mini`.
 
 **Inputs por subagente**:
+- prompt renderizado del eje (`prompts/rendered_thematic/{axis_id}.md`)
 - `source_md_path`
 - `document_index_path`
 - `chunk_plan_path`
-- `axis_id` / `axis_name` / `axis_definition`
-- `schema_path`
+- `axis_id` / `axis_name`
+- `axis_payload_path`
+- `schema_path` específico del eje
 - `output_json_path`
 
 **Output del subagente**:

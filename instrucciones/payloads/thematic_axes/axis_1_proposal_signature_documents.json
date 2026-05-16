@@ -1,0 +1,35 @@
+{
+  "axis_id": "axis_1_proposal_signature_documents",
+  "axis_name": "Documentos para propuesta y firma de contrato",
+  "schema_path": "instrucciones/schemas/axis_1_proposal_signature_documents.schema.json",
+  "role_frame": "Tu función aquí es asistir en la preparación de una oferta completa. No te interesan costos, ejecución del contrato ni bienes a suministrar, salvo como contexto. Te interesa identificar todo documento, certificado, estudio, formulario, declaración, carta o información que deba entregarse con la propuesta o para la firma/formalización del contrato.",
+  "task_axis_definition": "Lee el documento completo y extrae menciones a documentos o información documental requerida para la propuesta/oferta o para la firma del contrato, distinguiendo ambas fases.",
+  "inclusion_rules": [
+    "El texto exige que el postor/oferente/licitante presente, incluya, adjunte, acredite o suscriba un documento o información en la oferta/propuesta.",
+    "El texto exige documentos del postor adjudicado para firma/formalización del contrato.",
+    "El texto lista formularios, anexos, declaraciones, cartas, garantías, certificados, constancias, poderes o documentos legales/económicos/técnicos de presentación.",
+    "Incluye referencias sospechosas o con actor/fase posiblemente errónea solo si claramente piden un documento/información; márcalas con warning/notes."
+  ],
+  "exclusion_rules": [
+    "Documentos que son entregables de ejecución del contrato: van al eje 2.",
+    "Servicios, actividades, instalación, mantenimiento o capacitación: van al eje 3.",
+    "Bienes/licencias/equipos a suministrar: van al eje 4.",
+    "Datos comerciales generales sin documento específico: van al eje 0.",
+    "No extraigas requisitos técnicos completos si solo sirven como contenido de un formulario; registra el formulario/documento."
+  ],
+  "trigger_phrases": [
+    "en la oferta se deberá incluir", "la propuesta deberá contener", "deberá ser presentado en su propuesta", "el postor deberá presentar", "el oferente deberá incluir", "el licitante deberá adjuntar", "para la firma del contrato", "postor adjudicado deberá presentar", "de corresponder"
+  ],
+  "axis_disambiguation_examples": [
+    {"text": "El postor deberá presentar carta de garantía del fabricante", "include": true, "reason": "documento de propuesta"},
+    {"text": "El contratista deberá entregar manuales al finalizar la instalación", "include": false, "reason": "entregable documental de ejecución; eje 2"},
+    {"text": "El postor deberá entregar los equipos", "include": true, "reason": "actor/fase sospechosa; incluir solo si el contexto pide un documento o compromiso de oferta, advertir si parece error"},
+    {"text": "El contratista deberá poner en su oferta el plan de mantenimiento", "include": true, "reason": "documento/información de propuesta con actor mezclado; advertir"}
+  ],
+  "phase_rules": [
+    "Usa proposal para documentos/información exigidos con la oferta/propuesta.",
+    "Usa contract_signature para documentos exigidos al postor adjudicado o para formalizar contrato.",
+    "No uses execution_pre_acceptance ni post_acceptance en este eje."
+  ],
+  "axis_specific_fields": []
+}
