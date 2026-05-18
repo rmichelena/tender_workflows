@@ -221,6 +221,45 @@
 
 > Giro de diseño: antes de construir BOM consolidado, lanzar lectores especializados por eje y documento. Cada subagente produce **solo JSON canónico**; el orquestador valida y renderiza Markdown determinísticamente.
 
+> Ajuste híbrido: no todos los ejes deben usar el mismo nivel de rigidez en la primera lectura. Para ejes de comprensión global, especialmente eje 0, se permite una lectura libre/semiestructurada antes de canonicalizar.
+
+### 2A.axis0 — Lectura libre híbrida para datos principales
+
+**Uso recomendado**: eje 0 cuando el expediente completo o sus documentos principales caben razonablemente en contexto largo o pueden leerse por offsets sin análisis por chunk.
+
+**Patrón**:
+1. Lanzar 2 lectores libres con modelos contrastantes.
+2. El prompt de lectura debe ir **inline** en el handoff del subagente; no pedir “lee este prompt desde una ruta” salvo que sea demasiado largo.
+3. Pasar la ruta de la **carpeta de documentos fuente del expediente** y, si existe, un inventario breve de documentos normalizados. El lector debe revisar/buscar en todos los documentos relevantes. Solo pasar un documento específico si el orquestador limita explícitamente el alcance.
+4. Si el tool de lectura trunca, los offsets son solo transporte, no chunking semántico.
+5. El lector produce Markdown claro/semiestructurado, no JSON canónico.
+6. El orquestador compara outputs, consolida, detecta discrepancias y verifica personalmente contra los MD/PDF fuente.
+7. El JSON/schema canónico se produce después, como capa de normalización, no como restricción de primera lectura.
+
+**Prompt base**: `prompts/prompt_axis0_free_reader.md` (contenido suficientemente corto para pegar inline).
+
+**La lectura libre debe pedir explícitamente**:
+- cronograma;
+- objeto/alcance con hasta 8 familias principales de bienes/equipos;
+- clasificación contractual;
+- presupuesto;
+- plazos/hitos/duraciones;
+- requisitos del postor;
+- garantías;
+- pagos;
+- penalidades;
+- personal/perfiles;
+- experiencia;
+- evaluación/buena pro;
+- entidades externas/supervisoras en aceptación/conformidad/reconocimiento/pago;
+- condiciones contractuales principales;
+- dudas o ambigüedades.
+
+**Regla de alcance multi-documento**:
+- Clientes privados (AAP, AdP, LAP, etc.): típicamente hay bases + uno o más documentos técnicos/anexos; leer todos.
+- Estado peruano: puede ser un documento consolidado o principal + anexos; leer principal y anexos relevantes.
+- OACI/ICAO, BID u organismos multilaterales: la información suele estar dispersa entre varios documentos; leer/buscar en todo el paquete.
+
 ### 2A.0 Construir chunk plans determinísticos
 
 **Owner**: Orquestador / script determinístico.

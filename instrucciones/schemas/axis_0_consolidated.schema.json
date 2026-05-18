@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "axis_0_consolidated.schema.json",
+  "title": "Consolidated axis 0 output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document_id",
+    "type",
+    "source_models",
+    "consolidated_count",
+    "unanimous_count",
+    "by_model_agreement",
+    "consolidated_entries"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "document_id": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "const": "axis_0_consolidated"
+    },
+    "source_models": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "consolidated_count": {
+      "type": "integer"
+    },
+    "unanimous_count": {
+      "type": "integer"
+    },
+    "by_model_agreement": {
+      "type": "object"
+    },
+    "consolidated_entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entry_id",
+          "entry_type",
+          "mention_type",
+          "phase",
+          "description",
+          "source_line_start",
+          "source_line_end",
+          "section_path",
+          "evidence_excerpt",
+          "evidence_is_verbatim",
+          "interpretation_notes",
+          "dedupe_context",
+          "cross_axis_notes",
+          "confidence",
+          "source_context_type",
+          "is_primary_requirement",
+          "conditional_applicability",
+          "models_found",
+          "wording_source",
+          "merge_notes"
+        ],
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "entry_type": {
+            "type": "string",
+            "enum": [
+              "tender_object",
+              "scope_summary",
+              "schedule_milestone",
+              "budget_or_reference_value",
+              "bidder_requirement",
+              "consortium_condition",
+              "participation_guarantee",
+              "performance_guarantee",
+              "payment_condition",
+              "penalty_condition",
+              "key_personnel_requirement",
+              "bidder_experience_requirement",
+              "certification_requirement",
+              "contract_condition",
+              "insurance_requirement",
+              "legal_or_compliance_condition",
+              "other_main_data",
+              "tender_process_schedule",
+              "tender_classification",
+              "delivery_deadline_or_milestone",
+              "advance_payment_condition",
+              "evaluation_scoring_factor",
+              "post_sale_support_condition",
+              "maintenance_condition",
+              "warranty_condition"
+            ],
+            "description": "Axis 0 commercial/contractual main-data category. Use specific values for schedule, classification, delivery deadlines, scoring factors, payment/advance, guarantees/warranties and qualification requirements."
+          },
+          "mention_type": {
+            "type": "string",
+            "enum": [
+              "explicit",
+              "implied"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "general",
+              "proposal",
+              "contract_signature",
+              "execution_pre_acceptance",
+              "post_acceptance",
+              "unclear"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_line_start": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "source_line_end": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "section_path": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence_excerpt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400,
+            "description": "Short literal or near-literal quote from the source, max 400 chars. Truncate with ellipsis if needed."
+          },
+          "interpretation_notes": {
+            "type": "string"
+          },
+          "dedupe_context": {
+            "type": "string"
+          },
+          "cross_axis_notes": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "source_context_type": {
+            "type": "string",
+            "enum": [
+              "general_context",
+              "schedule",
+              "proposal_requirement",
+              "signature_requirement",
+              "contract_clause",
+              "presupuesto",
+              "toc",
+              "other",
+              "evaluation_criteria",
+              "qualification_requirement",
+              "payment_terms",
+              "penalty_clause",
+              "guarantee_clause",
+              "experience_requirement",
+              "personnel_requirement",
+              "certification_requirement",
+              "scope_clause"
+            ],
+            "description": "Where the main datum appears: schedule, scope, qualification, evaluation, payment, penalties, guarantees, contract clause, etc."
+          },
+          "is_primary_requirement": {
+            "type": "boolean"
+          },
+          "conditional_applicability": {
+            "type": "string",
+            "enum": [
+              "always",
+              "conditional",
+              "if_applicable",
+              "unclear"
+            ]
+          },
+          "evidence_is_verbatim": {
+            "type": "boolean"
+          },
+          "models_found": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Which models found this entry"
+          },
+          "wording_source": {
+            "type": "string",
+            "description": "Which model provided the chosen wording"
+          },
+          "merge_notes": {
+            "type": "string",
+            "description": "Notes on merge decisions if non-obvious"
+          }
+        }
+      }
+    }
+  }
+}

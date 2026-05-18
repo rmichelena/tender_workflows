@@ -309,4 +309,8 @@ python3 scripts/render_thematic_prompt.py \
   --output instrucciones/prompts/rendered_thematic/axis_4_goods_licenses_equipment.md
 ```
 
-Los subagentes deben recibir el prompt renderizado y el schema específico del eje.
+Para llamadas JSON-only estrictas, los subagentes deben recibir el prompt renderizado y el schema específico del eje.
+
+Para prompts cortos o de lectura libre (por ejemplo `prompt_axis0_free_reader.md`), el orquestador debe pegar el prompt **inline** en el mensaje del subagente en vez de pasar solo la ruta. La ruta puede quedar como referencia/versionado, pero no debe ser una indirección obligatoria para el modelo.
+
+En lectura libre, especialmente eje 0, el input normal debe ser la **carpeta del expediente/documentos fuente**, no un único documento de bases. El subagente debe buscar en bases, documentos técnicos, anexos, formularios y aclaraciones según existan. Solo limitar a un archivo cuando el orquestador lo indique explícitamente para un experimento o comparación.

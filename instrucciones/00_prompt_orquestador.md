@@ -80,7 +80,7 @@ Para cada paso del workflow:
 
 1. Identificar el **tipo** del paso (LLM call / workflow no-LLM / agent multi-step).
 2. Verificar que **no estoy haciendo trabajo que le corresponde al sub-agente**: si me sorprendo escribiendo un parser, un retry handler, un rescue de JSON truncado, o "context_full_doc" en lugar de paths — **detenerse** y reformular la delegación.
-3. Construir el `context` del sub-agente con **paths a inputs/schemas/prompts**, tool budget, output path, y `handoff_id` único.
+3. Construir el `context` del sub-agente con inputs, tool budget, output path, y `handoff_id` único. Para prompts cortos o de alta prioridad semántica, **pegar el prompt inline** en el handoff; evitar el meta-prompt “lee el prompt en esta ruta” porque introduce indirección y puede diluir la instrucción. Mantener paths para documentos/schemas/artefactos grandes.
 4. Delegar.
 5. Validar el output contra schema. Si falla: retry una vez con el error → si falla otra vez: falla loud.
 6. Para Paso 1.5, recordar: el indexador puede sugerir correcciones Markdown, pero no modifica el Markdown fuente; cualquier reparación va en un paso separado, reversible y auditado.
@@ -95,6 +95,7 @@ Cuando el workflow indica pausa, detenerse, presentar el output relevante, esper
 **Si caigo en alguno de estos anti-patterns, detenerme y corregir, NO inventar arquitectura paralela:**
 
 - ❌ Pasar contenido de archivos en `context` (es lo que falló en INC-001 de ICAO-00068).
+- ❌ Pasar prompts cortos solo como ruta cuando pueden ir inline (el subagente queda haciendo meta-trabajo antes de la tarea real).
 - ❌ Aumentar `max_tokens` para que el modelo "compacte" más (no funciona — usar tool budget + schema).
 - ❌ Escribir un parser de rescue para JSON truncado (señal de schema validation ausente).
 - ❌ Re-lanzar al productor si el auditor lo rechaza (handoff budget = 1 — escalar al humano).

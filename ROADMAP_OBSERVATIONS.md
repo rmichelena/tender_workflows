@@ -232,3 +232,117 @@ Axis 0 now covers broader bid-decision data beyond the original generic commerci
 - evaluation scoring factors;
 - post-sale support, maintenance, warranty conditions;
 - more precise source contexts for evaluation, qualification, payment, penalties, guarantees, experience, personnel, certifications and scope.
+
+## 2026-05-18 — Gemini 2.5 Flash as subagent: failure analysis
+
+Context: Roberto compared failed Gemini subagent runs for Paso 2A with a direct Discord channel test (`#prueba-gemini`). Findings:
+
+- Gemini subagent invocation is reaching the intended provider/model (`google/gemini-2.5-flash`) and can issue tool calls, so this is not simply a model-routing failure.
+- In failed subagent runs for eje 2:
+  - Bases run read the rendered prompt, initially hallucinated a schema path missing `/workspace/`, corrected it, then the Google provider returned `unknown error` after tool results. The surfaced completion was the last schema/tool content, not a valid extraction artifact.
+  - EETT run read prompt/schema/chunk plan/index, then provider returned `unknown error`; the surfaced output was the structural index/tool result, not an extraction.
+- Direct Discord test in `#prueba-gemini` produced a plausible high-level extraction and wrote `artifacts/step_2_thematic/bases_axis_0_main_tender_data_gemini.json`, but the artifact was not valid JSON: parse error at line 215 due unescaped quotes. After one local repair, it still had 9 schema errors (long `evidence_excerpt`, null uncertainty line_start/line_end).
+- Conclusion: Gemini Flash can produce plausible prose/extraction in a conversational flow, but is unreliable for the current strict JSON-only subagent contract with tool-heavy, schema-heavy prompts. Failures are both provider/tool-continuation issues and schema adherence issues.
+- Recommended pattern if Gemini must be used again: keep the prompt much simpler, avoid giving it full schema/tooling responsibilities, make it produce draft content only, and have a deterministic or stronger-model post-processor validate/map to canonical JSON. Do not use Gemini Flash as primary producer for Paso 2A canonical artifacts.
+
+## 2026-05-18 — Hybrid extraction strategy for axis 0
+
+Observation from Roberto: for axis 0 (main tender/commercial/contractual data), the full documents are within long-context capacity (Bases ~120k tokens, EETT ~60k tokens). For this axis, forcing chunked line-by-line reading and strict canonical schema from the first pass may be unnecessary and can reduce quality.
+
+Recommended hybrid pattern for axis 0:
+
+1. **Free extraction readers**
+   - Use 2 strong/contrasting models.
+   - Give the full document when context allows; no chunking unless document exceeds context or provider limits.
+   - Prompt with a complete checklist of information to extract (schedule, object, classification, budget, deadlines, eligibility, guarantees, payment, penalties, personnel, experience, evaluation, contract conditions).
+   - Do not require line numbers in this first pass.
+   - Allow natural prose / semi-structured output focused on recall and semantic understanding.
+
+2. **Orchestrator consolidation**
+   - Compare the two free outputs semantically.
+   - Produce the canonical structured artifact.
+   - Detect discrepancies (amounts, percentages, deadlines, guarantees, dates, counts).
+   - Verify discrepancies directly against the source document before finalizing.
+
+3. **Schema as downstream artifact, not first-pass constraint**
+   - The schema remains useful for the final canonical output, but should not necessarily constrain first-pass comprehension.
+   - This avoids making a single model act simultaneously as reader, legal analyst, schema mapper, JSON validator, line-citation engine, and file operator.
+
+Expected benefits:
+- Better recall for global/commercial facts.
+- Fewer failures with models that reason well conversationally but struggle with strict tool/schema contracts.
+- Discrepancy verification becomes explicit and auditable.
+
+Caveat:
+- Axes requiring exhaustive local traceability (e.g. axis 2 deliverables, axis 4 item lists) may still benefit from chunked/structured reading, especially when many small requirements appear throughout the document.
+
+## 2026-05-18 — Axis 0 hybrid experiment results (Gemini Flash + DeepSeek V4 Flash)
+
+Experiment: run axis 0 as free extraction over Bases, no schema, no chunk plan; then orchestrator consolidates and verifies discrepancies.
+
+Artifacts:
+- `artifacts/step_2_thematic/model_compare/free_axis0_bases_gemini25flash.md`
+- `artifacts/step_2_thematic/model_compare/free_axis0_bases_deepseekv4flash.md`
+- `artifacts/step_2_thematic/model_compare/free_axis0_bases_consolidated_orchestrator.md`
+
+Findings:
+- Gemini 2.5 Flash succeeded in free Markdown mode and produced a useful 21KB/424-line extraction. This contrasts with strict JSON-only subagent failures.
+- DeepSeek V4 Flash required explicit offset reading because `read` truncates long files; after retry, it produced a useful ~20KB extraction.
+- Gemini had strong global recall and clean organization.
+- DeepSeek was more granular on contractual clauses/anomalies, but missed the base amount of the guarantee of faithful performance, claiming it was not found. Orchestrator verified line 1386: guarantee = 20% of winning economic proposal.
+- Orchestrator verification resolved several discrepancy/doubt points:
+  - final liquidation documentation = 10 calendar days (line 1094), not a live calendar/business-day contradiction;
+  - manufacturing guarantee has two relevant anchors: 5 years from technical-operational conformity act per airport (line 109/1023), while contract term ties to OSITRAN recognition (line 1065);
+  - support/maintenance guarantee says No aplica (lines 1408-1410), but post-sale/support obligations exist in manufacturing guarantee clauses (1177-1185);
+  - similar goods definition is narrow: components corresponding to structured cabling (377-379);
+  - penalty formula is genuinely malformed/ambiguous in MD line 1225 and should be checked in original PDF;
+  - multiple template carryovers exist: Contrato de Obra, LPI-006-2025-AdP, LPN-001-2026-AdP, Contrato de Consultoría.
+
+Conclusion:
+- For axis 0, free dual-model extraction + orchestrator consolidation/verification is likely better than schema-first chunked extraction.
+- Keep strict schema as final canonicalization layer, not as the first-pass reading constraint.
+
+## 2026-05-18 — Axis 0 object/scope must include macro goods families
+
+Refinement from Roberto: the axis 0 object/scope summary should not only say "supply of goods/equipment". It must name the major goods/equipment families included, at macro level, so a reader immediately understands what the procurement materially contains.
+
+Rule added to `prompt_axis0_free_reader.md`:
+- In the object/scope summary, include up to 8 major goods/equipment families.
+- Choose the most important units for understanding the procurement.
+- Avoid minor accessories unless they are a major unit of the requirement.
+- Example granularity: switches core, switches de acceso/borde, access points, gateway de voz, telefonía IP, cableado estructurado/fibra óptica.
+
+Applied to AdP axis 0 consolidated artifact:
+- `free_axis0_bases_consolidated_orchestrator.md` now lists: switches core, switches de acceso/borde 24/48, access points, gateway de voz, telefonía IP, cableado estructurado voz/data with fiber-optic components.
+
+## 2026-05-18 — Inline prompts for short/free-reader tasks
+
+Refinement from Roberto: our prompts are short enough that passing only a prompt path adds an unnecessary meta-step. For subagents, especially Gemini-like models, “read the prompt from this path, then do the task” can dilute the force of the actual instruction.
+
+Decision:
+- For short prompts and free-reading tasks, paste the prompt inline in the subagent handoff.
+- Keep file paths for versioning/reference, but do not make the model read a separate prompt file unless the prompt is too long or generated dynamically.
+- Keep paths for large source documents, schemas, outputs, and artifacts.
+
+Prompt cleanup:
+- `prompt_axis0_free_reader.md` was simplified to remove anti-constraints like “do not use chunk plan / do not produce JSON / no schema / line numbers not required”. Those were distracting because a fresh subagent has no prior context of the old pattern.
+- Axis 0 prompt now asks positively for tender analysis.
+- Numeral 5 now asks generically for delivery/execution deadlines, differentiated milestones, and activities with specified durations.
+- Numeral 8 removes explicit OSITRAN/MTC mention from payment.
+- New requirement asks to identify external/supervisory entities involved in acceptance, conformity, recognition, approval, or payment.
+- Numeral 13 removed confidentiality from the default “main conditions” checklist.
+
+## 2026-05-18 — Free readers should receive the source document folder, not only Bases
+
+Refinement from Roberto: axis 0 free readers should generally receive the folder/package of all source documents, not only the Bases document.
+
+Rationale:
+- Private airport clients (AAP, AdP, LAP, etc.) usually provide Bases plus one or more technical documents/anexos.
+- Peruvian public-sector tenders may have one consolidated document or a main document plus annexes.
+- ICAO/OACI, BID and multilateral tenders often distribute key information across several documents.
+
+Decision:
+- For free/hybrid reading, the normal input is the source-document folder (or normalized-doc folder) plus a brief inventory when available.
+- The reader must search/read all relevant documents: bases, technical specs, TDR/EETT, annexes, forms, clarifications, etc.
+- Passing only a single document is allowed only when the orchestrator explicitly scopes the run as an experiment or document-specific comparison.
+- `prompt_axis0_free_reader.md`, `01_workflow.md`, and `README.md` were updated accordingly.

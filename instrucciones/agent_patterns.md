@@ -1,275 +1,447 @@
-# Patrones de delegación, orquestación y sub-agentes
+# Patrones de delegación y subagentes
 
-> Referencia normativa que el orquestador debe leer al arrancar. Define cómo delegar trabajo a LLMs/agentes y cómo manejar las transiciones entre pasos. Adoptado tras la ejecución de ICAO-00068 (mayo 2026) que reveló problemas sistémicos de delegación.
-
-Aplica al workflow de procurement: documentos EETT/aclaraciones → BOM → búsqueda → consolidado.
-
----
-
-## 1. Marco conceptual
-
-Hay **tres niveles** que conviene distinguir antes de delegar nada. Confundirlos es el origen del 80% de los problemas en la corrida de ICAO-00068.
-
-**LLM call (one-shot)**: una sola llamada al modelo con un prompt y un output. Sin loop, sin herramientas, o con herramientas pero sin autonomía para decidir cuándo parar. **La mayoría de los pasos de este workflow son esto**, no agentes.
-
-**Workflow**: una secuencia de LLM calls orquestada por código determinístico. Anthropic: "Workflows are systems where LLMs and tools are orchestrated through predefined code paths". El control de flujo está en el código del orquestador, no en el modelo.
-
-**Agent**: un LLM que opera en un loop, decide qué herramientas usar, evalúa resultados, y elige cuándo terminar. El control de flujo está en el modelo. Solo se justifica para tareas genuinamente exploratorias.
-
-**Regla**: usar el nivel más bajo de complejidad que cumpla los requisitos. Multi-agent paralelo consume ~15× más tokens que un chat y ~4× más que un single agent — solo conviene cuando la tarea es genuinamente paralelizable y el valor del output paga ese costo.
+> Guía operativa para decidir **cómo** delegar trabajo a LLMs/subagentes dentro del workflow `tender_procurement`.
+>
+> Este archivo **no define la secuencia del workflow**. La secuencia, artefactos y pasos viven en `01_workflow.md`. Si este archivo contradice `01_workflow.md` sobre orden operacional, artefactos o preparación documental, seguir `01_workflow.md` y corregir este archivo.
 
 ---
 
-## 2. Mapa de patrones aplicables
+## 1. Principios
 
-### 2.1. Prompt chaining (sequential pipeline)
+### 1.1 Delegar por intención, no por número de paso
 
-**Qué es**: descomposición en subtareas fijas; cada LLM call procesa el output de la anterior; gates programáticos entre etapas.
+Antes de lanzar un subagente, identificar qué tipo de trabajo se necesita:
 
-**Anti-pattern — Orchestrator-as-god**: un LLM planner que decide en cada paso a quién llamar manteniendo todo el estado en su context. Genera latency stacking, bottleneck, y "un mal token en su context envenena el resto de la corrida".
+- comprensión global;
+- extracción exhaustiva;
+- consolidación/deduplicación;
+- verificación documental;
+- auditoría;
+- búsqueda externa;
+- transformación determinística.
 
-**Aplica a**: casi todo este workflow. Pasos 1.4, 2, 3, 4, 7 son cadenas determinísticas con gates programáticos.
+El patrón de delegación depende de ese tipo de trabajo, no del número del paso.
 
----
+### 1.2 Usar el nivel mínimo de autonomía suficiente
 
-### 2.2. Evaluator-optimizer (producer + critic loop) — bounded
+Distinguir:
 
-**Qué es**: una LLM call genera, otra evalúa, con criterios claros. Anthropic: "particularly effective when we have clear evaluation criteria, and when iterative refinement provides measurable value".
+- **LLM call / subagente one-shot**: una tarea clara, un output esperado, pocas decisiones de control.
+- **Workflow**: el orquestador controla una secuencia de llamadas y gates.
+- **Agent autónomo**: el modelo decide herramientas, subpasos y cuándo parar.
 
-**Anti-pattern — Loop sin handoff budget**: dos agentes iterando hasta quemarse el presupuesto porque ninguno sabe cuándo está "done". La solución no es un mejor prompt: es un **handoff budget explícito** (típicamente 1, raramente 2) y la regla "no hay reverse edge": si el revisor encuentra problemas mayores, falla loud y escala al humano, no devuelve al productor para "otra iteración".
+Usar agent autónomo solo cuando la tarea sea realmente exploratoria. La mayoría del procurement funciona mejor como workflow controlado por orquestador.
 
-**Aplica a**: Paso 1.4 (ejecutor + auditor de merge), Paso 3.2 (revisor "ojos frescos" de specs), Paso 7.2 (QA final).
+### 1.3 El orquestador conserva ownership
 
----
+El orquestador:
 
-### 2.3. Orchestrator-workers con fan-out paralelo
+- decide alcance;
+- elige patrón;
+- verifica outputs;
+- consolida;
+- registra decisiones;
+- escala dudas al humano.
 
-**Qué es**: un LLM lead descompone tareas independientes, las despacha a workers paralelos con context windows propios, y sintetiza. Cada worker tiene "distinct tools, prompts, and exploration trajectories—que reduce path dependency y permite investigaciones independientes y exhaustivas".
+El subagente produce un entregable acotado. No decide la arquitectura global.
 
-**Anti-pattern — Every-agent-can-call-every-agent (mesh)**: sin un único punto de handoff, sin enforcement de budget, los loops son inevitables.
+### 1.4 No duplicar el workflow
 
-**Tradeoff**: Anthropic reporta +90% sobre single-agent en tareas de investigación, pero consume ~15× más tokens. Solo se justifica cuando "el valor de la tarea es suficientemente alto para pagar la mejora de performance" y la tarea es **genuinamente paralelizable** (subtareas independientes que no comparten contexto crítico).
+`agent_patterns.md` no debe decir “primero limpiar PDF, luego X, luego Y”. Eso pertenece a `01_workflow.md`.
 
-**Aplica a**: **únicamente Paso 6** (búsqueda de candidatos por ítem). Un item-manager por ítem que despacha N search-workers en paralelo, cada uno con su propio context window y tool budget.
-
----
-
-### 2.4. Hierarchical task decomposition con ownership completo
-
-**Qué es**: niveles —planner que decompone pero no escribe el output, sub-planners que dividen, workers aislados que ejecutan. Cursor/Anthropic convergieron en esto tras encontrar que estructuras planas fallan a escala: "veinte agentes desaceleraron al throughput de dos o tres… las estructuras planas inducen evitación de responsabilidad".
-
-**Anti-pattern — Integrator central como QA gate**: Cursor lo intentó y lo eliminó: "se volvió un bottleneck obvio. Cientos de workers y una sola compuerta".
-
-**Aplica a**: estructura general. El orquestador es el planner; los prompts de cada paso son los workers; cada uno tiene un único entregable claro.
-
----
-
-### 2.5. Handoff with ownership boundaries
-
-**Qué es**: estado tipado compartido con un campo `owner` que indica quién es el único que puede escribir; el handoff es un function call con payload, no un tool call al otro agente; el handoff cuenta contra un budget que **falla loud** si se excede.
-
-**Anti-pattern crítico — Context-as-content**: pasar el contenido del archivo en el campo `context` cuando el contrato esperaba paths o handles. **Esto fue exactamente el error del INC-001 en ICAO-00068**, que generó timeouts artificiales y motivó toda la arquitectura paralela de scripts Python + API directa.
-
-**Regla operativa explícita**: `context` lleva **ubicaciones, identificadores y referencias**, no payload. El sub-agente lee los archivos por su cuenta usando sus tools (`read_file`, `terminal`, etc.).
-
-**Aplica a**: cualquier transición entre pasos. Cuando el orquestador delega, pasa paths a inputs, paths a outputs esperados, ruta al prompt-template, ruta al schema de salida. No pasa contenido.
+Aquí solo se documentan patrones reutilizables de delegación.
 
 ---
 
-### 2.6. Context engineering: share full traces, not just messages
+## 2. Verificación de modelos antes de delegar
 
-**Qué es**: Cognition formaliza dos principios casi inviolables:
-1. **Share context, share full agent traces, not just individual messages**.
-2. **Actions carry implicit decisions, and conflicting decisions carry bad results**.
+Antes de lanzar subagentes, el orquestador debe verificar **cómo están disponibles los modelos en el entorno actual**.
 
-Ejemplo canónico: dos sub-agentes que generan el background y el pájaro de un Flappy Bird, cada uno con asunciones implícitas distintas sobre estilo, y un final agent que tiene que componer dos piezas incoherentes.
+### 2.1 Consultar modelos recomendados
 
-**Anti-pattern — Sub-agentes a los que se les pasa solo su subtarea**, no el contexto general ni las decisiones previas. Outputs inconsistentes que no componen.
+Revisar:
 
-**Aplica a**: **explica el INC-006 de ICAO-00068** (28 requisitos FALTANTE detectados post-hoc). Cada variante del BOM exploded decidió implícitamente cosas distintas sobre naming y agrupación; al consolidar, los requisitos que no encajaban con las otras decisiones se perdieron. La solución no es revisor más fuerte: es un **scratchpad de decisiones compartido** entre pasos (decisiones de naming, abreviaturas, supuestos).
+- `instrucciones/model_routing.yaml`
+- `ROADMAP_OBSERVATIONS.md` para evidencia reciente
+- resultados de experimentos locales de la licitación actual
 
----
+No elegir modelo por reputación general. Elegir por evidencia para el tipo de tarea.
 
-### 2.7. Context engineering: write / select / compress / isolate
+### 2.2 Verificar strings reales de provider/model
 
-**Qué es**: cuatro estrategias para manejar context window finito:
-- **Write**: scratchpads, memorias fuera del context window.
-- **Select**: RAG, recuperar solo lo relevante para la subtarea.
-- **Compress**: resumir tras N turnos.
-- **Isolate**: sub-agentes con context window propio.
+Los nombres pueden variar por entorno:
 
-Anthropic refuerza: "context, therefore, must be treated as a finite resource with diminishing marginal returns… context rot: as the number of tokens in the context window increases, the model's ability to accurately recall information from that context decreases".
+- `google/gemini-2.5-flash`
+- `openrouter/deepseek/deepseek-v4-flash`
+- `fireworks/accounts/fireworks/models/deepseek-v4-pro`
+- aliases locales
+- allowlists en `openclaw.json`
 
-**Anti-pattern — Context dump**: meter todo el documento de 200 páginas en el prompt "por si acaso". Genera context rot, sube costo, degrada precisión.
+Antes de lanzar:
 
-**Aplica a**: pasos 2 y 3. El BOM y las specs no necesitan ver el pliego entero, sino las secciones relevantes seleccionadas. El scratchpad explícito entre pasos es la implementación práctica de "write context".
+- revisar `/status` / `session_status` cuando aplique;
+- revisar configuración disponible si se tiene acceso;
+- confirmar provider/model string exacto;
+- si el modelo no existe en allowlist o provider, escoger alternativa documentada.
 
----
+### 2.3 Auditar fallback y atribución real
 
-### 2.8. Constraints over instructions
+No basta con saber el modelo primario de la sesión. Si hay fallbacks, el turno efectivo puede producirse con otro modelo.
 
-**Qué es**: decirle al modelo **qué NO hacer** funciona mejor que decirle qué SÍ hacer. Mejor aún: hacer los constraints **ambientales** (físicos) en lugar de instruccionales. Si el agente no tiene acceso a internet, no necesitás decirle que no la use.
+Reglas:
 
-**Anti-pattern — Checkbox mentality**: listas de tareas prescriptivas que el modelo completa literalmente sin entender el intent.
+- Para comparativos de modelo, deshabilitar fallback si la plataforma lo permite, o auditar historial por turno.
+- Reportar si hubo fallback efectivo.
+- No atribuir un artefacto a Gemini/DeepSeek/GPT solo porque era el modelo primario de sesión.
+- Si un subagente escribe archivo, verificar qué provider/model ejecutó el turno que hizo `write` o generó el contenido.
 
-**Aplica a**: todos los pasos. En lugar de listas "asegurate de incluir X, Y, Z", restringir el JSON schema de output a un shape donde X, Y, Z son `required`. La validación post-call hace el rol de "constraint físico" que el modelo no puede esquivar.
-
----
-
-### 2.9. Structured output validation post-call (gate primitive)
-
-**Qué es**: cada LLM call devuelve JSON contra schema; un validador determinístico (no otro LLM) verifica. Si falla, retry con el error como feedback o falla loud.
-
-**Anti-pattern — Free-text output más parser regex**: frágil, no falla loud, los errores de schema se acumulan silenciosamente downstream. El "bracket counting rescue" implementado en ICAO-00068 es un parche sobre este problema, no la solución correcta.
-
-**Aplica a**: salida de todos los pasos. Particularmente crítica para Paso 2 (BOM) y Paso 3 (specs): un faltante de campo es un BOM con requisitos perdidos. El validador detecta inmediatamente que `cantidad`, `unidad` o `referencia_sección` está ausente.
+Lección AdP: una sesión primaria Gemini puede terminar escribiendo vía fallback GPT; `status` muestra modelo de sesión, no necesariamente modelo efectivo por turno.
 
 ---
 
-### 2.10. Tool budget explícito (en lugar de max_tokens)
+## 3. Tipos de tarea y patrón recomendado
 
-**Qué es**: en lugar de un límite de tokens (que el modelo no percibe como restricción accionable), un presupuesto de tool calls que el modelo conoce y administra. El paper BATS (2025): "standard agents lack inherent budget awareness and without explicit signals, they often perform shallow searches and fail to utilize additional resources".
+### 3.1 Lectura libre / comprensión global
 
-Complemento: **loop primitive** en tareas largas — un loop explícito de "trabajar → verificar progreso → continuar o salir" en lugar de un solo turno largo.
+**Uso típico**: eje 0, análisis comercial/contractual general, lectura ejecutiva de un paquete de licitación.
 
-**Anti-pattern — `max_tokens` alto y esperar autogobierno**: sin señal explícita, los modelos hacen búsquedas superficiales o truncan output sin avisar. **Esto fue exactamente el INC-002 de ICAO-00068**.
+**Patrón recomendado**:
 
-**Aplica a**: Paso 6 (search workers) — cada worker recibe budget de N búsquedas y M páginas; cuando se agota, devuelve lo que tiene. Y todo paso con output estructurado grande (Paso 2, Paso 3): si el modelo se queda sin output, el harness debe rechazar y pedir retry, no rescatar bracket counting.
+- 1 o 2 lectores libres con modelos contrastantes.
+- Prompt corto **inline**.
+- Input normal: carpeta del expediente/documentos fuente, no un único archivo.
+- Output: Markdown claro o JSON laxo, no schema canónico.
+- Orquestador consolida, detecta discrepancias y verifica contra fuentes.
 
----
+**Cuándo usar**:
 
-## 3. Reglas operativas del orquestador
+- información global dispersa pero no excesivamente granular;
+- el objetivo es recall/comprensión;
+- el schema temprano podría distraer o reducir calidad.
 
-Diez reglas no negociables, destiladas de los patrones anteriores. El orquestador debe respetarlas en cada delegación.
+**Gate de calidad**:
 
-1. **`context` lleva ubicaciones, no contenido**. Paths, doc IDs, range references. Nunca el texto del archivo.
-2. **Cada LLM call devuelve JSON validado contra schema**; falla bloquea avance.
-3. **Tool budget explícito por delegación**, no `max_tokens`. El sub-agente debe percibirlo como restricción accionable.
-4. **Handoff count budget global**. Cruzarlo es falla loud, no retry silencioso.
-5. **Un único `owner` por estado en cada momento**. El campo `owner` viaja con el payload; el receptor verifica `assert state.owner == self`.
-6. **El planner no produce el output final**. Quien decompone no es quien escribe.
-7. **Trazas completas, no mensajes aislados**, cuando hay sub-agentes en paralelo. Compartir decisiones implícitas previas.
-8. **Logging en el handoff**, no en cada turno. El span de boundary es la unidad de observabilidad más informativa.
-9. **Falla loud antes que retry silencioso**. Un sub-agente que no puede cumplir su definition of done debe romper la corrida.
-10. **Model routing por evidencia, no por reputación general**. Ver `model_routing.yaml`. Anthropic mostró que upgrade de modelo > duplicar token budget — la elección de modelo es variable independiente con efectos no obvios.
+- cubre checklist esperado;
+- marca dudas;
+- identifica documentos usados;
+- no inventa;
+- discrepancias verificables.
 
----
+### 3.2 Extracción canónica estructurada
 
-## 4. Cuándo SÍ y cuándo NO multi-agent
+**Uso típico**: entregables documentales, bienes/equipos, obligaciones específicas, campos que alimentan scripts downstream.
 
-**Cognition** (perspectiva crítica): la mayoría de los workflows mal llamados "multi-agent" se resuelven mejor con un single-threaded linear agent — o, en términos de Anthropic, prompt chaining workflow. Los multi-agent paralelos rompen el principio de contexto compartido y generan inconsistencias entre piezas que después hay que componer.
+**Patrón recomendado**:
 
-**Anthropic** (perspectiva pro): para tareas genuinamente paralelizables —búsqueda breadth-first, exploración de espacios independientes— multi-agent es vital. El factor que predice 80% de la varianza de performance es el uso de tokens.
+- subagente especializado por eje/documento;
+- prompt claro;
+- schema específico del eje;
+- JSON canónico;
+- validación determinística;
+- Markdown derivado por script.
 
-**Síntesis aplicada a este workflow**: multi-agent se justifica solo cuando las subtareas son genuinamente independientes Y el valor del output paga el 15× de tokens. En este workflow, eso aplica **únicamente al Paso 6 (búsqueda de candidatos por ítem)**. El resto es prompt chaining + evaluator-optimizer + gates programáticos.
+**Cuándo usar**:
 
-**Decisión post-ICAO-00068 sobre las variantes paralelas del Paso 2**: las 3 variantes del BOM HL y las 4 del BOM Exploded eran sobre-arquitectura. Cognition tenía razón en este caso: un solo productor + auditor "ojos frescos" da mejor resultado que múltiples variantes que cada una decide implícitamente cosas distintas y después hay que consolidar. Las variantes consumen 7× tokens, generan inconsistencias en naming/agrupación (cada modelo decide diferente), y la consolidación posterior pierde requisitos que no encajan en el "consenso". **Se eliminan en v0.2**.
+- el output será consumido por automatización;
+- se requieren enums, campos obligatorios, evidencia corta;
+- hay muchas menciones pequeñas que deben ser trazables.
 
----
+**Gate de calidad**:
 
-## 5. Aplicación a cada paso del workflow
+- JSON parse;
+- schema OK;
+- evidencia presente;
+- rangos válidos;
+- cobertura declarada.
 
-### Paso 1 — Normalización documental
-**Tipo**: workflow no-LLM determinístico + LLM call selectiva para visión.
-**Patrones**: Constraints over instructions (schema de output del extractor define required fields).
-**Flujo correcto** (post-ICAO):
-1. Si DOCX → convertir a PDF (determinístico).
-2. PDF → pasar por optimizador (`pdf_image_audit.py`: quita headers/footers/firmas/sellos/decorativos).
-3. PDF optimizado → LandingAI ADE → markdown.
+### 3.3 Consolidación / deduplicación semántica
 
-### Paso 1.2b — Planos/diagramas pre-OCR
-**Tipo**: workflow no-LLM determinístico + LLM call visual selectiva.
-**Patrones**: 2.1 (chaining), 2.7 (select), 2.9 (schema validation), 2.10 (tool budget).
-**Reglas**:
-- Detector geométrico solo propone páginas candidatas; no decide eliminación.
-- Modelo visual confirma plano/diagrama y extrae `identifier_or_title` visible.
-- Páginas confirmadas se extraen a PDF aparte y se sustituyen por resumen textual en `{stem}_preocr.pdf`.
-- Páginas grandes que son tablas/anexos textuales quedan en OCR normal.
+**Uso típico**: fusionar outputs de modelos, documentos o ejes.
 
-### Paso 1.4 — Merge aclaraciones (ejecutor + auditor)
-**Tipo**: evaluator-optimizer bounded.
-**Patrones**: 2.2 (evaluator-optimizer), 2.5 (handoff), 2.9 (schema validation).
-**Reglas**:
-- Handoff budget = 1 (auditor revisa una vez).
-- No hay reverse edge: si auditor encuentra problemas mayores, falla loud y escala al humano.
-- Context para auditor: documento original + diff propuesto, NO solo el documento ya mergeado.
+**Patrón recomendado**:
 
-### Paso 1.5 — Índice estructural de Markdown
-**Tipo**: prompt chaining / LLM call por documento, con lectura completa secuencial.
-**Patrones**: 2.1 (chaining), 2.7 (write/select), 2.9 (schema validation), 2.10 (tool budget explícito).
-**Reglas**:
-- Leer TODO el Markdown por ventanas de 200 líneas con overlap de 50.
-- No confiar ciegamente en headings Markdown; reconstruir jerarquía real con señales combinadas.
-- No extraer BOM ni entregables en esta pasada.
-- El indexador puede sugerir correcciones Markdown estructurales de bajo riesgo, pero NO modifica el archivo fuente.
-- Outputs planos: `artifacts/step_1_index/{stem_original}_index.json/.md`.
-- JSON contra `schemas/document_index.schema.json`.
+- LLM semantic merge, no heurística textual como fuente de verdad.
+- Empezar con un consolidado base.
+- Procesar nuevos inputs item por item.
+- Si equivalente: fusionar procedencia y elegir mejor wording.
+- Si nuevo: agregar.
+- Preservar `source_documents`, `models_found`, `source_entry_ids`, evidencias y notas.
 
-### Paso 2 — BOM HL + Exploded
-**Tipo**: prompt chaining single-shot, sin variantes.
-**Patrones**: 2.1 (chaining), 2.6 (trazas completas / scratchpad), 2.7 (write/select), 2.9 (schema validation).
-**Cambio v0.2**: **eliminar variantes paralelas**. Reemplazar por:
-- 2.1 BOM HL: 1 productor + 1 auditor "ojos frescos" (modelo distinto).
-- 2.3 BOM Exploded: 1 productor + 1 auditor "ojos frescos" (modelo distinto).
-- Scratchpad explícito de decisiones (naming, abreviaturas, supuestos) compartido entre 2.1 y 2.3.
+**Evitar**:
 
-### Paso 3 — Specs + herencia + revisor
-**Tipo**: prompt chaining + evaluator-optimizer.
-**Patrones**: 2.1, 2.2, 2.6, 2.7, 2.9.
-**Reglas**:
-- 3.1 productor procesa en batches con context selecto (solo secciones relevantes por ítem, no documento completo).
-- 3.2 revisor: context fresco — no ve el razonamiento de 3.1, solo el output y el documento fuente. Handoff budget = 1.
+- Jaccard/string similarity como criterio final;
+- consenso ciego;
+- perder menciones minoritarias sin verificar.
 
-### Paso 4 — BOM búsqueda
-**Tipo**: workflow no-LLM determinístico.
-**Patrón**: ninguno LLM-agentic.
-Transforma el BOM consolidado en queries estructuradas. Si hay LLM call, es one-shot de reformulación.
+### 3.4 Verificación documental
 
-### Paso 6 — Búsqueda de candidatos
-**Tipo**: **orchestrator-workers con fan-out paralelo. ÚNICO paso multi-agent del workflow**.
-**Patrones**: 2.3 (orchestrator-workers), 2.4 (hierarchical), 2.5 (handoff), 2.7 (isolate), 2.8 (constraints), 2.10 (tool budget).
-**Estructura**:
-- Item-manager (1 por ítem): agente real con loop, tools, autonomía bounded.
-- 2 search-workers por ítem en paralelo: cada uno context window propio, tool budget explícito (N búsquedas, M páginas, K fetches de PDF).
-- Búsqueda en español Y en inglés.
-- Capacidad de descargar y parsear datasheet PDF del fabricante.
-- Schema de output con evidencia citada (URL + página + sección).
-**Matriz de cumplimiento**: producida **separadamente** como LLM call adicional post-búsqueda, con context = item-spec + candidato-evidencia. No es responsabilidad del search worker.
+**Uso típico**: montos, fechas, porcentajes, garantías, plazos, discrepancias entre modelos.
 
-### Paso 7 — Consolidación + QA
-**Tipo**: prompt chaining + critic terminal.
-**Patrones**: 2.1, 2.2 (bounded, sin reverse edge), 2.9.
-**Reglas**:
-- 7.1 Consolidador: LLM call con context engineering serio (matriz Paso 6 + specs Paso 3 + BOM Paso 2).
-- 7.2 QA: critic terminal. Si encuentra inconsistencias graves, **falla loud y escala**, no devuelve al consolidador.
+**Patrón recomendado**:
 
----
+- El orquestador verifica contra MD/PDF fuente.
+- Usar búsqueda dirigida y lectura de contexto.
+- Registrar veredicto y líneas/secciones cuando sea útil.
 
-## 6. Decisiones de ICAO-00068 que se invierten en v0.2
+**Regla**:
 
-| Decisión v0.1 | Causa raíz observada | Decisión v0.2 |
-|---|---|---|
-| 3 variantes BOM HL + consolidación | INC-006: 28 requisitos FALTANTE por decisiones implícitas inconsistentes entre variantes | 1 productor + 1 auditor "ojos frescos" |
-| 4 variantes BOM Exploded + consolidación | Idem + INC-004 (504 timeout por 426 items en 1 prompt) | 1 productor + 1 auditor + scratchpad de decisiones compartido con 2.1 |
-| Búsqueda solo en español (Paso 6 v1) | INC-007: 0% hit rate | Búsqueda en español Y en inglés |
-| Solo Firecrawl para fetch | INC-009: créditos agotados, sin alternativa | Pool de fetch tools con fallback (ver `catalog_tools.md`) |
-| Sin acceso a spec sheets PDF | Hit rate 10.7% | Búsqueda explícita de PDFs de fabricante + parser |
-| max_tokens alto, sin tool budget | INC-002: kimi/deepseek/minimax truncaron JSON | Tool budget explícito + schema validation |
-| Selección de modelo por reputación | glm-5p1 fue el único confiable para JSON; los demás truncaron | `model_routing.yaml` por evidencia |
+- Los modelos detectan discrepancias; el orquestador las resuelve contra la fuente.
+
+### 3.5 Auditoría / revisor de ojos frescos
+
+**Uso típico**: revisar un output ya producido sin contaminarse con el razonamiento del productor.
+
+**Patrón recomendado**:
+
+- modelo distinto al productor;
+- contexto mínimo suficiente: fuente + output + criterios de revisión;
+- handoff budget 1;
+- si hay fallas mayores, escalar al humano o al orquestador, no loop infinito.
+
+### 3.6 Búsqueda externa / candidatos
+
+**Uso típico**: encontrar productos/proveedores/candidatos fuera del expediente.
+
+**Patrón recomendado**:
+
+- fan-out paralelo controlado;
+- tool budget explícito;
+- cada worker con alcance estrecho;
+- orquestador consolida.
+
+### 3.7 Transformación determinística
+
+**Uso típico**: render Markdown desde JSON, validar schema, convertir formatos, calcular conteos, mover/archivar archivos.
+
+**Patrón recomendado**:
+
+- scripts/Python/herramientas determinísticas;
+- no usar LLM para parseo trivial o conversión mecánica.
 
 ---
 
-## Fuentes
+## 4. Diseño del handoff
 
-- [Anthropic — Building effective agents](https://www.anthropic.com/engineering/building-effective-agents)
-- [Anthropic — How we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system)
-- [Anthropic — Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
-- [Anthropic — Advanced tool use](https://www.anthropic.com/engineering/advanced-tool-use)
-- [Cognition — Don't build multi-agents](https://cognition.ai/blog/dont-build-multi-agents)
-- [Anhaia — Multi-agent handoff with ownership boundaries](https://dev.to/gabrielanhaia/multi-agent-handoff-with-ownership-boundaries-nobody-crosses-nll)
-- [Lavaee — Five primitives of agent swarms](https://alexlavaee.me/blog/five-primitives-agent-swarms/)
-- [GitHub — Building reliable AI workflows with agentic primitives](https://github.blog/ai-and-ml/github-copilot/how-to-build-reliable-ai-workflows-with-agentic-primitives-and-context-engineering/)
-- [LangChain — Context engineering for agents](https://blog.langchain.com/context-engineering-for-agents/)
-- [Microsoft Azure — AI Agent Orchestration Design Patterns](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns)
-- [OpenAI — A Practical Guide to Building Agents (PDF)](https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf)
-- [BATS — Budget-Aware Tool-Use Enables Effective Agent Scaling (arXiv 2025)](https://arxiv.org/html/2511.17006v1)
+### 4.1 Prompt inline vs ruta de prompt
+
+Usar **prompt inline** cuando:
+
+- el prompt es corto;
+- la instrucción semántica es central;
+- se quiere máxima adherencia;
+- el modelo podría distraerse con meta-trabajo.
+
+Usar **ruta de prompt** cuando:
+
+- el prompt es largo o generado;
+- hay plantillas versionadas extensas;
+- el subagente ya está probado para leer herramientas correctamente.
+
+Evitar el meta-prompt “lee el prompt en esta ruta y luego haz la tarea” si el prompt cabe inline.
+
+### 4.2 Carpeta fuente vs documento único
+
+Input normal para licitaciones: **carpeta del expediente/documentos fuente**.
+
+Porque:
+
+- AAP/AdP/LAP suelen tener Bases + EETT/TDR/anexos;
+- Estado peruano puede tener documento consolidado o principal + anexos;
+- OACI/ICAO/BID suelen dispersar información entre varios documentos.
+
+Pasar un único documento solo si:
+
+- el experimento está explícitamente limitado;
+- el workflow lo define así;
+- el documento consolidado realmente contiene todo.
+
+### 4.3 Inventario de documentos
+
+Cuando sea posible, incluir un inventario breve:
+
+- nombre de archivo;
+- tipo probable: bases, expediente técnico, anexo, formulario, aclaración;
+- ruta.
+
+El inventario ayuda al subagente a navegar sin convertir el handoff en un volcado de contenido.
+
+### 4.4 Paths vs contenido inline
+
+Regla actualizada:
+
+- Documentos grandes: pasar paths/carpeta.
+- Prompts cortos: inline.
+- Schemas largos: path.
+- Extractos pequeños críticos: pueden ir inline si reducen ambigüedad.
+- Tablas/listas cortas de parámetros: inline.
+
+La regla no es “nunca contenido”; es “no volcar documentos grandes como contexto cuando el subagente puede leerlos”.
+
+### 4.5 Definition of Done
+
+Todo handoff debe decir explícitamente:
+
+- qué leer;
+- qué producir;
+- dónde escribir;
+- formato esperado;
+- qué hacer si falta información;
+- cómo reportar dudas;
+- si debe validar o no.
+
+---
+
+## 5. Context engineering
+
+### 5.1 Write / select / compress / isolate
+
+Usar:
+
+- **Write**: registrar decisiones en archivos (`ROADMAP_OBSERVATIONS.md`, logs, scratchpads).
+- **Select**: recuperar secciones relevantes cuando no hace falta todo el paquete.
+- **Compress**: resumir contexto cuando la conversación se vuelve larga.
+- **Isolate**: subagentes con contexto propio para lecturas independientes.
+
+### 5.2 Offsets no son chunking semántico
+
+Cuando `read` trunca archivos largos, leer por offsets puede ser solo transporte técnico.
+
+No confundir:
+
+- “leer por offsets para superar límite de herramienta”
+- con “extraer por chunks semánticos con cobertura y schema”.
+
+El primer caso puede seguir siendo lectura libre/holística.
+
+### 5.3 Compartir decisiones, no solo outputs
+
+Si varios subagentes deben componer un resultado, el orquestador debe compartir decisiones relevantes:
+
+- naming;
+- alcance;
+- clasificación;
+- supuestos;
+- exclusiones;
+- criterios de dedupe.
+
+Cuando no se comparten, cada modelo inventa su propia taxonomía y la consolidación pierde información.
+
+---
+
+## 6. Outputs y gates
+
+### 6.1 Markdown libre / semiestructurado
+
+Apto para:
+
+- comprensión global;
+- lectura ejecutiva;
+- análisis de discrepancias;
+- primer pase de recall.
+
+Gate:
+
+- checklist completo;
+- claridad;
+- dudas explícitas;
+- fuentes identificadas;
+- revisión del orquestador.
+
+### 6.2 JSON canónico
+
+Apto para:
+
+- downstream automatizado;
+- dedupe sistemático;
+- render determinístico;
+- matrices y scripts.
+
+Gate:
+
+- JSON parse;
+- schema;
+- validaciones adicionales;
+- retry una vez con error si procede;
+- segundo fallo = falla loud.
+
+### 6.3 Markdown derivado
+
+Si existe JSON canónico, el Markdown humano debe derivarse por script, no por el subagente.
+
+Así se puede cambiar formato sin relanzar LLM.
+
+### 6.4 Discrepancias
+
+Las discrepancias son output valioso.
+
+Registrar:
+
+- qué modelos/documentos discrepan;
+- cuál es el dato conflictivo;
+- verificación contra fuente;
+- veredicto;
+- si queda incertidumbre.
+
+---
+
+## 7. Fallbacks, fallas y atribución
+
+### 7.1 Falla loud antes que éxito ambiguo
+
+Si el subagente no cumple Definition of Done:
+
+- no inventar éxito;
+- no asumir que un archivo parcial sirve;
+- reportar fallo y evidencia.
+
+### 7.2 Fallback audit
+
+Para pruebas de modelo:
+
+- verificar modelo primario;
+- verificar fallbacks configurados;
+- revisar historial por turno si está disponible;
+- confirmar qué modelo produjo el artefacto.
+
+### 7.3 Gemini/subagente
+
+Lección observada:
+
+- Gemini directo/chat puede funcionar.
+- Gemini como subagente con herramientas/contexto largo puede desviarse, fallar o caer a fallback.
+- No atribuir output a Gemini sin auditar provider/model efectivo del turno productor.
+
+---
+
+## 8. Anti-patterns
+
+Evitar:
+
+1. **Mini-workflow duplicado**: `agent_patterns.md` no debe repetir `01_workflow.md`.
+2. **Meta-prompt innecesario**: pasar prompts cortos solo como ruta.
+3. **Schema-first para comprensión global**: puede reducir recall y empeorar razonamiento.
+4. **Free-text cuando hace falta canon**: si downstream requiere estructura, usar JSON/schema.
+5. **Dedupe semántico con heurística textual**: Jaccard/string similarity solo como ayuda, no decisión final.
+6. **Consenso sin verificación**: dos modelos pueden coincidir y estar mal; uno puede estar solo y tener razón.
+7. **Fallback invisible**: reportar un modelo sin revisar si hubo fallback efectivo.
+8. **Un documento por defecto**: asumir que “Bases” contiene todo el expediente.
+9. **Anti-instrucciones distractoras**: decir “no uses chunk plan/no schema/no JSON” a un subagente que no tiene ese contexto.
+10. **LLM para trabajo mecánico**: render, validación, conteos, conversiones simples deben ser determinísticos.
+
+---
+
+## 9. Lecciones históricas útiles, no reglas absolutas
+
+La corrida ICAO-00068 mostró problemas reales:
+
+- JSON truncado cuando no hay validación/gates;
+- variantes paralelas inconsistentes;
+- falta de scratchpad compartido;
+- context dumps costosos;
+- retries sin budget.
+
+Pero esas lecciones no implican que todo deba ser JSON-first ni chunked.
+
+Regla viva:
+
+> Elegir patrón según la tarea actual y la evidencia actual. Mantener el workflow como autoridad de secuencia; mantener este archivo como guía de delegación.
