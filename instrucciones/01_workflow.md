@@ -129,7 +129,7 @@ Cada output incluye frontmatter YAML con metadata (sheet_name, representation, m
 **Schema**: `schemas/plan_pages_analysis.schema.json`
 **Modelo**: `model_routing.yaml → paso_1_2b_planos_vision` (primary: `google/gemini-2.5-flash`).
 
-**Tarea**: después del PDF limpio y antes de LandingAI/OCR, detectar páginas con tamaño anómalo respecto al tamaño dominante del documento. Estas páginas suelen ser planos, diagramas o anexos tabulares grandes. El tamaño solo genera candidatos; la confirmación la hace un modelo visual.
+**Tarea**: después del PDF limpio y antes de la conversión a markdown, detectar páginas con tamaño anómalo respecto al tamaño dominante del documento. Estas páginas suelen ser planos, diagramas o anexos tabulares grandes. El tamaño solo genera candidatos; la confirmación la hace un modelo visual.
 
 **Método**:
 1. Auditar tamaño de páginas del PDF limpio.
