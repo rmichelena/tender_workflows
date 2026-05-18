@@ -38,15 +38,79 @@
 
 **Tipo**: workflow no-LLM determinístico + LLM call selectiva como fallback.
 
-### 1.1 Conversión a PDF (si aplica)
+### 1.0 Triage de inputs por tipo de archivo
+
+**Owner**: Orquestador (clasificación determinística por extensión).
+**Tarea**: para cada archivo en `/proyecto/inputs/`, decidir la rama:
+- `.docx` → rama PDF (Paso 1.1).
+- `.pdf` → rama PDF (Paso 1.1, pasa sin convertir).
+- `.xlsx` / `.xlsm` → **rama XLSX (Paso 1.0.b)** — NO se convierte a PDF.
+- Otros (`.txt`, `.csv`, imágenes sueltas): según corresponda; en caso de duda escalar al humano.
+
+**Done**: cada input asignado a una rama.
+
+### 1.0.b Rama XLSX (multi-pestaña → single-tab → markdown/html)
+
+> **Por qué rama separada**: convertir Excel a PDF rompe tablas grandes, merged cells y multi-hoja. Para preservar integridad estructural, los XLSX se procesan nativos con `openpyxl` y se convierten a la representación óptima por hoja (markdown table para tablas planas, HTML table para merged cells jerárquicas, markdown text para hojas narrativas).
+
+**Tipo**: workflow determinístico de 3 sub-pasos.
+
+#### 1.0.b.1 Split multi-pestaña → single-tab
+
+**Owner**: Orquestador (script `scripts/extractors/xlsx_split.py`).
+**Tarea**: dividir cada XLSX/XLSM multi-pestaña en N archivos XLSX, uno por hoja, preservando merged cells y formato.
+
+**Outputs**:
+- `/proyecto/artifacts/step_1_xlsx_split/{stem}_sheet{NN}_{slug}.xlsx` (uno por hoja)
+- `/proyecto/artifacts/step_1_xlsx_split/{stem}_split_manifest.json` (índice de hojas)
+
+**Done**: cada hoja del XLSX original es un archivo independiente.
+
+#### 1.0.b.2 Análisis de hoja → decisión de representación
+
+**Owner**: Orquestador (script `scripts/extractors/xlsx_sheet_analyze.py`).
+**Tarea**: por cada XLSX single-tab, analizar contenido y decidir representación óptima.
+
+**Reglas de decisión** (umbrales en `params.yaml → xlsx`):
+- Hoja vacía → `empty`.
+- Texto largo dominante (long_text_ratio ≥ 0.40 y ≤ 3 columnas) → `markdown_text`.
+- Merged cells en filas 1-3 (headers jerárquicos) → `html_table`.
+- Merged cells en filas de datos → `html_table`.
+- Resto (tabla rectangular sin merged) → `markdown_table`.
+
+**Outputs**: `{xlsx_single_tab_path}_analysis.json` con métricas y decisión.
+
+**Done**: cada hoja tiene su representación decidida.
+
+#### 1.0.b.3 Conversión a markdown/html
+
+**Owner**: Orquestador (script `scripts/extractors/xlsx_convert.py`).
+**Tarea**: aplicar el conversor según la representación decidida en 1.0.b.2.
+
+- `markdown_table`: vía MarkItDown (fallback: generación manual si MarkItDown no disponible).
+- `html_table`: vía openpyxl + generación HTML nativa preservando colspan/rowspan/scope.
+- `markdown_text`: párrafos plain markdown.
+- `empty`: archivo placeholder con comentario.
+
+Cada output incluye frontmatter YAML con metadata (sheet_name, representation, max_row/col, merged_count, etc.).
+
+**Outputs**: `/proyecto/artifacts/step_1_normalizados/{stem}_sheet{NN}_{slug}.md` (uno por hoja).
+
+> Las hojas XLSX se mezclan en `step_1_normalizados/` con los markdowns que vienen de la rama PDF (paso 1.3). A partir de ahí, el flujo es uniforme para todos los inputs.
+
+**Done**: todos los XLSX están normalizados a markdown/html en `step_1_normalizados/`.
+
+### 1.1 Conversión a PDF (rama PDF, solo DOCX/PDF)
 
 **Owner**: Orquestador (script determinístico)
-**Tarea**: por cada archivo en `/proyecto/inputs/`:
+**Tarea**: por cada archivo de la rama PDF (DOCX + PDF originales):
 - Si es DOCX → convertir a PDF (LibreOffice headless o equivalente).
 - Si es ya PDF → pasar sin tocar.
 
+> XLSX/XLSM **NO** entran por acá. Ya están normalizados vía Paso 1.0.b.
+
 **Output**: `/proyecto/artifacts/step_1_pdfs/{nombre_doc}.pdf`
-**Done**: todos los inputs son PDF.
+**Done**: todos los inputs de la rama PDF son PDF.
 
 ### 1.2 Optimizador (quitar headers/footers/firmas/sellos/decorativos)
 

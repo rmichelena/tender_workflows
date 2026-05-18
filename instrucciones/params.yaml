@@ -17,6 +17,13 @@ version: 0.2
 # ---------------------------------------------------------------
 
 batching:
+  # Paso 1.0.b XLSX: umbrales para la decisión de representación por hoja.
+  # Usados por scripts/extractors/xlsx_sheet_analyze.py.
+  xlsx_text_cell_threshold_chars: 200       # longitud mínima para considerar "texto largo"
+  xlsx_text_cell_ratio_for_md_text: 0.40    # ratio de celdas con texto largo para clasificar como markdown_text
+  xlsx_text_max_cols_for_md_text: 3         # max columnas para considerar hoja como narrativa
+  xlsx_header_merged_triggers_html: true    # merged cells en filas 1-3 → html_table
+  xlsx_data_merged_triggers_html: true      # merged cells en filas de datos → html_table
   # Paso 1.2b Planos/diagramas: detección geométrica y rasterización.
   plan_pages_area_ratio_threshold: 1.4
   plan_pages_min_width_pt: 700
@@ -54,6 +61,7 @@ limits:
 
 timeouts:
   default: 300                 # 5 min — pasos estándar (OCR, merge, BOM, specs, QA).
+  xlsx_pipeline: 300           # 5 min — Paso 1.0.b (split + analyze + convert) por archivo XLSX.
   plan_pages_vision: 900       # 15 min — Paso 1.2b análisis visual de páginas candidatas.
   document_indexer: 1800       # 30 min — Paso 1.5 lectura completa por documento con overlap.
   bom_productor: 600           # 10 min — paso 2.1 y 2.3 (BOM HL y Exploded).
