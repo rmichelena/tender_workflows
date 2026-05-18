@@ -277,6 +277,7 @@ Modal free tier: $30/month. Costo estimado ~$0.04/PDF (warm).
 
 - La imagen es `quay.io/docling-project/docling-serve:latest` + RapidOCR onnx models baked in
 - Soporta los mismos parámetros que el contenedor local: `page_range`, `do_ocr`, `ocr_lang`, `table_mode`, etc.
+- La API actual valida `page_range` como lista de dos enteros. En curl usar dos campos repetidos (`-F "page_range=1" -F "page_range=50"`); en los scripts usar `--page-range 1,50`.
 - Los resultados async están en memoria — si el container se reinicia, el task desaparece y el poll devuelve `{"detail":"Task not found."}`
 - Si un task queda `pending`/`started` >10 min, el container fue preempted — reenviar
 

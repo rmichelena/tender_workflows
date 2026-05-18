@@ -127,10 +127,14 @@ Para un PDF grande escaneado, usar `page_range` y concatenar los markdowns:
 
 ```bash
 # páginas 1-50
--F "page_range=1,50"
+# Nota: la API actual valida page_range como lista de dos enteros. En curl usar
+# dos campos repetidos; en los scripts usar --page-range 1,50.
+-F "page_range=1" \
+-F "page_range=50"
 
 # páginas 51-100
--F "page_range=51,100"
+-F "page_range=51" \
+-F "page_range=100"
 ```
 
 Esto reduce memoria y evita OOM. Mantener orden de concatenación.

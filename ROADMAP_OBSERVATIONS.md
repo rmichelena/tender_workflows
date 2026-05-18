@@ -362,3 +362,31 @@ Updates applied:
 - Gate 0 was reframed as package/document-scope confirmation only.
 - Origin/manufacturer and brand preferences moved to a post-BOM `Gate 5 — Preferencias de búsqueda post-BOM`, right before Step 6 candidate search.
 - README and `instrucciones/README.md` updated to match.
+
+## 2026-05-19 — Docling extractor alignment and Modal Docling support
+
+Roberto asked to verify the current Docling extractor against the local Docling Serve API guide and add support for the Modal-hosted Docling service.
+
+Findings and changes:
+
+- `scripts/extractors/docling_extract.py` now aligns with the documented Docling Serve API:
+  - default base URL `https://docling.infinitek.pe`;
+  - sync and async endpoints;
+  - `task_status` polling;
+  - `document.md_content` extraction;
+  - clean Markdown fields `image_export_mode=placeholder`, `include_images=false`;
+  - optional `do_ocr`, `force_ocr`, `ocr_lang`, `page_range`, `document_timeout`, `table_mode`.
+- Added standard extractor output-dir behavior: `{basename}_docling.md` + `{basename}_docling.json`, while preserving explicit output-file/stdout usage.
+- Added health/version checks.
+- Added `scripts/extractors/modal_docling_extract.py`, defaulting to `https://rmichelena--docling-converter-fastapi-app.modal.run`, async mode, and `{basename}_modal_docling.*` outputs.
+- Added `[docling]` and `[modal_docling]` config stanzas to `extractors.conf.example`.
+- Added `docling` and `modal_docling` to `batch_runner.py`.
+- Verified actual API behavior: `page_range` is validated as a list of two ints. Scripts accept `--page-range START,END` or `START-END` and emit repeated multipart fields. The API guide notes were updated accordingly.
+
+Verification run:
+
+- Local Docling `/version`: OK, docling-serve 1.18.0 / docling 2.93.0.
+- Modal Docling `/version`: OK, same docling-serve/docling versions after cold start.
+- Local conversion test: `pliego_absolutorio.pdf` page 1 -> 3,322 chars OK.
+- Modal conversion test: same file/page -> 3,322 chars OK via async.
+- Batch runner test with `--extractors docling`: full `pliego_absolutorio.pdf` -> 51,292 chars OK.

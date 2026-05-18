@@ -81,6 +81,12 @@ pip install requests PyMuPDF google-auth-oauthlib markitdown landingai-ade
 # PDF vectorial puro o DOCX (rápido, sin OCR):
 .venv/bin/python scripts/extractors/markitdown_extract.py documento.pdf output/
 
+# Docling local/bare-metal (default parser OCR/Markdown):
+.venv/bin/python scripts/extractors/docling_extract.py documento.pdf output/ --async
+
+# Docling en Modal (misma API, async por defecto):
+.venv/bin/python scripts/extractors/modal_docling_extract.py documento.pdf output/
+
 # PDF grande escaneado con DocAI (máxima calidad, lento):
 .venv/bin/python scripts/extractors/docai_batch_gcs.py documento.pdf output/
 ```
@@ -186,7 +192,39 @@ python3 scripts/extractors/markitdown_extract.py documento.pdf output_dir/
 - **Límites**: Sin límite de páginas
 - **Instalación**: `pip install markitdown`
 
-### 3. Google DocAI — Batch/GCS (máxima calidad, lento)
+### 3. Docling Serve — Parser/OCR default self-hosted
+
+```bash
+python3 scripts/extractors/docling_extract.py documento.pdf output/ --async
+python3 scripts/extractors/docling_extract.py documento.pdf output/ --page-range 1,50 --async
+python3 scripts/extractors/docling_extract.py --version
+```
+
+- **Endpoint default**: `https://docling.infinitek.pe`
+- **API guide**: `scripts/extractors/api guide references/docling-api-guide.md`
+- **OCR**: Sí, vía Docling/RapidOCR según configuración del servicio.
+- **Formatos**: PDF, DOCX, PPTX, XLSX y otros soportados por Docling Serve.
+- **Salida estándar**: `{nombre}_docling.md` + `{nombre}_docling.json`.
+- **Parámetros default**: `image_export_mode=placeholder`, `include_images=false`.
+- **Chunks**: `--page-range START,END` envía el rango como lista multipart (`page_range=START`, `page_range=END`), que es lo que valida la API actual.
+- **Uso recomendado**: async para PDFs grandes o escaneados; sync solo para documentos pequeños.
+
+### 4. Modal Docling — Parser/OCR serverless
+
+```bash
+python3 scripts/extractors/modal_docling_extract.py documento.pdf output/
+python3 scripts/extractors/modal_docling_extract.py documento.pdf output/ --page-range 1,50
+python3 scripts/extractors/modal_docling_extract.py --version --timeout 180
+```
+
+- **Endpoint default**: `https://rmichelena--docling-converter-fastapi-app.modal.run`
+- **API guide**: `scripts/extractors/api guide references/docling-modal-api-guide.md`
+- **API**: idéntica al Docling local/bare-metal.
+- **Modo default**: async, porque Modal tiene timeout corto en web endpoints y puede tener cold start.
+- **Salida estándar**: `{nombre}_modal_docling.md` + `{nombre}_modal_docling.json`.
+- **Uso recomendado**: fallback/capacidad elástica cuando el contenedor local no convenga o esté saturado.
+
+### 5. Google DocAI — Batch/GCS (máxima calidad, lento)
 
 ```bash
 python3 scripts/extractors/docai_batch_gcs.py documento.pdf output_dir/
@@ -199,7 +237,7 @@ python3 scripts/extractors/docai_batch_gcs.py documento.pdf output_dir/
 - **Requisitos**: Bucket GCS + service agent de DocAI
 - **Setup**: Ver `docs/docai_setup.md`
 
-### 4. Google DocAI — Online/Chunked (alternativa sin GCS)
+### 6. Google DocAI — Online/Chunked (alternativa sin GCS)
 
 ```bash
 python3 scripts/extractors/docai_online.py documento.pdf output_dir/

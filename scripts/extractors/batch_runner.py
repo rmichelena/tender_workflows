@@ -13,6 +13,8 @@ Uso:
 
 Extractores disponibles:
   - markitdown    — Rápido, sin OCR, texto embebido solo
+  - docling       — Docling Serve local/bare-metal
+  - modal_docling — Docling Serve en Modal (async por defecto)
   - docai_online  — Google DocAI modo online/chunked (sin GCS)
   - docai_batch   — Google DocAI modo batch con GCS (RECOMENDADO)
 
@@ -31,6 +33,14 @@ EXTRACTORS = {
     "markitdown": {
         "script": os.path.join(os.path.dirname(__file__), "markitdown_extract.py"),
         "suffix": "markitdown",
+    },
+    "docling": {
+        "script": os.path.join(os.path.dirname(__file__), "docling_extract.py"),
+        "suffix": "docling",
+    },
+    "modal_docling": {
+        "script": os.path.join(os.path.dirname(__file__), "modal_docling_extract.py"),
+        "suffix": "modal_docling",
     },
     "docai_online": {
         "script": os.path.join(os.path.dirname(__file__), "docai_online.py"),

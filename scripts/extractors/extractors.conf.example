@@ -42,3 +42,38 @@ poll_interval = 20
 
 # Batch max wait time (seconds)
 max_wait = 3600
+
+[docling]
+# Local/bare-metal Docling Serve API. From host, external HTTPS is safest.
+# From a container in the same Docker network, use http://docling:5001.
+base_url = https://docling.infinitek.pe
+
+# Recommended clean Markdown fields.
+image_export_mode = placeholder
+include_images = false
+do_ocr = true
+force_ocr = false
+ocr_lang = es,en
+table_mode = accurate
+document_timeout = 1800
+
+# HTTP/polling behavior.
+timeout = 600
+poll_interval = 5
+max_wait = 900
+insecure = false
+
+[modal_docling]
+# Modal-hosted Docling Serve API. Same API as [docling], async recommended.
+base_url = https://rmichelena--docling-converter-fastapi-app.modal.run
+image_export_mode = placeholder
+include_images = false
+do_ocr = true
+force_ocr = false
+ocr_lang = es,en
+table_mode = accurate
+document_timeout = 1800
+timeout = 150
+poll_interval = 10
+max_wait = 900
+insecure = false
