@@ -72,10 +72,10 @@ proyecto/
 ├── overlay_usuario.yaml             (preferencias de búsqueda capturadas post-BOM / Gate 5)
 ├── artifacts/
 │   ├── step_1_pdfs/                 (PDFs preservados / DOCX→PDF)
-│   ├── step_1_pdfs_clean/           (PDFs optimizados + reportes `{stem}_clean_report.json` y `{stem}_clean_page_analysis.json`)
-│   ├── step_1_planos/               (planos detectados/análisis visual)
+│   ├── step_1_pdfs_clean/           (PDFs optimizados con `--strip` + reportes `{stem}_clean_report.json` y `{stem}_clean_page_analysis.json`)
+│   ├── step_1_planos/               (planos detectados/análisis visual; paso default)
 │   ├── step_1_pdfs_preocr/          (PDFs con planos sustituidos por texto)
-│   ├── step_1_normalizados/         (markdowns de docs fuente/preocr)
+│   ├── step_1_normalizados/         (markdowns post-Modal-Docling/preocr)
 │   ├── step_1_aclaradas/            (docs aclarados + auditoría)
 │   ├── step_1_index/                (`{stem}_index.json/.md`; índice estructural)
 │   ├── step_1_repaired/             (opcional; Markdown reparado, patch y log)

@@ -12,7 +12,7 @@
 |---|---|---|
 | 3 variantes BOM HL + consolidación | 28 requisitos FALTANTE por decisiones implícitas inconsistentes | **1 productor + 1 auditor "ojos frescos"** |
 | 4 variantes BOM Exploded + consolidación | Idem + 504 timeout con 426 items | **1 productor + 1 auditor + scratchpad compartido con 2.1** |
-| OCR Paso 1: subagente LLM-vision | LandingAI ADE funciona mejor | **Pipeline determinístico: DOCX→PDF + pdf_image_audit + LandingAI ADE** |
+| OCR Paso 1: subagente LLM-vision | Docling Serve funciona mejor como parser/OCR default y ya tenemos instancia Modal | **Pipeline determinístico: DOCX→PDF + strip-cleaning + reemplazo planos/diagramas + Modal Docling + índice** |
 | Matriz cumplimiento dentro del search worker | Mezcla búsqueda + validación + estructuración | **LLM call separada post-búsqueda** |
 | Solo Firecrawl | Sin créditos a mitad → degradación silenciosa | **Pool de tools con fallback explícito** (catalog_tools.md) |
 | Solo español en queries | 0% hit rate | **Búsqueda bilingüe ES+EN obligatoria** |
@@ -39,6 +39,16 @@
 ## Paso 1 — Normalización documental (pipeline determinístico)
 
 **Tipo**: workflow no-LLM determinístico + LLM call selectiva como fallback.
+
+**Default operativo Paso 1**:
+1. Triage por tipo de archivo.
+2. Rama PDF: convertir DOCX→PDF cuando aplique.
+3. Ejecutar cleaning **siempre con `--strip` + `--page-analysis`** para remover headers/footers/decoraciones repetitivas y producir reporte por página.
+4. Ejecutar detección/análisis/reemplazo de planos, diagramas y regiones visuales antes de convertir a Markdown.
+5. Convertir PDFs pre-OCR con **Modal Docling** (`scripts/extractors/modal_docling_extract.py`) como extractor default.
+6. Generar índice estructural Paso 1.5.
+
+**Política de falla**: esta secuencia debe ser casi automática, pero no silenciosa. Si falla cleaning, reemplazo de planos/diagramas, Modal Docling o indexación estructural, el orquestador **se detiene y pregunta al humano** con diagnóstico breve, archivos afectados y 2-3 opciones concretas. No degradar automáticamente a otro extractor ni saltar pasos sin aprobación.
 
 ### 1.0 Triage de inputs por tipo de archivo
 
@@ -119,6 +129,8 @@ Cada output incluye frontmatter YAML con metadata (sheet_name, representation, m
 **Owner**: Orquestador (script `scripts/pdf_image_audit.py` o similar)
 **Tarea**: detectar y eliminar zonas repetitivas (headers, footers, watermarks, firmas, sellos, logos decorativos) que aparecen en múltiples páginas. Producir PDF "limpio" y un análisis de contenido por página que alimente Paso 1.2b.
 
+**Default**: ejecutar siempre con `--strip` y `--page-analysis`. No correr en modo audit-only salvo que el humano lo pida explícitamente o se esté diagnosticando un fallo.
+
 **Comando típico**:
 
 ```bash
@@ -144,6 +156,8 @@ python3 scripts/pdf_image_audit.py input.pdf \
 
 **Done**: PDFs optimizados sin elementos repetitivos no útiles + reporte de contenido por página generado.
 
+**Si falla**: detener workflow y preguntar al humano. No continuar hacia OCR/Markdown con PDFs sin cleaning salvo autorización explícita.
+
 
 ### 1.2b Detección, análisis y sustitución de planos/diagramas grandes
 
@@ -154,6 +168,8 @@ python3 scripts/pdf_image_audit.py input.pdf \
 **Modelo**: `model_routing.yaml → paso_1_2b_planos_vision` (primary: `google/gemini-2.5-flash`).
 
 **Tarea**: después del PDF limpio y antes de la conversión a markdown, detectar páginas/regiones con planos, diagramas, imágenes técnicas o contenido visual que el OCR genérico manejaría mal. La candidatura combina tamaño + análisis de contenido por página; la decisión final la hace un modelo visual.
+
+**Default**: ejecutar este paso para todos los PDFs limpios de la rama PDF, aunque no se esperen planos. Si no hay candidatos, debe producir audit vacío/OK y continuar.
 
 **Método**:
 1. Consumir el PDF limpio y, si existe, `{stem}_clean_page_analysis.json` generado por Paso 1.2.
@@ -202,18 +218,37 @@ python3 scripts/pdf_image_audit.py input.pdf \
 - Si una página grande es tabla/anexo textual, dejarla en el flujo OCR normal (`exclude_from_ocr=false`).
 - Para `replace_images`, reemplazar con PNG renderizado de fondo gris y etiquetas OCR-friendly (`[imagen reemplazada]`, `[resumen]`, `[texto visible]`, `[notas]`). Evitar overlay de texto PDF.
 - Guardar PDFs derivados con compresión (`garbage=4`, `deflate=True`, `deflate_images=True`, `deflate_fonts=True`, `clean=True`) cuando el script lo soporte.
-- LandingAI/OCR debe consumir `{stem}_preocr.pdf` si existe; si no existe, consumir `{stem}_clean.pdf`.
+- Modal Docling debe consumir `{stem}_preocr.pdf` si existe; si no existe, consumir `{stem}_clean.pdf`.
+- Si el paso falla o el JSON visual no valida, detener workflow y preguntar al humano. No enviar PDFs sin sustitución a Modal Docling cuando había candidatos visuales sin resolver.
 
-### 1.3 OCR + parsing a Markdown
+### 1.3 OCR + parsing a Markdown con Modal Docling
 
-**Owner**: Orquestador (script `scripts/extractors/landingai_extract.py`)
-**Tarea**: pasar cada PDF optimizado por LandingAI ADE → Markdown con tablas preservadas + separadores `<!-- PAGE n -->`.
+**Owner**: Orquestador (script `scripts/extractors/modal_docling_extract.py`)
+**Tarea**: pasar cada PDF pre-OCR por Modal Docling → Markdown estructurado.
+
+**Default**:
+- Usar `scripts/extractors/modal_docling_extract.py`.
+- Usar modo async (default del script).
+- Input por documento:
+  - si existe `/proyecto/artifacts/step_1_pdfs_preocr/{stem}_preocr.pdf`, usar ese;
+  - si no existe, usar `/proyecto/artifacts/step_1_pdfs_clean/{stem}_clean.pdf`.
+- Output en `/proyecto/artifacts/step_1_normalizados/`.
+
+**Comando típico**:
+
+```bash
+python3 scripts/extractors/modal_docling_extract.py \
+  /proyecto/artifacts/step_1_pdfs_preocr/{stem}_preocr.pdf \
+  --output-dir /proyecto/artifacts/step_1_normalizados
+```
 
 **Output**: `/proyecto/artifacts/step_1_normalizados/{nombre_doc}.md`
-**Gate 1**: Pausar. Presentar markdowns al humano para spot-check rápido en documentos críticos (EETT principales).
-**Done**: todos los inputs tienen su `.md`.
+**QA interno**: verificar que el `.md` existe, no está vacío y tiene tamaño razonable frente al PDF fuente; registrar anomalías.
+**Done**: todos los inputs tienen su `.md`. Continuar automáticamente a Paso 1.5 salvo falla.
 
-**Fallback** (si LandingAI deja gaps en alguna página): LLM call one-shot con visión sobre la página específica (Gemini 2.5 Pro o GPT-5.5, ver `model_routing.yaml → paso_1_vision_fallback`).
+**Si falla**: detener workflow y preguntar al humano. No hacer fallback automático a Docling local, LandingAI, DocAI o MarkItDown sin autorización explícita.
+
+**Fallback autorizado por humano**: según diagnóstico, usar Docling local (`scripts/extractors/docling_extract.py`), LandingAI, DocAI, MarkItDown o LLM vision de página específica (ver `model_routing.yaml → paso_1_vision_fallback`).
 
 ---
 
@@ -302,6 +337,9 @@ python3 scripts/pdf_image_audit.py input.pdf \
 - JSON debe parsear con `json.load`.
 - Validar contra schema cuando `jsonschema` esté disponible.
 - Segundo fallo de schema tras retry = falla loud.
+- Si la indexación falla después del retry permitido, detener workflow y preguntar al humano. No pasar a extracción temática/BOM con documentos sin índice estructural salvo autorización explícita.
+
+**Gate 1 post-index opcional**: al terminar conversión + índices de todos los documentos, el orquestador puede presentar resumen de outputs y anomalías para spot-check humano. Si no hay anomalías y el usuario pidió modo automático, continuar al siguiente bloque del workflow.
 
 ### Paso 1.5b — Reparación Markdown opcional y reversible
 
@@ -768,7 +806,7 @@ proyecto/
 │   ├── step_1_pdfs_clean/                 (post optimizer; PDFs nombrados `{stem}_clean.pdf`)
 │   ├── step_1_planos/                     (planos detectados, análisis visual, páginas extraídas)
 │   ├── step_1_pdfs_preocr/                (PDFs con planos sustituidos por resumen textual)
-│   ├── step_1_normalizados/               (markdowns post-LandingAI/preocr)
+│   ├── step_1_normalizados/               (markdowns post-Modal-Docling/preocr)
 │   ├── step_1_aclaradas/                  (docs aclarados + auditoría)
 │   ├── step_1_index/                      (`{stem}_index.json/.md`; índice estructural + correcciones Markdown sugeridas)
 │   ├── step_1_repaired/                   (opcional; Markdown reparado, patch y log)

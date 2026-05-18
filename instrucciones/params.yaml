@@ -13,6 +13,32 @@
 version: 0.2
 
 # ---------------------------------------------------------------
+# DEFAULTS DE PIPELINE DOCUMENTAL (PASO 1)
+# ---------------------------------------------------------------
+
+step_1_defaults:
+  pdf_cleaning:
+    script: scripts/pdf_image_audit.py
+    strip: true                  # default obligatorio: quitar headers/footers/decoraciones repetitivas
+    page_analysis: true          # producir {stem}_clean_page_analysis.json para Paso 1.2b
+    fail_policy: ask_human       # si falla, detener; no continuar con PDF sin limpiar
+  plan_pages:
+    script: scripts/pdf_plan_pages.py
+    run_by_default: true         # ejecutar aunque no se esperen planos; audit vacío/OK permite continuar
+    input_pdf_preference: clean_pdf
+    fail_policy: ask_human       # si hay candidatos/JSON visual problemático, detener
+  pdf_to_markdown:
+    default_extractor: modal_docling
+    script: scripts/extractors/modal_docling_extract.py
+    async: true
+    input_preference: preocr_then_clean
+    output_dir: artifacts/step_1_normalizados
+    fail_policy: ask_human       # no fallback automático a otro extractor
+  document_index:
+    run_by_default: true
+    fail_policy: ask_human       # no pasar a Paso 2 sin índice salvo aprobación explícita
+
+# ---------------------------------------------------------------
 # BATCHING Y LIMITES
 # ---------------------------------------------------------------
 

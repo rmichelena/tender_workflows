@@ -31,8 +31,10 @@ tender_procurement/
 │       ├── common.py                  # Módulo compartido (config, creds, post-procesadores)
 │       ├── extractors.conf.example    # Template de configuración
 │       ├── extractors.conf            # Config local (gitignored)
-│       ├── landingai_extract.py       # LandingAI ADE (recomendado para PDFs mixtos/escaneados)
-│       ├── markitdown_extract.py      # MarkItDown (rápido, sin OCR, PDFs vectoriales + DOCX)
+│       ├── docling_extract.py         # Docling Serve local/bare-metal
+│       ├── modal_docling_extract.py   # Modal Docling (default workflow PDF→Markdown)
+│       ├── landingai_extract.py       # LandingAI ADE (fallback autorizado)
+│       ├── markitdown_extract.py      # MarkItDown (rápido, sin OCR, pruebas/fallback)
 │       ├── docai_online.py            # Google DocAI modo online/chunked
 │       ├── docai_batch_gcs.py         # Google DocAI modo batch con GCS
 │       ├── batch_runner.py            # Runner: ejecuta N extractores sobre N PDFs
@@ -91,9 +93,18 @@ pip install requests PyMuPDF google-auth-oauthlib markitdown landingai-ade
 .venv/bin/python scripts/extractors/docai_batch_gcs.py documento.pdf output/
 ```
 
-## Paso 1.2 / 1.2b experimental: contenido por página + planos/diagramas antes de OCR
+## Paso 1.2 / 1.2b default: contenido por página + planos/diagramas antes de OCR
 
-Después de limpiar PDFs y antes de LandingAI/OCR, el workflow puede detectar páginas o regiones visuales —planos, diagramas, fotografías técnicas o páginas CAD/vectoriales— para evitar costo/ruido en conversores Markdown.
+Después de limpiar PDFs y antes de Modal Docling, el workflow detecta páginas o regiones visuales —planos, diagramas, fotografías técnicas o páginas CAD/vectoriales— para evitar costo/ruido en conversores Markdown.
+
+Default del workflow:
+
+1. Ejecutar cleaning con `--strip --page-analysis`.
+2. Ejecutar `pdf_plan_pages.py audit` y `build` para sustituir planos/diagramas confirmados.
+3. Convertir a Markdown con `modal_docling_extract.py`.
+4. Indexar estructura del Markdown.
+
+Si falla cleaning, sustitución de planos/diagramas, Modal Docling o indexación, el workflow debe detenerse y preguntar al usuario. No hay fallback automático silencioso.
 
 El optimizador `pdf_image_audit.py` también puede producir un análisis de contenido por página. Ese reporte alimenta la detección de candidatos visuales: no se decide solo por tamaño.
 
@@ -149,9 +160,9 @@ El análisis visual decide entre:
 
 Para `replace_images`, el build debe insertar una imagen PNG de reemplazo con texto OCR-friendly, no texto overlay PDF. El script resuelve el bbox aproximado al rect real de imagen renderizada cuando puede.
 
-## Paso 1.5 experimental: índice estructural de Markdown
+## Paso 1.5 default: índice estructural de Markdown
 
-Tras convertir documentos a Markdown, el workflow puede ejecutar una pasada de indexación estructural antes de extraer BOM:
+Tras convertir documentos a Markdown, el workflow ejecuta una pasada de indexación estructural antes de extraer BOM:
 
 - lee TODO el Markdown por ventanas de 200 líneas con overlap de 50;
 - reconstruye secciones reales sin confiar ciegamente en headings Markdown;
@@ -192,7 +203,7 @@ python3 scripts/extractors/markitdown_extract.py documento.pdf output_dir/
 - **Límites**: Sin límite de páginas
 - **Instalación**: `pip install markitdown`
 
-### 3. Docling Serve — Parser/OCR default self-hosted
+### 3. Docling Serve — Parser/OCR self-hosted
 
 ```bash
 python3 scripts/extractors/docling_extract.py documento.pdf output/ --async
@@ -209,7 +220,7 @@ python3 scripts/extractors/docling_extract.py --version
 - **Chunks**: `--page-range START,END` envía el rango como lista multipart (`page_range=START`, `page_range=END`), que es lo que valida la API actual.
 - **Uso recomendado**: async para PDFs grandes o escaneados; sync solo para documentos pequeños.
 
-### 4. Modal Docling — Parser/OCR serverless
+### 4. Modal Docling — Parser/OCR default serverless
 
 ```bash
 python3 scripts/extractors/modal_docling_extract.py documento.pdf output/
@@ -222,7 +233,7 @@ python3 scripts/extractors/modal_docling_extract.py --version --timeout 180
 - **API**: idéntica al Docling local/bare-metal.
 - **Modo default**: async, porque Modal tiene timeout corto en web endpoints y puede tener cold start.
 - **Salida estándar**: `{nombre}_modal_docling.md` + `{nombre}_modal_docling.json`.
-- **Uso recomendado**: fallback/capacidad elástica cuando el contenedor local no convenga o esté saturado.
+- **Uso recomendado**: extractor default del workflow para convertir PDFs pre-OCR a Markdown. Si falla, detener y pedir decisión antes de probar otro extractor.
 
 ### 5. Google DocAI — Batch/GCS (máxima calidad, lento)
 
@@ -253,7 +264,7 @@ python3 scripts/extractors/docai_online.py documento.pdf output_dir/
 python3 scripts/extractors/batch_runner.py \
   --input-dir ./pdfs \
   --output-dir ./results \
-  --extractors docai_batch,markitdown \
+  --extractors modal_docling,markitdown \
   --recursive
 ```
 
@@ -261,13 +272,14 @@ python3 scripts/extractors/batch_runner.py \
 
 | Tipo de documento | Recomendado | Alternativa |
 |---|---|---|
-| **PDF con páginas/fragmentos escaneados** | LandingAI ADE `dpt-2-latest` | DocAI v1.6 |
-| **PDF vectorial puro** (texto embebido) | MarkItDown | LandingAI ADE |
+| **Flujo default Paso 1** | strip-cleaning + reemplazo planos/diagramas + Modal Docling | Docling local autorizado por humano |
+| **PDF con páginas/fragmentos escaneados** | Modal Docling sobre PDF pre-OCR | Docling local / LandingAI / DocAI con aprobación |
+| **PDF vectorial puro** (texto embebido) | Modal Docling en workflow completo | MarkItDown para pruebas rápidas |
 | **DOCX** (sin gráficos críticos) | MarkItDown | — |
-| **XLSX / CSV** | MarkItDown | LandingAI ADE |
-| **PDF escaneado puro, calidad máxima** | DocAI v1.6 batch | LandingAI ADE |
+| **XLSX / CSV** | Rama XLSX nativa (`xlsx_split/analyze/convert`) | MarkItDown para pruebas rápidas |
+| **PDF escaneado puro, calidad máxima** | Modal Docling por defecto | DocAI v1.6 batch con aprobación |
 
-**Criterio clave**: Si el documento tiene **algo escaneado** (firmas, stamps, páginas escaneadas, diagramas), LandingAI ADE es la mejor relación velocidad/calidad. Si es puramente vectorial/digital, MarkItDown es suficiente.
+**Criterio clave del workflow**: Paso 1 ya no elige extractor caso por caso al inicio. Primero limpia (`--strip`), detecta/sustituye planos y diagramas, y luego convierte con Modal Docling. Si algo falla, se detiene y pide decisión humana antes de degradar a otro extractor.
 
 ## Post-procesadores (common.py)
 
@@ -301,6 +313,8 @@ Variables configurables:
 - `online_page_limit` — máx páginas por request online (default: 15)
 - `chunk_size` — DocAI chunking config (default: 500)
 - `poll_interval`, `max_wait` — polling batch operation
+- `[docling]` / `[modal_docling]` — endpoints, timeouts, OCR/table params de Docling Serve
+- `step_1_defaults` en `instrucciones/params.yaml` — defaults operativos del pipeline documental
 
 **LandingAI**: API key en `scripts/extractors/.env_landingai` como `VISION_AGENT_API_KEY=...`
 

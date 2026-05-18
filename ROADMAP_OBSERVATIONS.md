@@ -390,3 +390,25 @@ Verification run:
 - Local conversion test: `pliego_absolutorio.pdf` page 1 -> 3,322 chars OK.
 - Modal conversion test: same file/page -> 3,322 chars OK via async.
 - Batch runner test with `--extractors docling`: full `pliego_absolutorio.pdf` -> 51,292 chars OK.
+
+## 2026-05-19 — Paso 1 defaults: automated docs-to-index pipeline
+
+Roberto clarified the intended default for the early workflow: it should be launchable almost automatically through document conversion and structural indexing.
+
+Decision:
+
+- Paso 1 PDF branch defaults to:
+  1. PDF/DOCX triage and DOCX→PDF where needed.
+  2. `pdf_image_audit.py --strip --page-analysis` always, to remove repeated headers/footers/decorations and produce per-page content analysis.
+  3. `pdf_plan_pages.py` audit/build always, to replace confirmed plans/diagrams/visual regions before Markdown conversion. Empty/OK audit can continue.
+  4. `modal_docling_extract.py` as default PDF→Markdown extractor, using `{stem}_preocr.pdf` when present and `{stem}_clean.pdf` otherwise.
+  5. Paso 1.5 structural index as default before thematic/BOM extraction.
+
+Fail policy:
+
+- If cleaning, plan/diagram replacement, Modal Docling, or structural indexing fails, stop and ask the human with a short diagnosis and options.
+- Do not silently fall back to Docling local, LandingAI, DocAI, MarkItDown, or skipping the failed step.
+
+Additional clarification:
+
+- The old post-Markdown pause is no longer a hard gate. The automated block should continue through structural indexing. Human interruption happens on failure/anomaly, or as an optional post-index spot-check summary.
