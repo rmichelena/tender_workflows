@@ -346,3 +346,19 @@ Decision:
 - The reader must search/read all relevant documents: bases, technical specs, TDR/EETT, annexes, forms, clarifications, etc.
 - Passing only a single document is allowed only when the orchestrator explicitly scopes the run as an experiment or document-specific comparison.
 - `prompt_axis0_free_reader.md`, `01_workflow.md`, and `README.md` were updated accordingly.
+
+## 2026-05-19 — Workflow alignment: pre-OCR page analysis and search preferences gate
+
+Roberto noted two workflow gaps:
+
+1. Pre-OCR plan/diagram handling had been refined in scripts but not fully reflected in `01_workflow.md` / README.
+2. The old Gate 0 asked for origin/brand preferences too early; the workflow no longer starts with procurement search, so those preferences belong post-BOM, immediately before candidate search.
+
+Updates applied:
+
+- Step 1.2 now documents that `pdf_image_audit.py` produces both the cleaned PDF and `{stem}_clean_page_analysis.json` via `--page-analysis`.
+- Step 1.2b now documents candidate selection from combined signals: page size, text density, image coverage, vector drawing/operator metrics, `autocad_like`, `image_heavy`, and anti-scan filters.
+- Step 1.2b now documents `replace_page`, `replace_images`, and `leave_for_ocr`, including PNG-based replacement for regions (not PDF text overlays), real rendered image rect resolution, OCR-friendly labels, and compressed PDF saving.
+- Gate 0 was reframed as package/document-scope confirmation only.
+- Origin/manufacturer and brand preferences moved to a post-BOM `Gate 5 — Preferencias de búsqueda post-BOM`, right before Step 6 candidate search.
+- README and `instrucciones/README.md` updated to match.

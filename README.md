@@ -85,9 +85,28 @@ pip install requests PyMuPDF google-auth-oauthlib markitdown landingai-ade
 .venv/bin/python scripts/extractors/docai_batch_gcs.py documento.pdf output/
 ```
 
-## Paso 1.2b experimental: planos/diagramas antes de OCR
+## Paso 1.2 / 1.2b experimental: contenido por página + planos/diagramas antes de OCR
 
-Después de limpiar PDFs y antes de LandingAI/OCR, el workflow puede detectar páginas de tamaño anómalo —frecuentemente planos— para evitar costo/ruido en conversores Markdown.
+Después de limpiar PDFs y antes de LandingAI/OCR, el workflow puede detectar páginas o regiones visuales —planos, diagramas, fotografías técnicas o páginas CAD/vectoriales— para evitar costo/ruido en conversores Markdown.
+
+El optimizador `pdf_image_audit.py` también puede producir un análisis de contenido por página. Ese reporte alimenta la detección de candidatos visuales: no se decide solo por tamaño.
+
+Ejemplo de limpieza + análisis:
+
+```bash
+.venv/bin/python scripts/pdf_image_audit.py input.pdf \
+  --strip \
+  --output artifacts/step_1_pdfs_clean/input_clean.pdf \
+  --report artifacts/step_1_pdfs_clean/input_clean_report.json \
+  --page-analysis
+```
+
+Esto genera, además del PDF limpio:
+
+- `artifacts/step_1_pdfs_clean/{stem}_clean_report.json`
+- `artifacts/step_1_pdfs_clean/{stem}_clean_page_analysis.json`
+
+El `page_analysis` incluye tamaño, densidad textual, conteo/cobertura de imágenes, conteo/cobertura de dibujos vectoriales/operadores, `content_dominant` y `plan_candidate_signals`.
 
 Herramienta:
 
@@ -107,6 +126,22 @@ Outputs principales:
 - `artifacts/step_1_pdfs_preocr/{stem}_preocr.pdf`
 
 El análisis visual debe extraer `identifier_or_title` cuando exista: número de plano, título del cajetín, o ambos.
+
+La candidatura visual combina señales geométricas y de contenido:
+
+- tamaño/área/aspect ratio;
+- baja densidad textual;
+- alto conteo/área de dibujos vectoriales;
+- señales tipo AutoCAD;
+- páginas `image_heavy`, con filtros anti-scan.
+
+El análisis visual decide entre:
+
+- `replace_page`: reemplazar página completa por resumen textual;
+- `replace_images`: reemplazar solo regiones/imágenes dentro de una página textual;
+- `leave_for_ocr`: dejar al OCR normal.
+
+Para `replace_images`, el build debe insertar una imagen PNG de reemplazo con texto OCR-friendly, no texto overlay PDF. El script resuelve el bbox aproximado al rect real de imagen renderizada cuando puede.
 
 ## Paso 1.5 experimental: índice estructural de Markdown
 

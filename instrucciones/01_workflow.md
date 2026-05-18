@@ -20,17 +20,19 @@
 
 ---
 
-## Gate 0 — Inputs humanos iniciales (obligatorio antes de ejecutar)
+## Gate 0 — Paquete documental inicial (obligatorio antes de ejecutar)
 
 **Owner**: Orquestador (diálogo con humano)
-**Acción**: Solicitar y registrar:
-- `origen_fabricacion`: países permitidos | vetados | sin preferencia
-- `marcas`: preferidas | vetadas | sin preferencia
+**Acción**: confirmar el paquete documental y alcance inicial:
+- carpeta del proyecto / expediente;
+- documentos fuente disponibles;
+- si hay documentos externos o anexos pendientes;
+- si el run es completo o un experimento acotado a ciertos documentos/ejes.
 
-**Output**: `/proyecto/overlay_usuario.yaml`
-**Done**: overlay guardado, confirmado por humano.
+**Output**: inventario inicial de documentos y alcance del run.
+**Done**: paquete documental confirmado por humano.
 
-> Nota v0.2: ya no se pregunta `docs_modo` (SIMPLE/COMPLEJO). El Paso 1 ahora es pipeline determinístico que maneja ambos casos uniformemente.
+> Nota: las preferencias de origen/marca **no** se preguntan aquí. Este workflow ya no empieza con procura/búsqueda; esas preferencias se capturan post-BOM, justo antes de invertir tokens en búsqueda de candidatos.
 
 ---
 
@@ -112,13 +114,35 @@ Cada output incluye frontmatter YAML con metadata (sheet_name, representation, m
 **Output**: `/proyecto/artifacts/step_1_pdfs/{nombre_doc}.pdf`
 **Done**: todos los inputs de la rama PDF son PDF.
 
-### 1.2 Optimizador (quitar headers/footers/firmas/sellos/decorativos)
+### 1.2 Optimizador + análisis de contenido por página
 
 **Owner**: Orquestador (script `scripts/pdf_image_audit.py` o similar)
-**Tarea**: detectar y eliminar zonas repetitivas (headers, footers, watermarks, firmas, sellos, logos decorativos) que aparecen en múltiples páginas. Producir PDF "limpio".
+**Tarea**: detectar y eliminar zonas repetitivas (headers, footers, watermarks, firmas, sellos, logos decorativos) que aparecen en múltiples páginas. Producir PDF "limpio" y un análisis de contenido por página que alimente Paso 1.2b.
 
-**Output**: `/proyecto/artifacts/step_1_pdfs_clean/{nombre_doc}_clean.pdf`
-**Done**: PDFs optimizados sin elementos repetitivos no útiles.
+**Comando típico**:
+
+```bash
+python3 scripts/pdf_image_audit.py input.pdf \
+  --strip \
+  --output artifacts/step_1_pdfs_clean/{stem}_clean.pdf \
+  --report artifacts/step_1_pdfs_clean/{stem}_clean_report.json \
+  --page-analysis
+```
+
+**Outputs**:
+- `/proyecto/artifacts/step_1_pdfs_clean/{stem}_clean.pdf`
+- `/proyecto/artifacts/step_1_pdfs_clean/{stem}_clean_report.json`
+- `/proyecto/artifacts/step_1_pdfs_clean/{stem}_clean_page_analysis.json`
+
+**Page analysis** incluye, por página:
+- dimensiones/orientación;
+- densidad textual;
+- conteo/cobertura de imágenes;
+- conteo/cobertura de dibujos vectoriales/operadores;
+- `content_dominant` (`text`, `vector_drawing`, `image_heavy`, `mixed`, `low_density_large_page`);
+- `plan_candidate_signals` (`large_page`, `high_drawing_count`, `high_drawing_ratio`, `autocad_like`, `image_heavy`, `very_low_text_density`, etc.).
+
+**Done**: PDFs optimizados sin elementos repetitivos no útiles + reporte de contenido por página generado.
 
 
 ### 1.2b Detección, análisis y sustitución de planos/diagramas grandes
@@ -129,21 +153,38 @@ Cada output incluye frontmatter YAML con metadata (sheet_name, representation, m
 **Schema**: `schemas/plan_pages_analysis.schema.json`
 **Modelo**: `model_routing.yaml → paso_1_2b_planos_vision` (primary: `google/gemini-2.5-flash`).
 
-**Tarea**: después del PDF limpio y antes de la conversión a markdown, detectar páginas con tamaño anómalo respecto al tamaño dominante del documento. Estas páginas suelen ser planos, diagramas o anexos tabulares grandes. El tamaño solo genera candidatos; la confirmación la hace un modelo visual.
+**Tarea**: después del PDF limpio y antes de la conversión a markdown, detectar páginas/regiones con planos, diagramas, imágenes técnicas o contenido visual que el OCR genérico manejaría mal. La candidatura combina tamaño + análisis de contenido por página; la decisión final la hace un modelo visual.
 
 **Método**:
-1. Auditar tamaño de páginas del PDF limpio.
-2. Calcular tamaño dominante y área mediana.
-3. Marcar candidatos por área/aspect ratio/tamaño absoluto, agrupando rangos consecutivos.
-4. Rasterizar candidatos a resolución moderada.
-5. Pedir al modelo visual confirmar si son planos/diagramas.
-6. Si una página confirmada es plano/diagrama:
+1. Consumir el PDF limpio y, si existe, `{stem}_clean_page_analysis.json` generado por Paso 1.2.
+2. Auditar tamaño de páginas, tamaño dominante y área mediana.
+3. Marcar candidatos combinando:
+   - área/aspect ratio/tamaño absoluto;
+   - baja densidad textual;
+   - alto conteo o área de dibujos vectoriales/operadores;
+   - señales tipo AutoCAD (`autocad_like`);
+   - páginas `image_heavy`, con filtros anti-scan.
+4. Aplicar filtros para no enviar al visual páginas que probablemente son documento escaneado normal:
+   - si demasiadas páginas consecutivas son `image_heavy`;
+   - si >70% del documento es `image_heavy`;
+   - si la página tiene demasiadas imágenes pequeñas;
+   - si las imágenes no ocupan ancho significativo.
+5. Rasterizar candidatos a resolución moderada.
+6. Pedir al modelo visual clasificar cada candidato como:
+   - `replace_page`: página completa es plano/diagrama;
+   - `replace_images`: página textual con regiones visuales/diagramas/fotos que conviene sustituir;
+   - `leave_for_ocr`: dejar al OCR normal.
+7. Si una página confirmada es plano/diagrama completo:
    - extraer `identifier_or_title` visible, ej. `Plano instalaciones eléctricas página 1`, `SPYL-SV-T-0300`, `SPUR-SV-T-0301 — Distribución de datos y voz en el terminal`;
    - describirla brevemente;
    - extraer información explícitamente visible útil para procurement;
-   - marcar `exclude_from_ocr=true` salvo que OCR genérico sea claramente preferible.
-7. Extraer páginas confirmadas a PDF separado.
-8. Generar un PDF pre-OCR donde las páginas confirmadas son sustituidas por páginas textuales estándar con el análisis visual. Páginas candidatas no confirmadas, como tablas grandes, quedan intactas.
+   - generar reemplazo textual de página completa.
+8. Si una página requiere `replace_images`:
+   - identificar regiones con `bbox_pct`;
+   - durante el build resolver el bbox aproximado al rect real de la imagen renderizada cuando exista;
+   - sustituir la región por una imagen PNG con resumen textual OCR-friendly, no por overlay de texto PDF.
+9. Extraer páginas afectadas a PDF separado.
+10. Generar un PDF pre-OCR donde las páginas/regiones confirmadas son sustituidas por resúmenes textuales. Páginas candidatas no confirmadas, como tablas grandes o scans normales, quedan intactas.
 
 **Outputs**:
 - `/proyecto/artifacts/step_1_planos/{stem}_page_size_audit.json`
@@ -155,9 +196,12 @@ Cada output incluye frontmatter YAML con metadata (sheet_name, representation, m
 
 **Reglas**:
 - No borrar nunca páginas del PDF limpio; solo crear derivados.
-- No excluir por tamaño únicamente: requiere confirmación visual.
+- No excluir por tamaño, dibujo vectorial o imagen únicamente: requiere confirmación visual.
+- No mandar todas las páginas `image_heavy` al visual si el documento parece escaneado completo.
 - No inventar cantidades ni códigos no legibles.
 - Si una página grande es tabla/anexo textual, dejarla en el flujo OCR normal (`exclude_from_ocr=false`).
+- Para `replace_images`, reemplazar con PNG renderizado de fondo gris y etiquetas OCR-friendly (`[imagen reemplazada]`, `[resumen]`, `[texto visible]`, `[notas]`). Evitar overlay de texto PDF.
+- Guardar PDFs derivados con compresión (`garbage=4`, `deflate=True`, `deflate_images=True`, `deflate_fonts=True`, `clean=True`) cuando el script lo soporte.
 - LandingAI/OCR debe consumir `{stem}_preocr.pdf` si existe; si no existe, consumir `{stem}_clean.pdf`.
 
 ### 1.3 OCR + parsing a Markdown
@@ -175,7 +219,7 @@ Cada output incluye frontmatter YAML con metadata (sheet_name, representation, m
 
 ## Paso 1.4 — Incorporar aclaraciones → documentos "aclarados"
 
-**Tipo**: evaluator-optimizer bounded (ver agent_patterns §2.2).
+**Tipo**: auditoría/revisor de ojos frescos con handoff acotado (ver `agent_patterns.md` §3.5).
 
 ### 1.4.1 Ejecutor
 
@@ -583,17 +627,28 @@ Este archivo se enriquece a medida que el productor toma decisiones. El auditor 
 
 ---
 
-## Paso 5 — REMOVIDO en v0.2
+## Gate 5 — Preferencias de búsqueda post-BOM
 
-> En v0.1 era "confirmar preferencias" entre Paso 4 y Paso 6. Se elimina: si las preferencias cambian, se actualiza `overlay_usuario.yaml` y se relanza Paso 6 selectivamente. Innecesario como gate fijo.
+> Este gate ocurre después de tener el BOM preparado para búsqueda. No pertenece al inicio del workflow porque las preferencias de origen/marca solo son relevantes cuando se van a buscar candidatos.
 
-Una nueva pausa **opcional** post-Paso 4 permite al humano marcar items como `SKIP` o `DIFERIR` antes de invertir tokens en Paso 6 (de `MEJORAS_PROPUESTAS.md` mejora 5.1).
+**Owner**: Orquestador (diálogo con humano)
+
+**Acción**: presentar el BOM de búsqueda y solicitar/confirmar:
+- `origen_fabricacion`: países permitidos | vetados | sin preferencia;
+- `marcas`: preferidas | vetadas | sin preferencia;
+- items `SKIP` o `DIFERIR`;
+- cualquier restricción comercial antes de invertir tokens en Paso 6.
+
+**Output**: `/proyecto/overlay_usuario.yaml`
+**Done**: overlay guardado/actualizado y confirmado por humano.
+
+Si las preferencias cambian después, actualizar `overlay_usuario.yaml` y relanzar Paso 6 selectivamente para los items afectados.
 
 ---
 
 ## Paso 6 — Búsqueda de candidatos (ÚNICO paso multi-agent del workflow)
 
-> **Tipo**: orchestrator-workers con fan-out paralelo (ver agent_patterns §2.3).
+> **Tipo**: búsqueda externa con fan-out paralelo controlado (ver `agent_patterns.md` §3.6).
 > **Cambio v0.2**: matriz de cumplimiento como LLM call SEPARADA post-búsqueda + búsqueda bilingüe + tool budget explícito + pool de tools con fallback.
 
 ### Arquitectura

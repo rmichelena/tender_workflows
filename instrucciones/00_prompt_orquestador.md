@@ -53,13 +53,15 @@ Estas reglas vienen de `agent_patterns.md` y se aplican en TODA delegación:
 
 ## Instrucciones de ejecución
 
-### Gate 0 — Inputs humanos iniciales
+### Gate 0 — Paquete documental inicial
 
 Pedir y registrar:
-- Preferencias de **origen** (país de fabricación): permitidos / vetados / sin preferencia.
-- Preferencias de **marca**: preferidas / vetadas / sin preferencia.
+- Carpeta del proyecto / expediente.
+- Documentos fuente disponibles.
+- Si hay anexos, aclaraciones o documentos externos pendientes.
+- Si el run es completo o un experimento acotado.
 
-Guardar en `/proyecto/overlay_usuario.yaml`.
+No preguntar preferencias de origen/marca al inicio. Esas preferencias se capturan post-BOM, justo antes de comenzar búsquedas de candidatos, y se guardan en `/proyecto/overlay_usuario.yaml`.
 
 ### Plan inicial
 

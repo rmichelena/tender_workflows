@@ -69,10 +69,10 @@ Regla: cuando un subagente produce JSON, el orquestador genera los derivados aut
 ```
 proyecto/
 ├── inputs/                          (EETT, anexos, aclaraciones — read-only)
-├── overlay_usuario.yaml             (preferencias capturadas en Gate 0)
+├── overlay_usuario.yaml             (preferencias de búsqueda capturadas post-BOM / Gate 5)
 ├── artifacts/
 │   ├── step_1_pdfs/                 (PDFs preservados / DOCX→PDF)
-│   ├── step_1_pdfs_clean/           (PDFs optimizados `{stem}_clean.pdf`)
+│   ├── step_1_pdfs_clean/           (PDFs optimizados + reportes `{stem}_clean_report.json` y `{stem}_clean_page_analysis.json`)
 │   ├── step_1_planos/               (planos detectados/análisis visual)
 │   ├── step_1_pdfs_preocr/          (PDFs con planos sustituidos por texto)
 │   ├── step_1_normalizados/         (markdowns de docs fuente/preocr)
