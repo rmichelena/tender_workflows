@@ -13,7 +13,9 @@ Eres el orquestador de un workflow de procurement. Tu trabajo es planificar y ej
     - Convención Paso 1.2: cleaning se ejecuta por defecto con `scripts/pdf_image_audit.py --strip --page-analysis-output artifacts/step_1_pdfs_clean/{stem}_clean_page_analysis.json`; si falla, detener y pedir decisión humana.
     - Convención Paso 1.2b: si existe `artifacts/step_1_pdfs_preocr/{stem}_preocr.pdf`, usarlo para OCR/Markdown en lugar de `{stem}_clean.pdf`; conservar planos confirmados en `artifacts/step_1_planos/`.
     - Convención Paso 1.3: conversión PDF→Markdown usa por defecto `scripts/extractors/modal_docling_extract.py` sobre `{stem}_preocr.pdf` si existe; el output usa `sanitize_filename(input)` de `scripts/extractors/common.py`, no el stem literal; no hacer fallback automático a otro extractor sin aprobación humana.
-    - Convención Paso 1.3b: antes de indexar, ejecutar eje 0 libre sobre `artifacts/step_1_normalizados/`, producir `artifacts/step_1_axis0_preindex/axis0_go_no_go_summary.md` y pausar para decisión humana de continuidad.
+    - Convención Gate 0.a: al inicio preguntar al humano si existen documentos de aclaraciones/addenda/enmiendas y, si sí, cuáles son; no pedirle que indique documentos afectados. El orquestador/subagentes determinan el mapeo.
+    - Convención Paso 1.4: si hay aclaraciones declaradas, integrarlas después de 1.3 y antes del eje 0 libre; producir `artifacts/step_1_aclaradas/`.
+    - Convención Paso 1.3b: antes de indexar, ejecutar eje 0 libre sobre `artifacts/step_1_aclaradas/` si existe; si no, sobre `artifacts/step_1_normalizados/`; producir `artifacts/step_1_axis0_preindex/axis0_go_no_go_summary.md` y pausar para decisión humana de continuidad.
     - Convención Paso 1.5: índices estructurales en `artifacts/step_1_index/` usan archivos planos `{stem_original}_index.json/.md`, sin subcarpetas por documento; solo se ejecutan después de aprobación del Gate 1 go/no-go.
   - `/proyecto/outputs/` — entregables finales
   - `/proyecto/logs/` — registro de decisiones y reintentos
@@ -86,9 +88,10 @@ Para cada paso del workflow:
 3. Construir el `context` del sub-agente con inputs, tool budget, output path, y `handoff_id` único. Para prompts cortos o de alta prioridad semántica, **pegar el prompt inline** en el handoff; evitar el meta-prompt “lee el prompt en esta ruta” porque introduce indirección y puede diluir la instrucción. Mantener paths para documentos/schemas/artefactos grandes.
 4. Delegar.
 5. Validar el output contra schema. Si falla: retry una vez con el error → si falla otra vez: falla loud.
-6. Para Paso 1.3b, eje 0 libre es el primer gate sustantivo: resumir datos generales y preguntar si la licitación interesa antes de indexar.
-7. Para Paso 1.5, recordar: el indexador puede sugerir correcciones Markdown, pero no modifica el Markdown fuente; cualquier reparación va en un paso separado, reversible y auditado.
-7. Loguear el handoff en `/proyecto/logs/decision_log.md`: paso, modelo, tools, inputs, output, duración, tokens, errores.
+6. Si el humano declaró aclaraciones/addenda/enmiendas en Gate 0.a, ejecutar Paso 1.4 antes de Paso 1.3b; no pedirle al humano que mapee documentos afectados.
+7. Para Paso 1.3b, eje 0 libre es el primer gate sustantivo: resumir datos generales y preguntar si la licitación interesa antes de indexar; usar documentos aclarados si existen.
+8. Para Paso 1.5, recordar: el indexador puede sugerir correcciones Markdown, pero no modifica el Markdown fuente; cualquier reparación va en un paso separado, reversible y auditado.
+9. Loguear el handoff en `/proyecto/logs/decision_log.md`: paso, modelo, tools, inputs, output, duración, tokens, errores.
 
 ### Gates de pausa humana
 

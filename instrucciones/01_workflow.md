@@ -29,15 +29,32 @@
 
 **Default operativo Paso 1**:
 1. Triage por tipo de archivo.
-2. Rama PDF: convertir DOCX→PDF cuando aplique.
-3. Ejecutar cleaning **siempre con `--strip` + `--page-analysis`** para remover headers/footers/decoraciones repetitivas y producir reporte por página.
-4. Ejecutar detección/análisis/reemplazo de planos, diagramas y regiones visuales antes de convertir a Markdown.
-5. Convertir PDFs pre-OCR con **Modal Docling** (`scripts/extractors/modal_docling_extract.py`) como extractor default.
-6. Ejecutar **eje 0 libre pre-index** sobre la carpeta de documentos normalizados.
-7. Pausar en gate humano para decidir si la licitación interesa y si se continúa.
-8. Solo si el humano aprueba continuar: generar índice estructural Paso 1.5 y seguir con el resto del workflow.
+2. Preguntar al humano si hay documentos de aclaraciones/addenda/enmiendas que deban integrarse. El humano puede indicar si existen y cuáles son; **no** debe pedírsele que determine qué documentos base afectan. Ese mapeo es trabajo del orquestador/subagentes.
+3. Rama PDF: convertir DOCX→PDF cuando aplique.
+4. Ejecutar cleaning **siempre con `--strip` + `--page-analysis-output`** para remover headers/footers/decoraciones repetitivas y producir reporte por página.
+5. Ejecutar detección/análisis/reemplazo de planos, diagramas y regiones visuales antes de convertir a Markdown.
+6. Convertir PDFs pre-OCR con **Modal Docling** (`scripts/extractors/modal_docling_extract.py`) como extractor default.
+7. Si el humano indicó que hay aclaraciones/addenda/enmiendas, ejecutar Paso 1.4 para producir documentos aclarados antes de cualquier lectura libre o indexado.
+8. Ejecutar **eje 0 libre pre-index** sobre documentos aclarados si existen; si no, sobre documentos normalizados.
+9. Pausar en gate humano para decidir si la licitación interesa y si se continúa.
+10. Solo si el humano aprueba continuar: generar índice estructural Paso 1.5 y seguir con el resto del workflow.
 
 **Política de falla**: esta secuencia debe ser casi automática, pero no silenciosa. Si falla cleaning, reemplazo de planos/diagramas, Modal Docling, eje 0 libre o indexación estructural, el orquestador **se detiene y pregunta al humano** con diagnóstico breve, archivos afectados y 2-3 opciones concretas. No degradar automáticamente a otro extractor ni saltar pasos sin aprobación.
+
+### Gate 0.a — Aclaraciones/addenda declaradas por el humano
+
+Antes de procesar semánticamente el expediente, el orquestador debe preguntar al humano si existen documentos de aclaraciones, addenda o enmiendas que deban integrarse.
+
+Pregunta sugerida:
+
+> “¿Hay documentos de aclaraciones/addenda/enmiendas que debamos integrar antes de analizar? Si sí, dime cuáles archivos son aclaraciones. Yo determinaré qué documentos base afectan.”
+
+Reglas:
+- Se puede pedir al humano que confirme si hay aclaraciones y cuáles archivos lo son.
+- **No** pedir al humano que indique qué documentos o secciones base son afectados; eso lo resuelve el Paso 1.4.
+- Registrar la respuesta en `/proyecto/logs/decision_log.md` y/o `/proyecto/artifacts/step_1_clarifications_declared.json`.
+- Si el humano confirma aclaraciones, ejecutar Paso 1.4 inmediatamente después de 1.3 y antes del free reader 1.3b.
+- Si el humano dice que no hay aclaraciones, saltar Paso 1.4 y ejecutar 1.3b sobre `step_1_normalizados/`.
 
 ### 1.0 Triage de inputs por tipo de archivo
 
@@ -245,18 +262,19 @@ python3 scripts/extractors/modal_docling_extract.py \
 
 ### 1.3b Eje 0 libre pre-index — datos generales y gate go/no-go
 
-> Este paso ocurre **antes del índice estructural** porque eje 0 ya se hace como lectura libre/semiestructurada, sin chunks. Su objetivo principal es decidir temprano si vale la pena invertir en indexado, extracción temática, BOM y búsquedas.
+> Este paso ocurre **después de integrar aclaraciones, si existen**, y **antes del índice estructural** porque eje 0 ya se hace como lectura libre/semiestructurada, sin chunks. Su objetivo es decidir temprano si vale la pena invertir en indexado, extracción temática, BOM y búsquedas.
 
 **Tipo**: lectura libre híbrida + consolidación/verificación del orquestador.
 **Owner**: Orquestador → 1-2 subagentes lectores libres.
 **Prompt base**: `prompts/prompt_axis0_free_reader.md` pegado inline en el handoff cuando quepa.
 **Inputs**:
-- carpeta completa `/proyecto/artifacts/step_1_normalizados/`;
+- carpeta `/proyecto/artifacts/step_1_aclaradas/` si existe y Paso 1.4 fue ejecutado;
+- si no hay aclaraciones aplicables, carpeta `/proyecto/artifacts/step_1_normalizados/`;
 - inventario breve de documentos disponibles;
-- opcionalmente PDFs limpios/pre-OCR si el lector necesita confirmar algo visual.
+- opcionalmente PDFs limpios/pre-OCR o normalizados originales si el lector necesita confirmar trazabilidad.
 
 **Tarea**:
-1. Leer/buscar libremente en los documentos normalizados del expediente.
+1. Leer/buscar libremente en los documentos aclarados si existen; si no, en los documentos normalizados del expediente.
 2. Extraer en Markdown/semiestructurado los datos generales de la licitación:
    - objeto/alcance con hasta 8 familias principales de bienes/equipos;
    - comprador/cliente y entidades supervisoras relevantes;
@@ -276,7 +294,7 @@ python3 scripts/extractors/modal_docling_extract.py \
 **Gate 1 — decisión humana de continuidad**:
 Presentar `axis0_go_no_go_summary.md` al humano y preguntar explícitamente:
 
-1. **Continuar**: licitación interesa → ejecutar Paso 1.5 indexado y seguir workflow.
+1. **Continuar**: licitación interesa → ejecutar Paso 1.5 indexado y seguir workflow. Si hubo Paso 1.4, indexar los documentos aclarados.
 2. **Detener**: licitación no interesa → cerrar run conservando artifacts.
 3. **Pedir aclaración/revisión puntual**: responder dudas concretas antes de decidir.
 
@@ -287,6 +305,10 @@ Presentar `axis0_go_no_go_summary.md` al humano y preguntar explícitamente:
 ---
 
 ## Paso 1.4 — Incorporar aclaraciones → documentos "aclarados"
+
+> Este paso se ejecuta **antes** de 1.3b cuando el humano confirmó que existen aclaraciones/addenda/enmiendas aplicables. El objetivo es que el free reader y el indexador trabajen sobre un expediente consolidado y no tengan que reconciliar bases + aclaraciones en cada lectura.
+
+**Input de decisión**: respuesta humana de Gate 0.a con los archivos que son aclaraciones. El orquestador/subagente debe determinar qué documentos base y qué secciones son afectadas.
 
 **Tipo**: auditoría/revisor de ojos frescos con handoff acotado (ver `agent_patterns.md` §3.5).
 
