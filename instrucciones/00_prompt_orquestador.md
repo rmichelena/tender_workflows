@@ -10,9 +10,9 @@ Eres el orquestador de un workflow de procurement. Tu trabajo es planificar y ej
   - `/proyecto/inputs/` — documentos fuente (EETT, anexos BOM, aclaraciones)
   - `/proyecto/artifacts/` — outputs intermedios por paso
     - Convención Paso 1: PDFs optimizados/limpios en `artifacts/step_1_pdfs_clean/` deben llevar sufijo `_clean.pdf` aunque ya estén en carpeta `clean`, para evitar ambigüedad al copiarlos/moverlos.
-    - Convención Paso 1.2: cleaning se ejecuta por defecto con `scripts/pdf_image_audit.py --strip --page-analysis`; si falla, detener y pedir decisión humana.
+    - Convención Paso 1.2: cleaning se ejecuta por defecto con `scripts/pdf_image_audit.py --strip --page-analysis-output artifacts/step_1_pdfs_clean/{stem}_clean_page_analysis.json`; si falla, detener y pedir decisión humana.
     - Convención Paso 1.2b: si existe `artifacts/step_1_pdfs_preocr/{stem}_preocr.pdf`, usarlo para OCR/Markdown en lugar de `{stem}_clean.pdf`; conservar planos confirmados en `artifacts/step_1_planos/`.
-    - Convención Paso 1.3: conversión PDF→Markdown usa por defecto `scripts/extractors/modal_docling_extract.py` sobre `{stem}_preocr.pdf` si existe; no hacer fallback automático a otro extractor sin aprobación humana.
+    - Convención Paso 1.3: conversión PDF→Markdown usa por defecto `scripts/extractors/modal_docling_extract.py` sobre `{stem}_preocr.pdf` si existe; el output usa `sanitize_filename(input)` de `scripts/extractors/common.py`, no el stem literal; no hacer fallback automático a otro extractor sin aprobación humana.
     - Convención Paso 1.3b: antes de indexar, ejecutar eje 0 libre sobre `artifacts/step_1_normalizados/`, producir `artifacts/step_1_axis0_preindex/axis0_go_no_go_summary.md` y pausar para decisión humana de continuidad.
     - Convención Paso 1.5: índices estructurales en `artifacts/step_1_index/` usan archivos planos `{stem_original}_index.json/.md`, sin subcarpetas por documento; solo se ejecutan después de aprobación del Gate 1 go/no-go.
   - `/proyecto/outputs/` — entregables finales

@@ -1553,6 +1553,8 @@ Examples:
     parser.add_argument("--text-only", action="store_true", help="Only remove text watermarks")
     parser.add_argument("--page-analysis", action="store_true",
                         help="Produce {stem}_page_analysis.json with per-page content metrics (size, text, images, drawings)")
+    parser.add_argument("--page-analysis-output",
+                        help="Explicit output path for page-analysis JSON. Implies --page-analysis.")
     args = parser.parse_args()
 
     if not os.path.exists(args.pdf):
@@ -1580,10 +1582,18 @@ Examples:
             json.dump(report, f, indent=2, default=str)
         print(f"\n  Report saved to: {args.report}")
 
-    # Save page analysis separately if requested (or if present in report)
-    if report.get("page_analysis") and (args.page_analysis or args.report):
-        base, ext = os.path.splitext(args.pdf)
-        pa_path = f"{base}_page_analysis.json"
+    # Save page analysis separately only when explicitly requested. The JSON
+    # report may include page_analysis internally, but --report must not create
+    # a second sidecar next to the input PDF as a surprise side effect.
+    if report.get("page_analysis") and (args.page_analysis or args.page_analysis_output):
+        if args.page_analysis_output:
+            pa_path = args.page_analysis_output
+        else:
+            base, ext = os.path.splitext(args.pdf)
+            pa_path = f"{base}_page_analysis.json"
+        pa_dir = os.path.dirname(pa_path)
+        if pa_dir:
+            os.makedirs(pa_dir, exist_ok=True)
         with open(pa_path, "w") as f:
             json.dump(report["page_analysis"], f, indent=2, default=str)
         pa = report["page_analysis"]

@@ -10,9 +10,10 @@ Typical flow:
   2) analyze rendered PNGs with a visual LLM and write an analysis JSON matching
      instrucciones/schemas/plan_pages_analysis.schema.json
 
-  3) build extracted-plans PDF and pre-OCR substituted PDF:
+  3) build extracted-plans PDF and pre-OCR substituted PDF, only when the
+     analysis contains at least one replace_page/replace_images action:
      python scripts/pdf_plan_pages.py build input_clean.pdf --output-dir artifacts/step_1_planos \
-       --preocr-dir artifacts/step_1_pdfs_preocr --stem DOC --analysis-json .../planos_extraidos_DOC.json
+       --preocr-dir artifacts/step_1_pdfs_preocr --stem DOC --analysis-json .../planos_analysis_DOC.json
 """
 
 from __future__ import annotations
@@ -85,7 +86,6 @@ def contiguous_ranges(pages: list[int]) -> list[dict[str, int]]:
 def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, min_width_pt: float, min_height_pt: float, render_dpi: int, page_analysis_json: Path | None = None, image_area_ratio_threshold: float = 0.4, image_min_width_pct: float = 0.15, max_images_per_candidate_page: int = 4, max_consecutive_image_heavy: int = 5, image_heavy_doc_pct_disable: float = 0.7) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     render_dir = output_dir / f"{stem}_candidate_pages"
-    render_dir.mkdir(parents=True, exist_ok=True)
 
     # Load existing page analysis if available (from pdf_image_audit.py --page-analysis)
     existing_pa = None
@@ -215,6 +215,8 @@ def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, m
             candidates.append(item)
 
     matrix = fitz.Matrix(render_dpi / POINTS_PER_INCH, render_dpi / POINTS_PER_INCH)
+    if candidates:
+        render_dir.mkdir(parents=True, exist_ok=True)
     for c in candidates:
         page = doc[c["page"] - 1]
         pix = page.get_pixmap(matrix=matrix, alpha=False)
@@ -437,9 +439,22 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
     preocr_pdf = preocr_dir / f"{stem}_preocr.pdf"
     md_path = output_dir / f"planos_extraidos_{stem}.md"
 
+    affected_pages = sorted(replace_page_set | replace_images_set)
+    if not affected_pages:
+        # Nothing was actually extracted/replaced. Do not create placeholder
+        # planos_extraidos PDFs/MDs or identical pre-OCR PDFs; downstream OCR
+        # should consume the clean PDF directly when no confirmed visual
+        # replacement exists.
+        return {
+            "extracted_pdf": None,
+            "preocr_pdf": None,
+            "md": None,
+            "extracted_pages": [],
+            "message": "No confirmed plan/diagram/image replacements; no extraction outputs generated.",
+        }
+
     # Extract affected pages in original document order, with source-page stamp.
     extracted = fitz.open()
-    affected_pages = sorted(replace_page_set | replace_images_set)
     for page_num in affected_pages:
         # Render the original page into a fresh page. This normalizes rotated CAD pages
         # so the corner label is reliably visible/extractable.
@@ -447,12 +462,7 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
         new_page = extracted.new_page(width=src_page.rect.width, height=src_page.rect.height)
         new_page.show_pdf_page(new_page.rect, doc, page_num - 1)
         add_red_page_label(new_page, page_num)
-    if extracted.page_count:
-        extracted.save(extracted_pdf, garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True)
-    else:
-        p = extracted.new_page(width=595.3, height=841.9)
-        p.insert_text((54, 54), "No se confirmaron planos/diagramas para extraer.", fontsize=11)
-        extracted.save(extracted_pdf, garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True)
+    extracted.save(extracted_pdf, garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True)
 
     # Build pre-OCR PDF
     dom = dominant_size(page_records(doc))
@@ -556,7 +566,7 @@ def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str
             md_lines.append("")
     md_path.write_text("\n".join(md_lines).rstrip() + "\n")
 
-    return {"extracted_pdf": str(extracted_pdf), "preocr_pdf": str(preocr_pdf), "md": str(md_path)}
+    return {"extracted_pdf": str(extracted_pdf), "preocr_pdf": str(preocr_pdf), "md": str(md_path), "extracted_pages": affected_pages}
 
 
 def main() -> None:

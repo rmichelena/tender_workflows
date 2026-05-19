@@ -127,7 +127,7 @@ python3 scripts/pdf_image_audit.py input.pdf \
   --strip \
   --output artifacts/step_1_pdfs_clean/{stem}_clean.pdf \
   --report artifacts/step_1_pdfs_clean/{stem}_clean_report.json \
-  --page-analysis
+  --page-analysis-output artifacts/step_1_pdfs_clean/{stem}_clean_page_analysis.json
 ```
 
 **Outputs**:
@@ -191,13 +191,17 @@ python3 scripts/pdf_image_audit.py input.pdf \
 9. Extraer páginas afectadas a PDF separado.
 10. Generar un PDF pre-OCR donde las páginas/regiones confirmadas son sustituidas por resúmenes textuales. Páginas candidatas no confirmadas, como tablas grandes o scans normales, quedan intactas.
 
-**Outputs**:
+**Outputs siempre permitidos**:
 - `/proyecto/artifacts/step_1_planos/{stem}_page_size_audit.json`
-- `/proyecto/artifacts/step_1_planos/{stem}_candidate_pages/page_XXXX.png` (temporales/auditables)
+- `/proyecto/artifacts/step_1_planos/{stem}_candidate_pages/page_XXXX.png` (solo si hubo candidatos rasterizados; temporales/auditables)
+
+**Outputs solo si se confirmó al menos un `replace_page` o `replace_images`**:
 - `/proyecto/artifacts/step_1_planos/planos_extraidos_{stem}.pdf`
 - `/proyecto/artifacts/step_1_planos/planos_extraidos_{stem}.json`
 - `/proyecto/artifacts/step_1_planos/planos_extraidos_{stem}.md`
 - `/proyecto/artifacts/step_1_pdfs_preocr/{stem}_preocr.pdf`
+
+Si no se confirmó ninguna extracción/sustitución visual, no generar placeholders tipo “No se confirmaron planos/diagramas…”, ni PDF/MD/JSON `planos_extraidos_*`; Modal Docling debe consumir directamente `{stem}_clean.pdf`.
 
 **Reglas**:
 - No borrar nunca páginas del PDF limpio; solo crear derivados.
@@ -231,7 +235,7 @@ python3 scripts/extractors/modal_docling_extract.py \
   --output-dir /proyecto/artifacts/step_1_normalizados
 ```
 
-**Output**: `/proyecto/artifacts/step_1_normalizados/{nombre_doc}.md`
+**Output**: `/proyecto/artifacts/step_1_normalizados/{sanitize_filename(input)}_modal_docling.md`, donde `sanitize_filename` es la convención de `scripts/extractors/common.py` (NFKD ASCII + caracteres no `[a-zA-Z0-9._-]` reemplazados por `_`). No asumir que espacios o acentos se conservan.
 **QA interno**: verificar que el `.md` existe, no está vacío y tiene tamaño razonable frente al PDF fuente; registrar anomalías.
 **Done**: todos los inputs tienen su `.md`. Continuar automáticamente a Paso 1.3b salvo falla.
 
