@@ -22,7 +22,7 @@ La página contiene texto + una o más imágenes embebidas (diagramas, fotograf�
 Condiciones:
 - La página tiene texto legible por OCR **y** regiones con diagramas/fotos que OCR no extraería.
 - Solo necesitas reemplazar las regiones problemáticas, no toda la página.
-- Debes proveer `bbox_pct` (coordenadas en porcentaje de la página) para cada región.
+- Debes proveer `bbox_pct` (coordenadas en porcentaje de la página) para cada región a reemplazar.
 
 ### `leave_for_ocr`
 La página es texto, tabla, documento escaneado, o contenido que OCR/Markdown normal procesa bien.
@@ -47,7 +47,7 @@ No marcar replace si:
 
 JSON válido contra `schemas/plan_pages_analysis.schema.json` v0.2.
 
-Campo `action` obligatorio (reemplaza los antiguos `is_plan_or_diagram` + `exclude_from_ocr`).
+Campo `action` obligatorio.
 
 ### Para `replace_page`
 

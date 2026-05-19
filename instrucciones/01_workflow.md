@@ -6,17 +6,6 @@
 > Patrones de delegación: ver `agent_patterns.md` — leer antes de delegar.
 > **JSON como canónico**: cualquier paso que produce datos estructurados entrega JSON validado contra schema. El orquestador genera los derivados (TSV, MD, XLSX) automáticamente.
 
-## Cambios v0.2 vs v0.1
-
-| Decisión v0.1 | Aprendizaje ICAO-00068 | Decisión v0.2 |
-|---|---|---|
-| 3 variantes BOM HL + consolidación | 28 requisitos FALTANTE por decisiones implícitas inconsistentes | **1 productor + 1 auditor "ojos frescos"** |
-| 4 variantes BOM Exploded + consolidación | Idem + 504 timeout con 426 items | **1 productor + 1 auditor + scratchpad compartido con 2.1** |
-| OCR Paso 1: subagente LLM-vision | Docling Serve funciona mejor como parser/OCR default y ya tenemos instancia Modal | **Pipeline determinístico: DOCX→PDF + strip-cleaning + reemplazo planos/diagramas + Modal Docling + eje 0 go/no-go + índice** |
-| Matriz cumplimiento dentro del search worker | Mezcla búsqueda + validación + estructuración | **LLM call separada post-búsqueda** |
-| Solo Firecrawl | Sin créditos a mitad → degradación silenciosa | **Pool de tools con fallback explícito** (catalog_tools.md) |
-| Solo español en queries | 0% hit rate | **Búsqueda bilingüe ES+EN obligatoria** |
-| `max_tokens` alto | JSON truncado en kimi/deepseek/minimax | **Tool budget explícito + schema validation** |
 
 ---
 
@@ -31,8 +20,6 @@
 
 **Output**: inventario inicial de documentos y alcance del run.
 **Done**: paquete documental confirmado por humano.
-
-> Nota: las preferencias de origen/marca **no** se preguntan aquí. Este workflow ya no empieza con procura/búsqueda; esas preferencias se capturan post-BOM, justo antes de invertir tokens en búsqueda de candidatos.
 
 ---
 
@@ -408,7 +395,7 @@ Presentar `axis0_go_no_go_summary.md` al humano y preguntar explícitamente:
 ---
 ## Paso 2A — Lectura temática lineal por documento — **v0.3**
 
-> Giro de diseño: antes de construir BOM consolidado, lanzar lectores especializados por eje y documento. Cada subagente produce **solo JSON canónico**; el orquestador valida y renderiza Markdown determinísticamente.
+> Antes de construir BOM consolidado, lanzar lectores especializados por eje y documento. Cada subagente produce **solo JSON canónico**; el orquestador valida y renderiza Markdown determinísticamente.
 
 > Ajuste híbrido: no todos los ejes deben usar el mismo nivel de rigidez en la primera lectura. El eje 0 ya se ejecutó antes del indexado como Paso 1.3b para el gate go/no-go. Paso 2A se concentra en ejes posteriores y/o en canonicalizar eje 0 solo si hace falta.
 
@@ -709,7 +696,7 @@ Este archivo se enriquece a medida que el productor toma decisiones. El auditor 
 
 ## Gate 5 — Preferencias de búsqueda post-BOM
 
-> Este gate ocurre después de tener el BOM preparado para búsqueda. No pertenece al inicio del workflow porque las preferencias de origen/marca solo son relevantes cuando se van a buscar candidatos.
+> Este gate ocurre después de tener el BOM preparado para búsqueda. Las preferencias de origen/marca solo son relevantes cuando se van a buscar candidatos.
 
 **Owner**: Orquestador (diálogo con humano)
 
