@@ -12,7 +12,7 @@
 |---|---|---|
 | 3 variantes BOM HL + consolidación | 28 requisitos FALTANTE por decisiones implícitas inconsistentes | **1 productor + 1 auditor "ojos frescos"** |
 | 4 variantes BOM Exploded + consolidación | Idem + 504 timeout con 426 items | **1 productor + 1 auditor + scratchpad compartido con 2.1** |
-| OCR Paso 1: subagente LLM-vision | Docling Serve funciona mejor como parser/OCR default y ya tenemos instancia Modal | **Pipeline determinístico: DOCX→PDF + strip-cleaning + reemplazo planos/diagramas + Modal Docling + índice** |
+| OCR Paso 1: subagente LLM-vision | Docling Serve funciona mejor como parser/OCR default y ya tenemos instancia Modal | **Pipeline determinístico: DOCX→PDF + strip-cleaning + reemplazo planos/diagramas + Modal Docling + eje 0 go/no-go + índice** |
 | Matriz cumplimiento dentro del search worker | Mezcla búsqueda + validación + estructuración | **LLM call separada post-búsqueda** |
 | Solo Firecrawl | Sin créditos a mitad → degradación silenciosa | **Pool de tools con fallback explícito** (catalog_tools.md) |
 | Solo español en queries | 0% hit rate | **Búsqueda bilingüe ES+EN obligatoria** |
@@ -46,9 +46,11 @@
 3. Ejecutar cleaning **siempre con `--strip` + `--page-analysis`** para remover headers/footers/decoraciones repetitivas y producir reporte por página.
 4. Ejecutar detección/análisis/reemplazo de planos, diagramas y regiones visuales antes de convertir a Markdown.
 5. Convertir PDFs pre-OCR con **Modal Docling** (`scripts/extractors/modal_docling_extract.py`) como extractor default.
-6. Generar índice estructural Paso 1.5.
+6. Ejecutar **eje 0 libre pre-index** sobre la carpeta de documentos normalizados.
+7. Pausar en gate humano para decidir si la licitación interesa y si se continúa.
+8. Solo si el humano aprueba continuar: generar índice estructural Paso 1.5 y seguir con el resto del workflow.
 
-**Política de falla**: esta secuencia debe ser casi automática, pero no silenciosa. Si falla cleaning, reemplazo de planos/diagramas, Modal Docling o indexación estructural, el orquestador **se detiene y pregunta al humano** con diagnóstico breve, archivos afectados y 2-3 opciones concretas. No degradar automáticamente a otro extractor ni saltar pasos sin aprobación.
+**Política de falla**: esta secuencia debe ser casi automática, pero no silenciosa. Si falla cleaning, reemplazo de planos/diagramas, Modal Docling, eje 0 libre o indexación estructural, el orquestador **se detiene y pregunta al humano** con diagnóstico breve, archivos afectados y 2-3 opciones concretas. No degradar automáticamente a otro extractor ni saltar pasos sin aprobación.
 
 ### 1.0 Triage de inputs por tipo de archivo
 
@@ -244,11 +246,52 @@ python3 scripts/extractors/modal_docling_extract.py \
 
 **Output**: `/proyecto/artifacts/step_1_normalizados/{nombre_doc}.md`
 **QA interno**: verificar que el `.md` existe, no está vacío y tiene tamaño razonable frente al PDF fuente; registrar anomalías.
-**Done**: todos los inputs tienen su `.md`. Continuar automáticamente a Paso 1.5 salvo falla.
+**Done**: todos los inputs tienen su `.md`. Continuar automáticamente a Paso 1.3b salvo falla.
 
 **Si falla**: detener workflow y preguntar al humano. No hacer fallback automático a Docling local, LandingAI, DocAI o MarkItDown sin autorización explícita.
 
 **Fallback autorizado por humano**: según diagnóstico, usar Docling local (`scripts/extractors/docling_extract.py`), LandingAI, DocAI, MarkItDown o LLM vision de página específica (ver `model_routing.yaml → paso_1_vision_fallback`).
+
+### 1.3b Eje 0 libre pre-index — datos generales y gate go/no-go
+
+> Este paso ocurre **antes del índice estructural** porque eje 0 ya se hace como lectura libre/semiestructurada, sin chunks. Su objetivo principal es decidir temprano si vale la pena invertir en indexado, extracción temática, BOM y búsquedas.
+
+**Tipo**: lectura libre híbrida + consolidación/verificación del orquestador.
+**Owner**: Orquestador → 1-2 subagentes lectores libres.
+**Prompt base**: `prompts/prompt_axis0_free_reader.md` pegado inline en el handoff cuando quepa.
+**Inputs**:
+- carpeta completa `/proyecto/artifacts/step_1_normalizados/`;
+- inventario breve de documentos disponibles;
+- opcionalmente PDFs limpios/pre-OCR si el lector necesita confirmar algo visual.
+
+**Tarea**:
+1. Leer/buscar libremente en los documentos normalizados del expediente.
+2. Extraer en Markdown/semiestructurado los datos generales de la licitación:
+   - objeto/alcance con hasta 8 familias principales de bienes/equipos;
+   - comprador/cliente y entidades supervisoras relevantes;
+   - cronograma e hitos críticos;
+   - presupuesto/valor referencial;
+   - moneda, garantías, pagos, penalidades;
+   - requisitos principales de postor/consorcio/experiencia;
+   - clasificación contractual y riesgos/dudas principales;
+   - cualquier condición que afecte decisión comercial temprana.
+3. El orquestador consolida los outputs, verifica discrepancias críticas contra los documentos fuente y produce un resumen ejecutivo.
+
+**Outputs**:
+- `/proyecto/artifacts/step_1_axis0_preindex/axis0_free_reader_{modelo}.md` (si hay múltiples lectores)
+- `/proyecto/artifacts/step_1_axis0_preindex/axis0_go_no_go_summary.md`
+- opcional: `/proyecto/artifacts/step_1_axis0_preindex/axis0_go_no_go_summary.json` si se requiere normalización canónica posterior.
+
+**Gate 1 — decisión humana de continuidad**:
+Presentar `axis0_go_no_go_summary.md` al humano y preguntar explícitamente:
+
+1. **Continuar**: licitación interesa → ejecutar Paso 1.5 indexado y seguir workflow.
+2. **Detener**: licitación no interesa → cerrar run conservando artifacts.
+3. **Pedir aclaración/revisión puntual**: responder dudas concretas antes de decidir.
+
+**Done**: decisión humana registrada. Solo continuar a Paso 1.5 si la respuesta es **Continuar**.
+
+**Si falla**: detener workflow y preguntar al humano. No saltar directo a indexado/BOM sin decisión explícita.
 
 ---
 
@@ -367,20 +410,17 @@ python3 scripts/extractors/modal_docling_extract.py \
 
 > Giro de diseño: antes de construir BOM consolidado, lanzar lectores especializados por eje y documento. Cada subagente produce **solo JSON canónico**; el orquestador valida y renderiza Markdown determinísticamente.
 
-> Ajuste híbrido: no todos los ejes deben usar el mismo nivel de rigidez en la primera lectura. Para ejes de comprensión global, especialmente eje 0, se permite una lectura libre/semiestructurada antes de canonicalizar.
+> Ajuste híbrido: no todos los ejes deben usar el mismo nivel de rigidez en la primera lectura. El eje 0 ya se ejecutó antes del indexado como Paso 1.3b para el gate go/no-go. Paso 2A se concentra en ejes posteriores y/o en canonicalizar eje 0 solo si hace falta.
 
-### 2A.axis0 — Lectura libre híbrida para datos principales
+### 2A.axis0 — Canonicalización opcional del eje 0 ya aprobado
 
-**Uso recomendado**: eje 0 cuando el expediente completo o sus documentos principales caben razonablemente en contexto largo o pueden leerse por offsets sin análisis por chunk.
+**Uso recomendado**: solo después del Gate 1 si la licitación interesa y se requiere convertir el resumen libre de Paso 1.3b a JSON canónico o enriquecerlo con verificaciones adicionales. No relanzar eje 0 chunked por defecto.
 
 **Patrón**:
-1. Lanzar 2 lectores libres con modelos contrastantes.
-2. El prompt de lectura debe ir **inline** en el handoff del subagente; no pedir “lee este prompt desde una ruta” salvo que sea demasiado largo.
-3. Pasar la ruta de la **carpeta de documentos fuente del expediente** y, si existe, un inventario breve de documentos normalizados. El lector debe revisar/buscar en todos los documentos relevantes. Solo pasar un documento específico si el orquestador limita explícitamente el alcance.
-4. Si el tool de lectura trunca, los offsets son solo transporte, no chunking semántico.
-5. El lector produce Markdown claro/semiestructurado, no JSON canónico.
-6. El orquestador compara outputs, consolida, detecta discrepancias y verifica personalmente contra los MD/PDF fuente.
-7. El JSON/schema canónico se produce después, como capa de normalización, no como restricción de primera lectura.
+1. Usar `/proyecto/artifacts/step_1_axis0_preindex/axis0_go_no_go_summary.md` como fuente primaria.
+2. Verificar discrepancias o dudas contra `/proyecto/artifacts/step_1_normalizados/` y PDFs fuente.
+3. Producir JSON canónico si un paso posterior lo requiere.
+4. No usar chunk plans para eje 0 salvo experimento explícito.
 
 **Prompt base**: `prompts/prompt_axis0_free_reader.md` (contenido suficientemente corto para pegar inline).
 
@@ -405,6 +445,8 @@ python3 scripts/extractors/modal_docling_extract.py \
 - Clientes privados (AAP, AdP, LAP, etc.): típicamente hay bases + uno o más documentos técnicos/anexos; leer todos.
 - Estado peruano: puede ser un documento consolidado o principal + anexos; leer principal y anexos relevantes.
 - OACI/ICAO, BID u organismos multilaterales: la información suele estar dispersa entre varios documentos; leer/buscar en todo el paquete.
+
+> La lectura libre multi-documento propiamente dicha vive en Paso 1.3b; esta sección solo documenta cómo reutilizar/canonicalizar ese resultado después de la decisión de continuidad.
 
 ### 2A.0 Construir chunk plans determinísticos
 
@@ -807,8 +849,9 @@ proyecto/
 │   ├── step_1_planos/                     (planos detectados, análisis visual, páginas extraídas)
 │   ├── step_1_pdfs_preocr/                (PDFs con planos sustituidos por resumen textual)
 │   ├── step_1_normalizados/               (markdowns post-Modal-Docling/preocr)
+│   ├── step_1_axis0_preindex/             (`axis0_go_no_go_summary.md`; gate humano antes de indexar)
 │   ├── step_1_aclaradas/                  (docs aclarados + auditoría)
-│   ├── step_1_index/                      (`{stem}_index.json/.md`; índice estructural + correcciones Markdown sugeridas)
+│   ├── step_1_index/                      (`{stem}_index.json/.md`; índice estructural post-gate + correcciones Markdown sugeridas)
 │   ├── step_1_repaired/                   (opcional; Markdown reparado, patch y log)
 │   ├── step_2_bom/                        (BOM HL y Exploded en JSON + derivados)
 │   ├── step_2_5_items/                    (1 JSON+MD por ítem)

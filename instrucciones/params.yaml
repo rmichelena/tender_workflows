@@ -34,8 +34,16 @@ step_1_defaults:
     input_preference: preocr_then_clean
     output_dir: artifacts/step_1_normalizados
     fail_policy: ask_human       # no fallback automático a otro extractor
-  document_index:
+  axis0_preindex:
     run_by_default: true
+    prompt: instrucciones/prompts/prompt_axis0_free_reader.md
+    input_dir: artifacts/step_1_normalizados
+    output_dir: artifacts/step_1_axis0_preindex
+    output_summary: artifacts/step_1_axis0_preindex/axis0_go_no_go_summary.md
+    gate: go_no_go               # preguntar al humano si continuar antes de indexar
+    fail_policy: ask_human       # no saltar directo a índice/BOM si eje 0 falla
+  document_index:
+    run_by_default: after_axis0_gate_continue
     fail_policy: ask_human       # no pasar a Paso 2 sin índice salvo aprobación explícita
 
 # ---------------------------------------------------------------

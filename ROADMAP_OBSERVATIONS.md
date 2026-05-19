@@ -412,3 +412,18 @@ Fail policy:
 Additional clarification:
 
 - The old post-Markdown pause is no longer a hard gate. The automated block should continue through structural indexing. Human interruption happens on failure/anomaly, or as an optional post-index spot-check summary.
+
+## 2026-05-19 — Move axis 0 before structural indexing as go/no-go gate
+
+Roberto identified that eje 0 (datos generales/comerciales/contractuales) is no longer a chunked/index-dependent extraction. It is now a free/hybrid reader over the converted document package, so it should happen immediately after Markdown conversion and before structural indexing.
+
+Decision:
+
+- New Paso 1.3b: run eje 0 libre pre-index over `artifacts/step_1_normalizados/`.
+- Produce `artifacts/step_1_axis0_preindex/axis0_go_no_go_summary.md`.
+- Gate 1: present the summary to the human and ask whether the licitación interests us:
+  - Continue → run Paso 1.5 structural indexing and continue workflow.
+  - Stop → close/preserve artifacts without spending more tokens.
+  - Review → answer specific doubts before deciding.
+- Paso 1.5 no longer runs automatically immediately after Markdown conversion; it runs only after Gate 1 approval.
+- Paso 2A axis 0 becomes optional canonicalization/reverification of the pre-index summary, not the primary first-pass extraction.

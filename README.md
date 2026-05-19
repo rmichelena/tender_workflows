@@ -102,9 +102,11 @@ Default del workflow:
 1. Ejecutar cleaning con `--strip --page-analysis`.
 2. Ejecutar `pdf_plan_pages.py audit` y `build` para sustituir planos/diagramas confirmados.
 3. Convertir a Markdown con `modal_docling_extract.py`.
-4. Indexar estructura del Markdown.
+4. Ejecutar eje 0 libre pre-index y producir resumen go/no-go.
+5. Preguntar al usuario si la licitación interesa.
+6. Solo si el usuario aprueba continuar: indexar estructura del Markdown.
 
-Si falla cleaning, sustitución de planos/diagramas, Modal Docling o indexación, el workflow debe detenerse y preguntar al usuario. No hay fallback automático silencioso.
+Si falla cleaning, sustitución de planos/diagramas, Modal Docling, eje 0 libre o indexación, el workflow debe detenerse y preguntar al usuario. No hay fallback automático silencioso.
 
 El optimizador `pdf_image_audit.py` también puede producir un análisis de contenido por página. Ese reporte alimenta la detección de candidatos visuales: no se decide solo por tamaño.
 
@@ -160,9 +162,21 @@ El análisis visual decide entre:
 
 Para `replace_images`, el build debe insertar una imagen PNG de reemplazo con texto OCR-friendly, no texto overlay PDF. El script resuelve el bbox aproximado al rect real de imagen renderizada cuando puede.
 
-## Paso 1.5 default: índice estructural de Markdown
+## Paso 1.3b default: eje 0 libre pre-index y Gate go/no-go
 
-Tras convertir documentos a Markdown, el workflow ejecuta una pasada de indexación estructural antes de extraer BOM:
+Tras convertir documentos a Markdown, el workflow ejecuta una lectura libre de datos generales antes de indexar. Esto permite decidir temprano si la licitación interesa antes de gastar tokens en índice, extracción temática, BOM y búsqueda.
+
+- input normal: carpeta `artifacts/step_1_normalizados/` completa;
+- prompt: `instrucciones/prompts/prompt_axis0_free_reader.md` pegado inline cuando quepa;
+- output: `artifacts/step_1_axis0_preindex/axis0_go_no_go_summary.md`;
+- contenido: objeto/alcance, familias principales de bienes/equipos, presupuesto, cronograma, garantías, pagos, penalidades, requisitos del postor, experiencia, riesgos/dudas;
+- gate: el usuario decide **Continuar**, **Detener** o **Pedir revisión puntual**.
+
+No ejecutar Paso 1.5 ni extracción temática/BOM hasta que el usuario apruebe continuar.
+
+## Paso 1.5 default post-gate: índice estructural de Markdown
+
+Si el usuario aprueba continuar en el gate de eje 0, el workflow ejecuta una pasada de indexación estructural antes de extraer BOM:
 
 - lee TODO el Markdown por ventanas de 200 líneas con overlap de 50;
 - reconstruye secciones reales sin confiar ciegamente en headings Markdown;
@@ -346,8 +360,9 @@ El texto viene como lista de chunks con tipo:
 
 El flujo experimental actual para extracción temprana usa lectores temáticos por documento/eje:
 
-1. `scripts/build_section_chunks.py` genera `artifacts/step_2_chunks/{stem}_chunks.json` desde el índice Paso 1.5.
-2. Cada subagente lee un documento + índice + chunk plan y escribe solo JSON canónico (`thematic_extraction.schema.json`).
+0. Eje 0 ya se ejecutó antes del índice como Paso 1.3b para el gate go/no-go. En Paso 2A solo se canonicaliza/reverifica eje 0 si hace falta.
+1. Tras aprobación humana, `scripts/build_section_chunks.py` genera `artifacts/step_2_chunks/{stem}_chunks.json` desde el índice Paso 1.5.
+2. Cada subagente de ejes 1-4 lee un documento + índice + chunk plan y escribe solo JSON canónico (`thematic_extraction.schema.json`).
 3. El orquestador valida con `scripts/validate_thematic_extraction.py`.
 4. El orquestador renderiza Markdown humano con `scripts/render_thematic_md.py`.
 
@@ -398,6 +413,6 @@ python3 scripts/render_thematic_prompt.py \
 
 Para llamadas JSON-only estrictas, los subagentes deben recibir el prompt renderizado y el schema específico del eje.
 
-Para prompts cortos o de lectura libre (por ejemplo `prompt_axis0_free_reader.md`), el orquestador debe pegar el prompt **inline** en el mensaje del subagente en vez de pasar solo la ruta. La ruta puede quedar como referencia/versionado, pero no debe ser una indirección obligatoria para el modelo.
+Para prompts cortos o de lectura libre (por ejemplo `prompt_axis0_free_reader.md` en Paso 1.3b), el orquestador debe pegar el prompt **inline** en el mensaje del subagente en vez de pasar solo la ruta. La ruta puede quedar como referencia/versionado, pero no debe ser una indirección obligatoria para el modelo.
 
-En lectura libre, especialmente eje 0, el input normal debe ser la **carpeta del expediente/documentos fuente**, no un único documento de bases. El subagente debe buscar en bases, documentos técnicos, anexos, formularios y aclaraciones según existan. Solo limitar a un archivo cuando el orquestador lo indique explícitamente para un experimento o comparación.
+En lectura libre de eje 0, el input normal debe ser la **carpeta del expediente/documentos fuente normalizados**, no un único documento de bases. El subagente debe buscar en bases, documentos técnicos, anexos, formularios y aclaraciones según existan. Solo limitar a un archivo cuando el orquestador lo indique explícitamente para un experimento o comparación.
