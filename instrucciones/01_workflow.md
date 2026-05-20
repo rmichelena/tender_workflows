@@ -366,8 +366,10 @@ Presentar `axis0_go_no_go_summary.md` al humano y preguntar explícitamente:
 - Prompt: `instrucciones/prompts/prompt_document_indexer.md`
 
 **Outputs** (sin subcarpetas por documento):
-- `/proyecto/artifacts/step_1_index/{stem_original}_index.json`
-- `/proyecto/artifacts/step_1_index/{stem_original}_index.md`
+- Subagente indexador: `/proyecto/artifacts/step_1_index/{stem_original}_index.json`
+- Renderer determinístico: `/proyecto/artifacts/step_1_index/{stem_original}_index.md`
+
+El subagente **no** escribe Markdown humano; el orquestador lo genera con `scripts/render_document_index_md.py` desde el JSON validado para mantener formato uniforme y evitar fallos parciales.
 
 **Método obligatorio**:
 - Leer TODO el Markdown de principio a fin.
@@ -393,6 +395,7 @@ Presentar `axis0_go_no_go_summary.md` al humano y preguntar explícitamente:
 - JSON debe parsear con `json.load`.
 - Validar contra schema cuando `jsonschema` esté disponible.
 - Segundo fallo de schema tras retry = falla loud.
+- Después de validar el JSON, ejecutar `scripts/render_document_index_md.py` para generar el `.md` humano navegable.
 - Si la indexación falla después del retry permitido, detener workflow y preguntar al humano. No pasar a extracción temática/BOM con documentos sin índice estructural salvo autorización explícita.
 
 **Gate 1 post-index opcional**: al terminar conversión + índices de todos los documentos, el orquestador puede presentar resumen de outputs y anomalías para spot-check humano. Si no hay anomalías y el usuario pidió modo automático, continuar al siguiente bloque del workflow.

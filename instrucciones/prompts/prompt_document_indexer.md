@@ -29,24 +29,21 @@ Recibirás por contexto **solo rutas**, no contenido:
 - `source_md_path`
 - `schema_path`
 - `output_json_path`
-- `output_md_path`
+- `output_md_path` (opcional/deprecated; no lo escribas salvo instrucción explícita del orquestador)
 
 Debes leer el archivo Markdown por tu cuenta usando herramientas de archivo/terminal.
 
 ## Output obligatorio
 
-1. JSON canónico válido contra:
-   - `instrucciones/schemas/document_index.schema.json`
+Produce **solo** el JSON canónico válido contra:
+- `instrucciones/schemas/document_index.schema.json`
 
-2. Resumen humano Markdown estructural.
+No escribas Markdown humano. El Markdown navegable se deriva después de forma determinística con `scripts/render_document_index_md.py` a partir del JSON validado.
 
-El Markdown humano debe ser un índice navegable, no una ficha factual. Para cada sección, incluye título, líneas, tipo y contenido predominante; evita datos específicos como montos, plazos, porcentajes, cantidades o requisitos detallados.
-
-Los nombres de salida deben ser planos en `artifacts/step_1_index/`:
+El nombre de salida JSON debe ser plano en `artifacts/step_1_index/`:
 
 ```text
 {stem_original}_index.json
-{stem_original}_index.md
 ```
 
 No crear subcarpetas por documento.
@@ -157,7 +154,7 @@ Antes de terminar:
 
 Responde brevemente:
 
-- rutas escritas;
+- ruta JSON escrita;
 - número de secciones;
 - número de tablas/formularios;
 - número de warnings;
