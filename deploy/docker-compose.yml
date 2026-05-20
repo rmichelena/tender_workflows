@@ -1,0 +1,55 @@
+# Ejecutar desde la raíz del repo:
+#   docker compose -f deploy/docker-compose.yml up -d --build
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: seace
+      POSTGRES_PASSWORD: seace
+      POSTGRES_DB: seace
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seace"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../config.yaml:/app/config.yaml:ro
+      - ../entities.csv:/app/entities.csv:ro
+      - ../data:/app/data
+    environment:
+      TENDER_REPO_ROOT: /app
+      CONFIG_PATH: /app/config.yaml
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      python -m seace_monitor web -c /app/config.yaml --host 0.0.0.0 --port 8080
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    volumes:
+      - ../config.yaml:/app/config.yaml:ro
+      - ../entities.csv:/app/entities.csv:ro
+      - ../data:/app/data
+    environment:
+      TENDER_REPO_ROOT: /app
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      python -m seace_monitor scan -c /app/config.yaml
+
+volumes:
+  pgdata:

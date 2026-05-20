@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Analizados — SEACE Monitor{% endblock %}
+{% block content %}
+<h2>Procesos analizados</h2>
+<p class="muted">Información extraída por el pipeline de análisis (etapa 1).</p>
+
+<table class="data">
+  <thead>
+    <tr>
+      <th>Entidad</th>
+      <th>Nomenclatura</th>
+      <th>Estado</th>
+      <th>Alcance</th>
+      <th>Requisitos</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in processes %}
+    <tr>
+      <td>{{ p.entity.nombre[:35] }}{% if p.entity.nombre|length > 35 %}…{% endif %}</td>
+      <td>{{ p.nomenclatura }}</td>
+      <td><span class="badge badge-{{ p.status.value }}">{{ p.status.value }}</span></td>
+      <td class="desc">
+        {% if p.analysis and p.analysis.alcance %}{{ p.analysis.alcance[:120] }}{% if p.analysis.alcance|length > 120 %}…{% endif %}
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td class="desc">
+        {% if p.analysis and p.analysis.requisitos %}{{ p.analysis.requisitos[:80] }}…
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td><a href="/analizados/{{ p.id }}" class="btn btn-secondary btn-sm">Ver</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="muted">Aún no hay procesos analizados.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

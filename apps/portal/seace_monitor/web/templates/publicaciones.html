@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Publicaciones — SEACE Monitor{% endblock %}
+{% block content %}
+<h2>Seguimiento de publicaciones</h2>
+
+{% if request.query_params.get('msg') == 'analisis_iniciado' %}
+<div class="alert">Análisis iniciado en segundo plano. Actualiza en unos minutos.</div>
+{% endif %}
+
+<form class="filters" method="get" action="/publicaciones">
+  <label>Estado
+    <select name="estado">
+      <option value="">Todos</option>
+      {% for s in statuses %}
+      <option value="{{ s.value }}" {% if filtro_estado == s.value %}selected{% endif %}>{{ s.value }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Entidad
+    <select name="entidad">
+      <option value="">Todas</option>
+      {% for e in entities %}
+      <option value="{{ e.ruc }}" {% if filtro_entidad == e.ruc %}selected{% endif %}>{{ e.nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit" class="btn btn-secondary">Filtrar</button>
+</form>
+
+<table class="data">
+  <thead>
+    <tr>
+      <th>N°</th>
+      <th>Entidad</th>
+      <th>Fecha pub.</th>
+      <th>Nomenclatura</th>
+      <th>Objeto</th>
+      <th>Descripción</th>
+      <th>Cuantía</th>
+      <th>Moneda</th>
+      <th>F. consultas</th>
+      <th>F. presentación</th>
+      <th>Estado</th>
+      <th>Acciones</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in processes %}
+    <tr>
+      <td>{{ p.numero or '—' }}</td>
+      <td class="muted">{{ p.entity.nombre[:30] }}{% if p.entity.nombre|length > 30 %}…{% endif %}</td>
+      <td>{{ p.fecha_publicacion or '—' }}</td>
+      <td>{{ p.nomenclatura }}</td>
+      <td>{{ p.objeto or '—' }}</td>
+      <td class="desc">{{ p.descripcion or '—' }}</td>
+      <td>{{ p.cuantia or '—' }}</td>
+      <td>{{ p.moneda or '—' }}</td>
+      <td>{{ p.fecha_consultas or '—' }}</td>
+      <td>{{ p.fecha_presentacion or '—' }}</td>
+      <td><span class="badge badge-{{ p.status.value }}">{{ p.status.value }}</span></td>
+      <td>
+        <form method="post" action="/publicaciones/{{ p.id }}/analizar" style="display:inline">
+          <button type="submit" class="btn btn-primary btn-sm">Analizar</button>
+        </form>
+        {% if p.status.value == 'analizada' %}
+        <form method="post" action="/publicaciones/{{ p.id }}/estado" style="display:inline">
+          <input type="hidden" name="estado" value="portafolio"/>
+          <button type="submit" class="btn btn-secondary btn-sm">→ Portafolio</button>
+        </form>
+        {% endif %}
+        {% if p.status.value == 'portafolio' %}
+        <form method="post" action="/publicaciones/{{ p.id }}/estado" style="display:inline">
+          <input type="hidden" name="estado" value="analizada"/>
+          <button type="submit" class="btn btn-secondary btn-sm">Quitar portafolio</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="12" class="muted">No hay publicaciones. Ejecuta el worker de escaneo.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

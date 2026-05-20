@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ process.nomenclatura }} — Análisis{% endblock %}
+{% block content %}
+<h2>{{ process.nomenclatura }}</h2>
+<p class="muted">{{ process.entity.nombre }} · <span class="badge badge-{{ process.status.value }}">{{ process.status.value }}</span></p>
+
+{% if process.analysis and process.analysis.status == 'error' %}
+<div class="alert" style="background:#fef2f2;border-color:#fca5a5">
+  Error en análisis: {{ process.analysis.error_message }}
+</div>
+{% endif %}
+
+<div class="detail-grid">
+  <div class="detail-box">
+    <h3>Alcance</h3>
+    <pre>{{ process.analysis.alcance if process.analysis else '—' }}</pre>
+  </div>
+  <div class="detail-box">
+    <h3>Qué incluye</h3>
+    <pre>{{ process.analysis.incluye if process.analysis else '—' }}</pre>
+  </div>
+  <div class="detail-box">
+    <h3>Requisitos</h3>
+    <pre>{{ process.analysis.requisitos if process.analysis else '—' }}</pre>
+  </div>
+  <div class="detail-box">
+    <h3>Entregables (etapa 2)</h3>
+    <pre>{{ process.analysis.entregables if process.analysis and process.analysis.entregables else '—' }}</pre>
+  </div>
+  <div class="detail-box">
+    <h3>Equipos sugeridos (etapa 2)</h3>
+    <pre>{{ process.analysis.equipos if process.analysis and process.analysis.equipos else '—' }}</pre>
+  </div>
+  <div class="detail-box">
+    <h3>Cronograma</h3>
+    <pre>{{ process.cronograma_json or '—' }}</pre>
+  </div>
+</div>
+
+<p style="margin-top:1.5rem">
+  <a href="/analizados" class="btn btn-secondary">← Volver</a>
+  {% if process.status.value == 'analizada' %}
+  <form method="post" action="/publicaciones/{{ process.id }}/estado" style="display:inline">
+    <input type="hidden" name="estado" value="portafolio"/>
+    <button type="submit" class="btn btn-primary">Marcar portafolio</button>
+  </form>
+  {% endif %}
+</p>
+{% endblock %}

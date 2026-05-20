@@ -1,4 +1,10 @@
-# tender_procurement
+# tender_workflows — monorepo
+
+> **Desarrollo activo en este repositorio.**  
+> Histórico pre-monorepo: rama `archival/pre-restructure`, tag `v0.2-pre-workflows`.  
+> Ver [TENDER_WORKFLOWS.md](TENDER_WORKFLOWS.md) para layout y portal SEACE.
+
+# tender_procurement (pipeline documental)
 
 Pipeline de extracción y análisis de documentos de licitación pública.
 

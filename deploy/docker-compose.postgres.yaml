@@ -1,0 +1,8 @@
+# Uso: docker compose -f docker-compose.yml -f docker-compose.postgres.yaml up -d
+services:
+  web:
+    environment:
+      DATABASE_URL: postgresql+psycopg://seace:seace@db:5432/seace
+  worker:
+    environment:
+      DATABASE_URL: postgresql+psycopg://seace:seace@db:5432/seace

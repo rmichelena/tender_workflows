@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — SEACE Monitor{% endblock %}
+{% block content %}
+<h2>Dashboard</h2>
+<p class="muted">Monitoreo cada {{ config.poll_interval }} · Año {{ config.anio }}</p>
+
+<div class="cards">
+  
+  <div class="card">
+    <div class="num">{{ counts.get('publicada', 0) }}</div>
+    <div class="label">Publicadas</div>
+  </div>
+  <div class="card">
+    <div class="num">{{ counts.get('analizada', 0) }}
+    <div class="label">Analizadas</div>
+  </div>
+  <div class="card">
+    <div class="num">{{ counts.get('portafolio', 0) }}</div>
+    <div class="label">Portafolio</div>
+  </div>
+  <div class="card">
+    <div class="num">{{ entities }}</div>
+    <div class="label">Entidades</div>
+  </div>
+</div>
+
+<h3>Últimas publicaciones detectadas</h3>
+<table class="data">
+  <thead>
+    <tr>
+      <th>Entidad</th>
+      <th>Nomenclatura</th>
+      <th>Publicación</th>
+      <th>Estado</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in recent %}
+    <tr>
+      <td>{{ p.entity.nombre[:40] }}{% if p.entity.nombre|length > 40 %}…{% endif %}</td>
+      <td>{{ p.nomenclatura }}</td>
+      <td>{{ p.fecha_publicacion or '—' }}</td>
+      <td><span class="badge badge-{{ p.status.value }}">{{ p.status.value }}</span></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="muted">Sin datos aún. Inicia el worker de escaneo.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

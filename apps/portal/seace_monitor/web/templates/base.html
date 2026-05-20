@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>{% block title %}SEACE Monitor{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+  <aside class="sidebar">
+    <h1>SEACE Monitor</h1>
+    <nav>
+      <a href="/" class="{% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
+      <a href="/publicaciones" class="{% if active_page == 'publicaciones' %}active{% endif %}">Publicaciones</a>
+      <a href="/analizados" class="{% if active_page == 'analizados' %}active{% endif %}">Analizados</a>
+    </nav>
+  </aside>
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

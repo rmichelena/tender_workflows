@@ -1,0 +1,20 @@
+# Copia a config.yaml en la raíz del repo
+
+poll_interval: 6h
+anio: 2026
+entities_csv: entities.csv
+database_url: sqlite:///./data/seace.db
+max_pages: 1
+rows_per_page: 15
+data_dir: ./data
+
+analysis:
+  tender_procurement:
+    # null = auto-detect raíz monorepo (instrucciones/ + scripts/)
+    repo_path: null
+    planos_mode: auto_leave
+    run_axis0: true
+    gemini_model: gemini-2.5-flash
+    gemini_api_key_env: GEMINI_API_KEY
+  stage2_script: ./scripts/portal/analyze_stage2.sh
+  scripts_timeout_seconds: 3600

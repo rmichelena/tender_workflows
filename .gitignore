@@ -21,3 +21,9 @@ proyecto/outputs/*.xlsx
 
 # Local Python environment
 .venv/
+apps/portal/.venv/
+
+# Portal runtime data
+data/
+config.yaml
+entities.csv
