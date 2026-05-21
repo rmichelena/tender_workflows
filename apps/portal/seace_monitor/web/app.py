@@ -18,6 +18,7 @@ from ..config import AppConfig
 from ..db.models import AnalysisResult, Entity, Process, ProcessStatus, utcnow
 from ..db.session import init_db, session_factory
 from .detail_data import (
+    apply_fechas_listado,
     download_filename_for_path,
     list_analyzable_files,
     list_downloaded_documents,
@@ -146,7 +147,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             q = q.filter(Process.objeto == objeto)
         sort_col = normalize_sort(sort)
         sort_dir = normalize_dir(dir, sort_col)
-        processes = sort_processes(q.limit(500).all(), sort_col, sort_dir)
+        processes = q.limit(500).all()
+        apply_fechas_listado(processes)
+        processes = sort_processes(processes, sort_col, sort_dir)
         entities = (
             db.query(Entity)
             .join(Process, Process.entity_id == Entity.id)
@@ -351,6 +354,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             .order_by(Process.updated_at.desc())
             .all()
         )
+        apply_fechas_listado(rows)
         return render(
             request,
             "descargados.html",
@@ -555,6 +559,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             .order_by(Process.updated_at.desc())
             .all()
         )
+        apply_fechas_listado(rows)
         return render(
             request,
             "analizados.html",

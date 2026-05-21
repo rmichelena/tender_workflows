@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..parser import clean_cronograma_etapa
+from ..parser import clean_cronograma_etapa, fechas_listado_from_cronograma_json
 from ..db.models import Process
 from ..document_storage import (
     MANIFEST_NAME,
@@ -267,6 +267,24 @@ def list_downloaded_documents(process: Process) -> list[DocumentoDescargado]:
             )
 
     return rows
+
+
+def fechas_listado(process: Process) -> tuple[str, str]:
+    """Fechas de fin (consultas y presentación) para columnas de listado."""
+    fechas = fechas_listado_from_cronograma_json(
+        process.cronograma_json,
+        fallback_consultas=process.fecha_consultas or "",
+        fallback_presentacion=process.fecha_presentacion or "",
+    )
+    return fechas.fecha_consultas, fechas.fecha_presentacion
+
+
+def apply_fechas_listado(processes: list[Process]) -> None:
+    """Recalcula fechas de listado en memoria (p. ej. tras cambiar fin vs inicio)."""
+    for proc in processes:
+        consultas, presentacion = fechas_listado(proc)
+        proc.fecha_consultas = consultas or None
+        proc.fecha_presentacion = presentacion or None
 
 
 def parse_cronograma(cronograma_json: str | None) -> list[CronogramaFila]:

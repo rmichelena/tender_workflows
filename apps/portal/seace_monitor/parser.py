@@ -166,8 +166,8 @@ class CronogramaFechasClave:
 def extract_cronograma_fechas(cronograma: list[CronogramaEtapa]) -> CronogramaFechasClave:
     """
     Mapea etapas del cronograma SEACE a columnas de la UI.
-    - fecha_consultas: inicio de presentación de consultas (no absolución)
-    - fecha_presentacion: inicio de presentación de propuestas
+    - fecha_consultas: fin de presentación de consultas (no absolución)
+    - fecha_presentacion: fin de presentación de propuestas
     """
     consultas = ""
     presentacion = ""
@@ -175,16 +175,55 @@ def extract_cronograma_fechas(cronograma: list[CronogramaEtapa]) -> CronogramaFe
     for etapa in cronograma:
         nombre = etapa.etapa.lower()
         if _is_presentacion_consultas(nombre):
-            consultas = etapa.fecha_inicio or consultas
+            consultas = _pick_fecha_fin(etapa) or consultas
         elif _is_consultas_stage(nombre) and not _is_absolucion(nombre) and not consultas:
-            consultas = etapa.fecha_inicio
+            consultas = _pick_fecha_fin(etapa)
         if _is_presentacion_propuestas(nombre) and not presentacion:
-            presentacion = etapa.fecha_inicio
+            presentacion = _pick_fecha_fin(etapa)
 
     return CronogramaFechasClave(
         fecha_consultas=consultas,
         fecha_presentacion=presentacion,
     )
+
+
+def fechas_listado_from_cronograma_json(
+    cronograma_json: str | None,
+    *,
+    fallback_consultas: str = "",
+    fallback_presentacion: str = "",
+) -> CronogramaFechasClave:
+    """Fechas de fin para columnas de listado, recalculadas desde cronograma_json."""
+    if not cronograma_json:
+        return CronogramaFechasClave(
+            fecha_consultas=fallback_consultas,
+            fecha_presentacion=fallback_presentacion,
+        )
+    try:
+        raw = json.loads(cronograma_json)
+    except json.JSONDecodeError:
+        raw = []
+    if not isinstance(raw, list):
+        raw = []
+    cronograma = [
+        CronogramaEtapa(
+            etapa=str(item.get("etapa", "")),
+            fecha_inicio=str(item.get("fecha_inicio", "")),
+            fecha_fin=str(item.get("fecha_fin", "")),
+        )
+        for item in raw
+        if isinstance(item, dict)
+    ]
+    if not cronograma:
+        return CronogramaFechasClave(
+            fecha_consultas=fallback_consultas,
+            fecha_presentacion=fallback_presentacion,
+        )
+    return extract_cronograma_fechas(cronograma)
+
+
+def _pick_fecha_fin(etapa: CronogramaEtapa) -> str:
+    return etapa.fecha_fin or etapa.fecha_inicio
 
 
 def _is_absolucion(nombre: str) -> bool:

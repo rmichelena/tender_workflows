@@ -50,3 +50,23 @@ def test_normalize_legacy_uuid_filename(tmp_path: Path):
     assert docs[0]["archivo"].endswith(".pdf")
     assert "INFORME" in docs[0]["archivo"]
     assert (docs_dir / docs[0]["archivo"]).is_file()
+
+
+def test_normalize_keeps_existing_readable_filename(tmp_path: Path):
+    docs_dir = tmp_path / "documentos"
+    docs_dir.mkdir()
+    uuid = "0a600639-6ec0-49bc-a615-a99de65dbf66"
+    nombre = "BASES_EETT_LPB_01_2026.zip"
+    dest = docs_dir / nombre
+    dest.write_bytes(b"zip")
+    docs = [
+        {
+            "uuid": uuid,
+            "nombre": nombre,
+            "archivo": nombre,
+        }
+    ]
+    normalize_legacy_filenames(docs_dir, docs)
+    assert docs[0]["archivo"] == nombre
+    assert dest.is_file()
+    assert not (docs_dir / "BASES_EETT_LPB_01_2026_2.zip").exists()

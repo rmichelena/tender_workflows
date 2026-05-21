@@ -119,11 +119,12 @@ def normalize_legacy_filenames(docs_dir: Path, docs: list[dict]) -> None:
 
         nombre = doc.get("nombre") or uuid
         target_name = sanitize_download_filename(nombre, uuid)
-        target = allocate_unique_path(docs_dir, target_name)
+        if current.name == target_name:
+            doc["archivo"] = current.name
+            continue
 
+        target = allocate_unique_path(docs_dir, target_name)
         if current.resolve() != target.resolve():
-            if target.exists():
-                target = allocate_unique_path(docs_dir, target_name)
             current.rename(target)
 
         doc["archivo"] = target.name

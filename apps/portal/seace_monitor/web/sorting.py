@@ -22,8 +22,8 @@ SORTABLE_COLUMNS: dict[str, str] = {
     "descripcion": "Descripción",
     "cuantia": "Cuantía",
     "moneda": "Moneda",
-    "fecha_consultas": "F. consultas",
-    "fecha_presentacion": "F. presentación",
+    "fecha_consultas": "Fin consultas",
+    "fecha_presentacion": "Fin presentación",
     "estado": "Estado",
 }
 

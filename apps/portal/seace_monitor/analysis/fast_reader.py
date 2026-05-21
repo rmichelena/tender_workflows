@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 from ..config import AppConfig
 from ..db.models import Process
-from ..parser import clean_cronograma_etapa
+from ..parser import clean_cronograma_etapa, fechas_listado_from_cronograma_json
 from ..tender_repo import resolve_tender_repo_root
 from .document_prep import merge_pdfs, prepare_documents_for_llm, resolve_selected_documents
 from .tender_bridge import parse_axis0_summary
@@ -194,10 +194,15 @@ def _build_user_context(process: Process, source_paths: list[Path]) -> str:
         lines.append(f"Objeto (ficha): {process.objeto}")
     if process.descripcion:
         lines.append(f"Descripción (ficha): {process.descripcion}")
-    if process.fecha_consultas:
-        lines.append(f"Inicio consultas (ficha SEACE): {process.fecha_consultas}")
-    if process.fecha_presentacion:
-        lines.append(f"Inicio presentación propuestas (ficha SEACE): {process.fecha_presentacion}")
+    fechas = fechas_listado_from_cronograma_json(
+        process.cronograma_json,
+        fallback_consultas=process.fecha_consultas or "",
+        fallback_presentacion=process.fecha_presentacion or "",
+    )
+    if fechas.fecha_consultas:
+        lines.append(f"Fin consultas (ficha SEACE): {fechas.fecha_consultas}")
+    if fechas.fecha_presentacion:
+        lines.append(f"Fin presentación propuestas (ficha SEACE): {fechas.fecha_presentacion}")
     lines.append(
         "Recuerda: NO incluyas sección de cronograma del proceso; "
         "ese dato se toma de la ficha SEACE aparte."

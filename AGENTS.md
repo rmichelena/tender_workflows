@@ -16,7 +16,7 @@
 - SEACE public UI uses JSF/PrimeFaces session state; ficha data requires POST with ViewState; process key is `(entity_id, nid_proceso)`; live links use portal proxy `/seace/open/{process_id}` (not bookmarkable SEACE URLs).
 - ONGEI buscador `anio` URL param does not filter by year; monitor scan uses the first page only (~15 rows per active entity).
 - Post-scan auto-descarte matches descripcion keywords (configurable list); older-year rows kept for desierta/re-convocatoria; SEACE estado tracking planned.
-- Cronograma column `fecha_consultas` is the start of presentación de consultas, not the absolución end date.
+- Cronograma list columns use **fin** of consultas and presentación propuestas stages (from cronograma_json when available).
 - Monitored entities live in gitignored `entities.csv` at repo root (59 ONGEI entities); config key `entities_csv`.
 - VPS production: `ssh bots-sysop`, project `tender-workflows` under `~/tender_workflows/deploy/`; hot-deploy via rsync `apps/portal/seace_monitor/` (use `web/templates/` and `web/static/` subpaths) then `docker compose -f docker-compose.vps.yml up -d --build web`; UI at http://bots.infinitek.pe:8080/; SEACE egress via Squid `http://server.maczona.com:18081`.
 - Portal routes: `/publicaciones` (`publicada`, Descargar→`descargando`→`descargada`); `/descargados` (select PDFs, Analizar); `/analizados` (`analizada`/`portafolio`); `/descartados`; default sort fecha publicación desc.
