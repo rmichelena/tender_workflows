@@ -2,9 +2,19 @@
 # Uso (desde deploy/):
 #   cp config.example.vps.yaml config.yaml
 #   cp ../entities.csv.example ../entities.csv
-#   docker compose -p tender-workflows -f docker-compose.vps.yml up -d --build
+#   cp .env.example .env          # GEMINI_API_KEY, SEACE_HTTP_PROXY, etc.
+#   docker compose -f docker-compose.vps.yml up -d --build
 
-name: tender-workflows
+name: ${COMPOSE_PROJECT_NAME:-tender-workflows}
+
+x-app-environment: &app-environment
+  TENDER_REPO_ROOT: ${TENDER_REPO_ROOT:-/app}
+  CONFIG_PATH: ${CONFIG_PATH:-/app/config.yaml}
+  DATABASE_URL: ${DATABASE_URL:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  SEACE_HTTP_PROXY: ${SEACE_HTTP_PROXY:-}
+  HTTP_PROXY: ${HTTP_PROXY:-${SEACE_HTTP_PROXY:-}}
+  HTTPS_PROXY: ${HTTPS_PROXY:-${HTTP_PROXY:-${SEACE_HTTP_PROXY:-}}}
 
 services:
   web:
@@ -12,14 +22,12 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     ports:
-      - "8080:8080"
+      - "${WEB_PORT:-8080}:8080"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ../entities.csv:/app/entities.csv:ro
       - tender_data:/app/data
-    environment:
-      TENDER_REPO_ROOT: /app
-      # GEMINI_API_KEY: ...  # requerido para Analizar (fast-path)
+    environment: *app-environment
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/"]
@@ -36,8 +44,7 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       - ../entities.csv:/app/entities.csv:ro
       - tender_data:/app/data
-    environment:
-      TENDER_REPO_ROOT: /app
+    environment: *app-environment
     command: >
       python -m seace_monitor scan -c /app/config.yaml
     restart: unless-stopped

@@ -27,3 +27,7 @@ apps/portal/.venv/
 data/
 config.yaml
 entities.csv
+
+# Docker / secrets (deploy/.env.example is tracked)
+.env
+deploy/.env

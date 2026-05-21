@@ -39,6 +39,7 @@ python -m seace_monitor web
 
 ```bash
 cp config.example.yaml config.yaml && cp entities.csv.example entities.csv
+cp deploy/.env.example deploy/.env   # GEMINI_API_KEY, etc.
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 

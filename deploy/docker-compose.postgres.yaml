@@ -1,8 +1,9 @@
-# Uso: docker compose -f docker-compose.yml -f docker-compose.postgres.yaml up -d
+# Uso: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.postgres.yaml up -d
+# Define DATABASE_URL en deploy/.env o aquí vía defaults.
 services:
   web:
     environment:
-      DATABASE_URL: postgresql+psycopg://seace:seace@db:5432/seace
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-seace}:${POSTGRES_PASSWORD:-seace}@db:5432/${POSTGRES_DB:-seace}}
   worker:
     environment:
-      DATABASE_URL: postgresql+psycopg://seace:seace@db:5432/seace
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-seace}:${POSTGRES_PASSWORD:-seace}@db:5432/${POSTGRES_DB:-seace}}

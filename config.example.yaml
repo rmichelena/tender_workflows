@@ -1,6 +1,7 @@
 # Copia a config.yaml en la raíz del repo
 
 # Proxy HTTP para SEACE/Alfresco (requerido desde IPs de datacenter).
+# Preferir deploy/.env: SEACE_HTTP_PROXY o HTTP_PROXY.
 # http_proxy: http://server.maczona.com:18081
 
 poll_interval: 6h

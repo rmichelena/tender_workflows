@@ -1,7 +1,7 @@
 # Copiar a deploy/config.yaml en el VPS
 
 # Proxy HTTP para SEACE/Alfresco (requerido desde IPs de datacenter).
-# También vía env SEACE_HTTP_PROXY o HTTP_PROXY.
+# Preferir deploy/.env: SEACE_HTTP_PROXY o HTTP_PROXY (no commitear secretos).
 # http_proxy: http://server.maczona.com:18081
 
 poll_interval: 6h
