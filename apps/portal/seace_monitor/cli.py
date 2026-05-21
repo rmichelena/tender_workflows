@@ -21,6 +21,12 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("-c", "--config", default="config.yaml")
     scan.add_argument("-v", "--verbose", action="store_true")
 
+    cleanup = sub.add_parser(
+        "cleanup-data", help="Borrar carpetas de procesos descartados/huérfanas"
+    )
+    cleanup.add_argument("-c", "--config", default="config.yaml")
+    cleanup.add_argument("-v", "--verbose", action="store_true")
+
     web = sub.add_parser("web", help="Servidor web UI")
     web.add_argument("-c", "--config", default="config.yaml")
     web.add_argument("--host", default="0.0.0.0")
@@ -38,6 +44,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "scan":
         cfg = AppConfig.load(args.config)
         run_worker(cfg, once=args.once)
+        return 0
+
+    if args.command == "cleanup-data":
+        from .db.session import init_db, session_factory
+        from .process_storage import purge_all_stale_process_data
+
+        cfg = AppConfig.load(args.config)
+        init_db(cfg.database_url)
+        session = session_factory()
+        try:
+            db_cleaned, orphans = purge_all_stale_process_data(cfg, session)
+            session.commit()
+            logging.info(
+                "Limpieza completada: %s proceso(s) en BD, %s carpeta(s) huérfana(s)",
+                db_cleaned,
+                orphans,
+            )
+        finally:
+            session.close()
         return 0
 
     if args.command == "web":

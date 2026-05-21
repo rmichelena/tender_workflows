@@ -1,0 +1,74 @@
+"""Tests para borrado de carpetas de procesos."""
+
+from pathlib import Path
+
+from .config import AppConfig
+from .db.models import Process, ProcessStatus
+from .process_storage import (
+    cleanup_orphan_process_dirs,
+    delete_process_data_dir,
+    purge_all_stale_process_data,
+)
+
+
+def _proc(data_dir: str | None, status: ProcessStatus = ProcessStatus.descartada) -> Process:
+    p = Process(
+        entity_id=1,
+        anio=2026,
+        nid_proceso="123",
+        nomenclatura="TEST-1",
+        status=status,
+    )
+    p.id = 1
+    p.data_dir = data_dir
+    return p
+
+
+def test_delete_process_data_dir(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path)
+    proc_dir = tmp_path / "procesos" / "123_TEST"
+    proc_dir.mkdir(parents=True)
+    (proc_dir / "documentos" / "a.pdf").parent.mkdir(parents=True)
+    (proc_dir / "documentos" / "a.pdf").write_bytes(b"x")
+
+    proc = _proc(str(proc_dir))
+    assert delete_process_data_dir(cfg, proc) is True
+    assert proc.data_dir is None
+    assert not proc_dir.exists()
+
+
+def test_delete_rejects_path_outside_procesos(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path)
+    outside = tmp_path / "other" / "secret"
+    outside.mkdir(parents=True)
+    proc = _proc(str(outside))
+    assert delete_process_data_dir(cfg, proc) is False
+    assert outside.exists()
+
+
+def test_purge_orphans_and_descartada(tmp_path: Path, monkeypatch):
+    cfg = AppConfig(data_dir=tmp_path)
+    root = tmp_path / "procesos"
+    keep = root / "111_KEEP"
+    orphan = root / "999_ORPHAN"
+    stale = root / "222_STALE"
+    for d in (keep, orphan, stale):
+        d.mkdir(parents=True)
+
+    class FakeSession:
+        def query(self, _model):
+            return self
+
+        def all(self):
+            return [
+                _proc(str(keep), ProcessStatus.descargada),
+                _proc(str(stale), ProcessStatus.descartada),
+            ]
+
+    session = FakeSession()
+    db_cleaned, orphans = purge_all_stale_process_data(cfg, session)
+    assert db_cleaned == 2
+    assert orphans == 1
+    assert not stale.exists()
+    assert not orphan.exists()
+    assert not keep.exists()

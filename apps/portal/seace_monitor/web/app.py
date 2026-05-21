@@ -20,6 +20,7 @@ from ..db.maintenance import is_stale_running_analysis, recover_stale_analyses
 from ..db.models import AnalysisResult, Entity, Process, ProcessStatus, utcnow
 from ..db.session import init_db, session_factory
 from ..document_storage import cleanup_partial_downloads
+from ..process_storage import delete_process_data_dir, purge_all_stale_process_data
 from .detail_data import (
     download_filename_for_path,
     list_analyzable_files,
@@ -85,6 +86,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 logger.warning(
                     "Recuperados %s análisis en estado running obsoletos",
                     recovered,
+                )
+            db_cleaned, orphans = purge_all_stale_process_data(_config, db)
+            if db_cleaned or orphans:
+                db.commit()
+                logger.info(
+                    "Limpieza data/procesos: %s proceso(s) en BD, %s carpeta(s) huérfana(s)",
+                    db_cleaned,
+                    orphans,
                 )
         finally:
             db.close()
@@ -476,16 +485,36 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             status_code=303,
         )
 
+    def _discard_downloaded_or_analyzed(
+        db: Session, proc: Process, *, allowed: set[ProcessStatus], redirect: str
+    ) -> RedirectResponse:
+        if proc.status not in allowed:
+            raise HTTPException(400, "Estado no válido para descartar")
+        if proc.analysis and proc.analysis.status == "running":
+            if not is_stale_running_analysis(
+                proc.analysis, _config.stale_analysis_seconds
+            ):
+                raise HTTPException(409, "Análisis en curso")
+        proc.status = ProcessStatus.descartada
+        delete_process_data_dir(_config, proc)
+        return RedirectResponse(redirect, status_code=303)
+
     @app.post("/descargados/{process_id}/descartar")
     def descartar_descargado(process_id: int, db: Session = Depends(get_db)):
-        proc = db.get(Process, process_id)
+        proc = (
+            db.query(Process)
+            .options(joinedload(Process.analysis))
+            .filter(Process.id == process_id)
+            .one_or_none()
+        )
         if proc is None:
             raise HTTPException(404)
-        if proc.status != ProcessStatus.descargada:
-            raise HTTPException(400, "Solo procesos descargados")
-        proc.status = ProcessStatus.descartada
-        db.commit()
-        return RedirectResponse("/descargados", status_code=303)
+        return _discard_downloaded_or_analyzed(
+            db,
+            proc,
+            allowed={ProcessStatus.descargada},
+            redirect="/descargados",
+        )
 
     @app.get("/descargados/{process_id}/documentos/{filename:path}")
     def descargar_documento_descargado(
@@ -547,14 +576,20 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.post("/analizados/{process_id}/descartar")
     def descartar_analizado(process_id: int, db: Session = Depends(get_db)):
-        proc = db.get(Process, process_id)
+        proc = (
+            db.query(Process)
+            .options(joinedload(Process.analysis))
+            .filter(Process.id == process_id)
+            .one_or_none()
+        )
         if proc is None:
             raise HTTPException(404)
-        if proc.status not in (ProcessStatus.analizada, ProcessStatus.portafolio):
-            raise HTTPException(400, "Solo procesos analizados o en portafolio")
-        proc.status = ProcessStatus.descartada
-        db.commit()
-        return RedirectResponse("/analizados", status_code=303)
+        return _discard_downloaded_or_analyzed(
+            db,
+            proc,
+            allowed={ProcessStatus.analizada, ProcessStatus.portafolio},
+            redirect="/analizados",
+        )
 
     @app.post("/analizados/{process_id}/estado")
     def cambiar_estado_analizados(
