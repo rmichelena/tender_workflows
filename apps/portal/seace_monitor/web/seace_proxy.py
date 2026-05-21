@@ -136,7 +136,8 @@ def _proxy_location_from_absolute(absolute_url: str) -> str | None:
     if not absolute_url:
         return None
     parsed = urlparse(absolute_url)
-    if not parsed.netloc.endswith("seace.gob.pe") or SEACE_APP not in parsed.path:
+    host = parsed.hostname or parsed.netloc.split(":", 1)[0]
+    if not host.endswith("seace.gob.pe") or SEACE_APP not in parsed.path:
         return None
     suffix = parsed.path.split(SEACE_APP, 1)[1].lstrip("/")
     location = f"{PROXY_ROOT}/{suffix}"
@@ -286,7 +287,8 @@ def _build_response(
         if location:
             absolute = urljoin(f"{SEACE_ORIGIN}{SEACE_APP}/", location)
             parsed = urlparse(absolute)
-            if parsed.netloc.endswith("seace.gob.pe") and SEACE_APP in parsed.path:
+            host = parsed.hostname or parsed.netloc.split(":", 1)[0]
+            if host.endswith("seace.gob.pe") and SEACE_APP in parsed.path:
                 suffix = parsed.path.split(SEACE_APP, 1)[1].lstrip("/")
                 query = parsed.query
                 location = f"{PROXY_ROOT}/{suffix}"
