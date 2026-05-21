@@ -15,10 +15,12 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..analysis.runner import AnalysisRunner
 from ..config import AppConfig
+from ..db.list_views import build_process_list_views
+from ..db.maintenance import is_stale_running_analysis, recover_stale_analyses
 from ..db.models import AnalysisResult, Entity, Process, ProcessStatus, utcnow
 from ..db.session import init_db, session_factory
+from ..document_storage import cleanup_partial_downloads
 from .detail_data import (
-    apply_fechas_listado,
     download_filename_for_path,
     list_analyzable_files,
     list_downloaded_documents,
@@ -39,7 +41,7 @@ from .sorting import (
     build_sort_query,
     normalize_dir,
     normalize_sort,
-    sort_processes,
+    sort_process_list_views,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,6 +78,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         logger.info("SEACE Monitor web — DB: %s", _config.database_url)
+        db = session_factory()
+        try:
+            recovered = recover_stale_analyses(db, _config.stale_analysis_seconds)
+            if recovered:
+                logger.warning(
+                    "Recuperados %s análisis en estado running obsoletos",
+                    recovered,
+                )
+        finally:
+            db.close()
         yield
 
     app = FastAPI(title="SEACE Monitor", lifespan=lifespan)
@@ -133,11 +145,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
         )
         workflow_statuses = [ProcessStatus.publicada, ProcessStatus.descargando]
-        if estado and estado in ProcessStatus.__members__:
-            if estado != ProcessStatus.publicada.value:
+        valid_estado_values = {s.value for s in workflow_statuses}
+        if estado:
+            if estado not in valid_estado_values:
                 raise HTTPException(
-                    400, "Publicaciones solo muestra procesos pendientes (publicada)"
+                    400,
+                    "Estado no válido para publicaciones (publicada o descargando)",
                 )
+            q = q.filter(Process.status == ProcessStatus(estado))
         if entidad:
             q = q.filter(
                 Process.entity_id
@@ -147,9 +162,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             q = q.filter(Process.objeto == objeto)
         sort_col = normalize_sort(sort)
         sort_dir = normalize_dir(dir, sort_col)
-        processes = q.limit(500).all()
-        apply_fechas_listado(processes)
-        processes = sort_processes(processes, sort_col, sort_dir)
+        rows = q.all()
+        processes = sort_process_list_views(
+            build_process_list_views(rows), sort_col, sort_dir
+        )
         entities = (
             db.query(Entity)
             .join(Process, Process.entity_id == Entity.id)
@@ -331,6 +347,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 proc_fail = session.get(Process, process_id)
                 if proc_fail is not None:
                     proc_fail.status = ProcessStatus.publicada
+                    if proc_fail.data_dir:
+                        cleanup_partial_downloads(
+                            Path(proc_fail.data_dir) / "documentos"
+                        )
                     session.commit()
                 logger.exception("Background download failed")
             finally:
@@ -354,12 +374,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             .order_by(Process.updated_at.desc())
             .all()
         )
-        apply_fechas_listado(rows)
+        processes = build_process_list_views(rows)
         return render(
             request,
             "descargados.html",
             active_page="descargados",
-            processes=rows,
+            processes=processes,
         )
 
     @app.get("/descargados/{process_id}", response_class=HTMLResponse)
@@ -406,10 +426,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if proc.status not in (ProcessStatus.descargada, ProcessStatus.analizada):
             raise HTTPException(400, "Solo procesos descargados pueden analizarse")
         if proc.analysis and proc.analysis.status == "running":
-            return RedirectResponse(
-                f"/descargados/{process_id}?msg=analisis_iniciado",
-                status_code=303,
-            )
+            if not is_stale_running_analysis(
+                proc.analysis, _config.stale_analysis_seconds
+            ):
+                return RedirectResponse(
+                    f"/descargados/{process_id}?msg=analisis_iniciado",
+                    status_code=303,
+                )
 
         form = await request.form()
         selected = [
@@ -559,12 +582,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             .order_by(Process.updated_at.desc())
             .all()
         )
-        apply_fechas_listado(rows)
+        processes = build_process_list_views(rows)
         return render(
             request,
             "analizados.html",
             active_page="analizados",
-            processes=rows,
+            processes=processes,
             ProcessStatus=ProcessStatus,
         )
 

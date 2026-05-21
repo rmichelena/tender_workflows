@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,14 @@ from .entities import EntityRow, load_entities_csv
 from .parser import extract_cronograma_fechas, parse_ficha, row_snapshot_hash
 
 logger = logging.getLogger(__name__)
+
+_FICHA_REFRESH_STATUSES = frozenset(
+    {
+        ProcessStatus.publicada,
+        ProcessStatus.descargando,
+        ProcessStatus.descargada,
+    }
+)
 
 
 def sync_entities(session: Session, rows: list[EntityRow]) -> dict[str, Entity]:
@@ -66,6 +74,11 @@ class MultiEntityScanner:
         new_count = 0
         seen_nids: set[str] = set()
 
+        # Paginación SEACE (REVIEW M5 — omitido a propósito):
+        # Solo escaneamos config.max_pages (default 1 × rows_per_page filas). No llamamos
+        # SeaceClient.total_pages() ni avisamos si SEACE tiene más páginas: nuestras entidades
+        # caben en una página. Si alguna supera ~15 procesos visibles, subir max_pages en
+        # config.yaml (H1 ya preserva ViewState por página).
         for page in range(self.config.max_pages):
             _, soup = client.fetch_list_page(page)
             rows = client.parse_rows(soup)
@@ -91,15 +104,39 @@ class MultiEntityScanner:
                     proc.last_seen_at = utcnow()
                     continue
 
-                if proc is None:
-                    if self._upsert_from_ficha(entity, client, row, proc=None):
-                        new_count += 1
-                elif proc.list_hash != list_hash:
-                    self._upsert_from_ficha(entity, client, row, proc=proc)
-                else:
-                    proc.last_seen_at = utcnow()
+                savepoint = self.session.begin_nested()
+                try:
+                    if proc is None:
+                        if self._upsert_from_ficha(entity, client, row, proc=None):
+                            new_count += 1
+                    elif proc.list_hash != list_hash:
+                        self._upsert_from_ficha(entity, client, row, proc=proc)
+                    elif self._needs_ficha_refresh(proc):
+                        self._upsert_from_ficha(entity, client, row, proc=proc)
+                    else:
+                        proc.last_seen_at = utcnow()
+                    savepoint.commit()
+                except Exception:
+                    savepoint.rollback()
+                    logger.exception(
+                        "Error procesando fila nid=%s nomenclatura=%s entidad=%s",
+                        row.nid_proceso,
+                        row.nomenclatura,
+                        entity.ruc,
+                    )
 
         return new_count
+
+    def _needs_ficha_refresh(self, proc: Process) -> bool:
+        if proc.status not in _FICHA_REFRESH_STATUSES:
+            return False
+        if not proc.updated_at:
+            return True
+        threshold = utcnow() - timedelta(seconds=self.config.ficha_refresh_seconds)
+        updated = proc.updated_at
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        return updated < threshold
 
     def _upsert_from_ficha(
         self,

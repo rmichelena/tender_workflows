@@ -74,7 +74,7 @@ class Process(Base):
     fecha_publicacion: Mapped[str | None] = mapped_column(String(32))
     nomenclatura: Mapped[str] = mapped_column(String(256), index=True)
     reiniciado_desde: Mapped[str | None] = mapped_column(String(256))
-    objeto: Mapped[str | None] = mapped_column(String(64), index=True)
+    objeto: Mapped[str | None] = mapped_column(String(256), index=True)
     descripcion: Mapped[str | None] = mapped_column(Text)
     cuantia: Mapped[str | None] = mapped_column(String(64))
     moneda: Mapped[str | None] = mapped_column(String(64))

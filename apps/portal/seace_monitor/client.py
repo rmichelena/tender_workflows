@@ -75,6 +75,12 @@ class SeaceClient:
         if proxies:
             self.session.proxies.update(proxies)
             logger.info("SEACE client using HTTP proxy")
+        self._list_form_action: str | None = None
+        self._list_view_state: str | None = None
+
+    def _capture_list_form_state(self, soup: BeautifulSoup) -> None:
+        self._list_form_action = self._form_action(soup)
+        self._list_view_state = self._view_state(soup)
 
     def _view_state(self, soup: BeautifulSoup) -> str:
         el = soup.find("input", {"name": "javax.faces.ViewState"})
@@ -86,17 +92,23 @@ class SeaceClient:
         form = soup.find("form", id="formBuscador")
         if not form:
             raise RuntimeError("No se encontró formBuscador")
-        return urljoin(self.list_url, form["action"])
+        action = form.get("action", "")
+        if not action or action == ".":
+            return self.list_url
+        return urljoin(self.list_url, action)
 
     def fetch_list_page(self, page_index: int = 0) -> tuple[str, BeautifulSoup]:
         """Obtiene una página del listado (page_index base 0)."""
         r = self.session.get(self.list_url, timeout=60)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "lxml")
+        self._capture_list_form_state(soup)
 
         if page_index > 0:
-            action = self._form_action(soup)
-            vs = self._view_state(soup)
+            action = self._list_form_action
+            vs = self._list_view_state
+            if not action or not vs:
+                raise RuntimeError("Estado JSF del listado no disponible para paginar")
             data: dict[str, str] = {
                 "formBuscador": "formBuscador",
                 "javax.faces.ViewState": vs,
@@ -110,6 +122,7 @@ class SeaceClient:
             r = self.session.post(action, data=data, timeout=60)
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "lxml")
+            self._capture_list_form_state(soup)
 
         return r.text, soup
 
@@ -172,6 +185,7 @@ class SeaceClient:
         return rows
 
     def total_pages(self, soup: BeautifulSoup) -> int:
+        """Páginas del listado JSF. No usado por el scanner (ver REVIEW M5 en scanner.py)."""
         paginator = soup.find("div", id=re.compile("dtProcesos_paginator"))
         if not paginator:
             return 1
@@ -189,11 +203,18 @@ class SeaceClient:
         Abre la ficha de selección mediante POST JSF (como el ícono del calendario).
         Debe llamarse en la misma sesión que obtuvo el listado.
         """
-        r = self.session.get(self.list_url, timeout=60)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "lxml")
-        action = self._form_action(soup)
-        vs = self._view_state(soup)
+        if self._list_form_action and self._list_view_state:
+            action = self._list_form_action
+            vs = self._list_view_state
+        else:
+            r = self.session.get(self.list_url, timeout=60)
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "lxml")
+            self._capture_list_form_state(soup)
+            action = self._list_form_action
+            vs = self._list_view_state
+            if not action or not vs:
+                raise RuntimeError("Estado JSF del listado no disponible para abrir ficha")
 
         post_data: dict[str, str] = {
             "formBuscador": "formBuscador",

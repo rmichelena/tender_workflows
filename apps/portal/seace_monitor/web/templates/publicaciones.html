@@ -38,7 +38,8 @@
     </tr>
   </thead>
   <tbody>
-    {% for p in processes %}
+    {% for item in processes %}
+    {% set p = item.process %}
     <tr data-process-id="{{ p.id }}"{% if p.status.value == 'descargando' %} data-downloading="1"{% endif %}>
       <td>{{ p.numero or '—' }}</td>
       <td class="muted col-entidad">{{ entidad_nombre(p.entity) }}</td>
@@ -48,8 +49,8 @@
       <td class="desc">{{ p.descripcion or '—' }}</td>
       <td>{{ p.cuantia or '—' }}</td>
       <td>{{ p.moneda or '—' }}</td>
-      <td>{{ p.fecha_consultas or '—' }}</td>
-      <td>{{ p.fecha_presentacion or '—' }}</td>
+      <td>{{ item.fin_consultas }}</td>
+      <td>{{ item.fin_presentacion }}</td>
       <td class="status-cell">{{ status_cell(p) }}</td>
       <td class="actions-cell">
         <div class="actions-stack js-action-row">

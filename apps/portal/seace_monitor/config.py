@@ -73,10 +73,12 @@ class AnalysisConfig:
 @dataclass
 class AppConfig:
     poll_interval: str = "6h"
+    ficha_refresh_interval: str = "6h"
+    stale_analysis_interval: str = "2h"
     anio: int = 2026
     entities_csv: Path = Path("entities.csv")
     database_url: str = "sqlite:///./data/seace.db"
-    max_pages: int = 1
+    max_pages: int = 1  # REVIEW M5: 1 página basta para nuestras entidades; ver scanner.py
     rows_per_page: int = 15
     data_dir: Path = Path("./data")
     http_proxy: str | None = None
@@ -85,6 +87,14 @@ class AppConfig:
     @property
     def poll_interval_seconds(self) -> int:
         return parse_duration(self.poll_interval)
+
+    @property
+    def ficha_refresh_seconds(self) -> int:
+        return parse_duration(self.ficha_refresh_interval)
+
+    @property
+    def stale_analysis_seconds(self) -> int:
+        return parse_duration(self.stale_analysis_interval)
 
     @classmethod
     def load(cls, path: Path | str = "config.yaml") -> AppConfig:
@@ -131,6 +141,10 @@ class AppConfig:
 
         return cls(
             poll_interval=str(raw.get("poll_interval", raw.get("poll_interval_seconds", "6h"))),
+            ficha_refresh_interval=str(
+                raw.get("ficha_refresh_interval", raw.get("poll_interval", "6h"))
+            ),
+            stale_analysis_interval=str(raw.get("stale_analysis_interval", "2h")),
             anio=int(raw.get("anio", 2026)),
             entities_csv=resolve_entities_csv(raw.get("entities_csv", "entities.csv")),
             database_url=str(

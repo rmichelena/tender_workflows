@@ -55,8 +55,17 @@ def download_file(
     r = requests.get(url, timeout=120, stream=True, proxies=proxies)
     r.raise_for_status()
 
-    with open(dest, "wb") as f:
+    part = dest.with_name(f"{dest.name}.part")
+    if part.exists():
+        part.unlink()
+    written = 0
+    with open(part, "wb") as f:
         for chunk in r.iter_content(chunk_size=65536):
             if chunk:
                 f.write(chunk)
+                written += len(chunk)
+    if written == 0:
+        part.unlink(missing_ok=True)
+        raise RuntimeError(f"Descarga vacía para documento {doc_uuid}")
+    part.replace(dest)
     return dest

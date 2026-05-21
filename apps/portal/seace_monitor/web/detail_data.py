@@ -279,14 +279,6 @@ def fechas_listado(process: Process) -> tuple[str, str]:
     return fechas.fecha_consultas, fechas.fecha_presentacion
 
 
-def apply_fechas_listado(processes: list[Process]) -> None:
-    """Recalcula fechas de listado en memoria (p. ej. tras cambiar fin vs inicio)."""
-    for proc in processes:
-        consultas, presentacion = fechas_listado(proc)
-        proc.fecha_consultas = consultas or None
-        proc.fecha_presentacion = presentacion or None
-
-
 def parse_cronograma(cronograma_json: str | None) -> list[CronogramaFila]:
     if not cronograma_json:
         return []

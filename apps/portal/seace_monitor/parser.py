@@ -123,36 +123,41 @@ def clean_cronograma_etapa(etapa: str) -> str:
 
 def _parse_cronograma(soup: BeautifulSoup) -> list[CronogramaEtapa]:
     """Extrae etapas del cronograma (tabla anidada bajo el panel Cronograma)."""
-    # Tabla específica del cronograma en SEACE 3.0 (evita el contenedor general)
     table = soup.find("table", id=re.compile(r"tbFicha:j_idt\d+$"))
-    candidates = [table] if table else []
-    candidates.extend(soup.find_all("table"))
-
-    for table in candidates:
-        if table is None:
-            continue
-        headers = [th.get_text(strip=True) for th in table.find_all("th")]
-        if headers != ["Etapa", "Fecha Inicio", "Fecha Fin"]:
-            continue
-
-        etapas: list[CronogramaEtapa] = []
-        for tr in table.find_all("tr")[1:]:
-            cells = [td.get_text(strip=True) for td in tr.find_all("td")]
-            if len(cells) != 3:
-                continue
-            etapa, inicio, fin = cells
-            if not _DATE_RE.match(inicio):
-                continue
-            etapas.append(
-                CronogramaEtapa(
-                    etapa=clean_cronograma_etapa(etapa),
-                    fecha_inicio=inicio,
-                    fecha_fin=fin,
-                )
-            )
+    if table is not None:
+        etapas = _extract_cronograma_from_table(table)
         if etapas:
             return etapas
-    return []
+
+    best: list[CronogramaEtapa] = []
+    for candidate in soup.find_all("table"):
+        etapas = _extract_cronograma_from_table(candidate)
+        if len(etapas) >= 2 and len(etapas) > len(best):
+            best = etapas
+    return best
+
+
+def _extract_cronograma_from_table(table) -> list[CronogramaEtapa]:
+    headers = [th.get_text(strip=True) for th in table.find_all("th")]
+    if headers != ["Etapa", "Fecha Inicio", "Fecha Fin"]:
+        return []
+
+    etapas: list[CronogramaEtapa] = []
+    for tr in table.find_all("tr")[1:]:
+        cells = [td.get_text(strip=True) for td in tr.find_all("td")]
+        if len(cells) != 3:
+            continue
+        etapa, inicio, fin = cells
+        if not _DATE_RE.match(inicio):
+            continue
+        etapas.append(
+            CronogramaEtapa(
+                etapa=clean_cronograma_etapa(etapa),
+                fecha_inicio=inicio,
+                fecha_fin=fin,
+            )
+        )
+    return etapas
 
 
 @dataclass
@@ -169,20 +174,21 @@ def extract_cronograma_fechas(cronograma: list[CronogramaEtapa]) -> CronogramaFe
     - fecha_consultas: fin de presentación de consultas (no absolución)
     - fecha_presentacion: fin de presentación de propuestas
     """
-    consultas = ""
+    best_consultas: tuple[int, str] = (-1, "")
     presentacion = ""
 
     for etapa in cronograma:
         nombre = etapa.etapa.lower()
-        if _is_presentacion_consultas(nombre):
-            consultas = _pick_fecha_fin(etapa) or consultas
-        elif _is_consultas_stage(nombre) and not _is_absolucion(nombre) and not consultas:
-            consultas = _pick_fecha_fin(etapa)
+        score = _score_consultas_stage(nombre)
+        if score > best_consultas[0]:
+            fin = _pick_fecha_fin(etapa)
+            if fin:
+                best_consultas = (score, fin)
         if _is_presentacion_propuestas(nombre) and not presentacion:
             presentacion = _pick_fecha_fin(etapa)
 
     return CronogramaFechasClave(
-        fecha_consultas=consultas,
+        fecha_consultas=best_consultas[1] if best_consultas[0] >= 0 else "",
         fecha_presentacion=presentacion,
     )
 
@@ -224,6 +230,16 @@ def fechas_listado_from_cronograma_json(
 
 def _pick_fecha_fin(etapa: CronogramaEtapa) -> str:
     return etapa.fecha_fin or etapa.fecha_inicio
+
+
+def _score_consultas_stage(nombre: str) -> int:
+    if _is_absolucion(nombre):
+        return -1
+    if _is_presentacion_consultas(nombre):
+        return 100
+    if _is_consultas_stage(nombre):
+        return 50
+    return -1
 
 
 def _is_absolucion(nombre: str) -> bool:

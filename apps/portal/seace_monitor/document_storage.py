@@ -136,11 +136,25 @@ def prepare_download_dest(docs_dir: Path, doc: dict) -> tuple[Path, bool]:
     nombre = doc.get("nombre") or uuid
     existing = manifest_path_for_doc(docs_dir, doc)
     if existing is not None:
-        doc["archivo"] = existing.name
-        return existing, True
+        if existing.stat().st_size == 0:
+            existing.unlink(missing_ok=True)
+        else:
+            doc["archivo"] = existing.name
+            return existing, True
 
     dest = allocate_unique_path(
         docs_dir, sanitize_download_filename(nombre, uuid)
     )
     doc["archivo"] = dest.name
     return dest, False
+
+
+def cleanup_partial_downloads(docs_dir: Path) -> None:
+    """Elimina archivos parciales o vacíos tras un fallo de descarga."""
+    if not docs_dir.is_dir():
+        return
+    for path in docs_dir.glob("*.part"):
+        path.unlink(missing_ok=True)
+    for path in docs_dir.iterdir():
+        if path.is_file() and path.name != MANIFEST_NAME and path.stat().st_size == 0:
+            path.unlink(missing_ok=True)

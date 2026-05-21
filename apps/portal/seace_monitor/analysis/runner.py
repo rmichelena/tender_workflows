@@ -13,7 +13,12 @@ from ..client import ProcessRow, SeaceClient
 from ..config import AppConfig
 from ..db.models import AnalysisResult, Process, ProcessStatus, utcnow
 from ..downloader import download_file
-from ..document_storage import normalize_legacy_filenames, prepare_download_dest, write_manifest
+from ..document_storage import (
+    cleanup_partial_downloads,
+    normalize_legacy_filenames,
+    prepare_download_dest,
+    write_manifest,
+)
 from ..parser import parse_ficha
 from .document_prep import extract_archives, resolve_selected_documents
 from .fast_reader import run_fast_analysis
@@ -57,8 +62,12 @@ class AnalysisRunner:
         # Commit antes de la descarga larga (SEACE) para no bloquear SQLite.
         self.session.commit()
 
-        self._fetch_documents(docs, docs_dir)
-        extract_archives(docs_dir)
+        try:
+            self._fetch_documents(docs, docs_dir)
+            extract_archives(docs_dir)
+        except Exception:
+            cleanup_partial_downloads(docs_dir)
+            raise
 
         process = self.session.get(Process, process_id)
         if process is None:
