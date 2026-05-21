@@ -12,12 +12,13 @@
 - Active GitHub repo is `rmichelena/tender_workflows`; former `tender_procurement` history lives on branch `archival/pre-restructure`.
 - Local repo path: `/Users/roberto/Library/CloudStorage/Dropbox/sync-backup/data/DEVELOPMENT/mis developments/tender_workflows/`.
 - Monorepo combines SEACE ingest/monitor, deterministic document analysis (pipeline steps 1.0–1.3), and agent phase (1.5+) defined in `instrucciones/`.
-- Analysis steps 1.0–1.3 are deterministic; Google Gemini is used only for step 1.2b (plan/diagram pages).
-- SEACE public UI uses JSF/PrimeFaces session state; ficha data requires POST with ViewState in the same session; process key is `(entity_id, nid_proceso)` with listado dedupe.
+- Steps 1.0–1.3 in `instrucciones/` are deterministic; Gemini for 1.2b (plan/diagram pages). SEACE Monitor **analizar** uses a separate Gemini free-reader fast-path on user-selected PDFs (DOCX→PDF via LibreOffice first).
+- SEACE public UI uses JSF/PrimeFaces session state; ficha data requires POST with ViewState; process key is `(entity_id, nid_proceso)`; live links use portal proxy `/seace/open/{process_id}` (not bookmarkable SEACE URLs).
 - ONGEI buscador `anio` URL param does not filter by year; monitor scan uses the first page only (~15 rows per active entity).
-- Post-scan auto-descarte matches descripcion keywords (configurable list); older-year rows are kept to spot desierta and possible re-convocatoria; SEACE estado tracking (publicada/adjudicada/desierta/anulada) is planned.
+- Post-scan auto-descarte matches descripcion keywords (configurable list); older-year rows kept for desierta/re-convocatoria; SEACE estado tracking planned.
 - Cronograma column `fecha_consultas` is the start of presentación de consultas, not the absolución end date.
 - Monitored entities live in gitignored `entities.csv` at repo root (59 ONGEI entities); config key `entities_csv`.
-- VPS production deploy: `ssh bots-sysop`, Docker project `tender-workflows` under `~/tender_workflows/deploy/`, web UI at http://bots.infinitek.pe:8080/; SEACE egress via Squid `http://server.maczona.com:18081`.
-- Portal UI views: `/publicaciones` = `publicada` only; `/analizados` = `analizada`/`portafolio`; `/descartados` = trash; default sort fecha de publicación desc; analizada rows use Ver (no Descartar on publicaciones); Portafolio only on analizados.
-- Live SEACE ficha links use portal proxy `/seace/open/{process_id}` plus `/seace/p/...` (JSF session bootstrap, same as analyze)—not bookmarkable SEACE URLs or embedded HTML.
+- VPS production: `ssh bots-sysop`, project `tender-workflows` under `~/tender_workflows/deploy/`; hot-deploy via rsync `apps/portal/seace_monitor/` (use `web/templates/` and `web/static/` subpaths) then `docker compose -f docker-compose.vps.yml up -d --build web`; UI at http://bots.infinitek.pe:8080/; SEACE egress via Squid `http://server.maczona.com:18081`.
+- Portal routes: `/publicaciones` (`publicada`, Descargar→`descargando`→`descargada`); `/descargados` (select PDFs, Analizar); `/analizados` (`analizada`/`portafolio`); `/descartados`; default sort fecha publicación desc.
+- Background jobs (download/analyze): commit SQLite before long I/O (SEACE fetch, Gemini); HTTP handler commits+expunges after `descargando`/`running` so the request session cannot overwrite background writes; disabled HTML checkboxes are omitted from POST.
+- Concurrent download/analyze per distinct process is supported (Starlette background threads, SQLite WAL); Gemini uploads retry with a fresh client on 503/upload-terminated; user prompt includes today's date (America/Lima).

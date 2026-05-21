@@ -148,6 +148,7 @@ table.data tr:hover td { background: #f8fafc; }
   text-decoration: none;
 }
 .btn-primary { background: var(--accent); color: #fff; }
+.btn-analyzing { background: #d97706; color: #fff; }
 .btn-secondary { background: #e2e8f0; color: var(--text); }
 .btn-danger { background: #dc2626; color: #fff; }
 .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; }

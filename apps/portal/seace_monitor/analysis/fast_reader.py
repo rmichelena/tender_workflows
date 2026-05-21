@@ -6,8 +6,10 @@ import json
 import logging
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ..config import AppConfig
 from ..db.models import Process
@@ -20,6 +22,30 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gemini-2.5-pro"
 PROMPT_REL = Path("instrucciones/prompts/prompt_seace_free_reader.md")
+_GEMINI_RETRY_ATTEMPTS = 5
+_GEMINI_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+_LIMA_TZ = ZoneInfo("America/Lima")
+_MESES_ES = (
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+)
+
+
+def _today_anchor_peru() -> tuple[str, int, str]:
+    now = datetime.now(_LIMA_TZ)
+    mes = _MESES_ES[now.month - 1]
+    human = f"{now.day} de {mes} de {now.year}"
+    return human, now.year, now.strftime("%Y-%m-%d")
 
 
 def _repo_root(config: AppConfig) -> Path:
@@ -32,10 +58,26 @@ def _repo_root(config: AppConfig) -> Path:
 def _load_system_prompt(config: AppConfig) -> str:
     path = _repo_root(config) / PROMPT_REL
     if path.exists():
-        return path.read_text(encoding="utf-8")
+        base = path.read_text(encoding="utf-8")
+    else:
+        base = (
+            "Lee las bases adjuntas y responde en Markdown narrativo. "
+            "No extraigas cronograma del documento."
+        )
+    today, year, iso = _today_anchor_peru()
     return (
-        "Lee las bases adjuntas y responde en Markdown narrativo. "
-        "No extraigas cronograma del documento."
+        f"{base.rstrip()}\n\n"
+        f"## Ancla temporal (obligatorio)\n\n"
+        f"- **Hoy es {today}** (`{iso}`, America/Lima). Año en curso: **{year}**.\n"
+        f"- Evalúa fechas y normativa citada desde esa fecha; no asumas que estamos en 2024 "
+        f"ni en un año anterior al de la convocatoria.\n"
+        f"- Leyes/decretos con vigencia en {year - 1} o {year} (p. ej. Ley N° 32069, "
+        f"D.S. N° 009-2025-EF) son marco legal **vigente o aplicable**, no «futuro» ni "
+        f"«próxima reforma», salvo texto expreso en contrario en las bases.\n"
+        f"- En «Dudas / puntos a verificar» **no** incluyas avisos meta sobre plantillas "
+        f"SEACE, años «prospectivos», ni «nuevo marco legal entrante» cuando ya estamos en "
+        f"{year}. Reserva esa sección para ambigüedades contractuales, OCR dudoso o "
+        f"contradicciones reales del documento.\n"
     )
 
 
@@ -57,8 +99,86 @@ def _wait_file_active(client, uploaded) -> Any:
     return file
 
 
+def _is_retryable_gemini_error(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None)
+    if status in _GEMINI_RETRYABLE_STATUS:
+        return True
+    message = str(exc).lower()
+    return any(
+        token in message
+        for token in (
+            "service unavailable",
+            "upload has already been terminated",
+            "resource exhausted",
+            "deadline exceeded",
+            "internal error",
+        )
+    )
+
+
+def _gemini_retry_delay(attempt: int) -> float:
+    return min(2**attempt, 30)
+
+
+def _upload_file_with_retry(api_key: str, path: Path):
+    from google import genai
+
+    last_exc: Exception | None = None
+    for attempt in range(1, _GEMINI_RETRY_ATTEMPTS + 1):
+        client = genai.Client(api_key=api_key)
+        try:
+            uploaded = client.files.upload(file=str(path))
+            return _wait_file_active(client, uploaded)
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= _GEMINI_RETRY_ATTEMPTS or not _is_retryable_gemini_error(exc):
+                raise
+            delay = _gemini_retry_delay(attempt)
+            logger.warning(
+                "Reintento %s/%s subida a Gemini (%s): %s; espera %ss",
+                attempt,
+                _GEMINI_RETRY_ATTEMPTS,
+                path.name,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"No se pudo subir {path.name} a Gemini")
+
+
+def _generate_content_with_retry(client, **kwargs):
+    last_exc: Exception | None = None
+    for attempt in range(1, _GEMINI_RETRY_ATTEMPTS + 1):
+        try:
+            return client.models.generate_content(**kwargs)
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= _GEMINI_RETRY_ATTEMPTS or not _is_retryable_gemini_error(exc):
+                raise
+            delay = _gemini_retry_delay(attempt)
+            logger.warning(
+                "Reintento %s/%s generateContent Gemini: %s; espera %ss",
+                attempt,
+                _GEMINI_RETRY_ATTEMPTS,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Gemini generateContent falló tras reintentos")
+
+
 def _build_user_context(process: Process, source_paths: list[Path]) -> str:
+    today, year, iso = _today_anchor_peru()
     lines = [
+        "## Referencia temporal",
+        f"- Fecha de hoy: {today} ({iso}, America/Lima)",
+        f"- Año en curso: {year}",
+        "- Usa esta referencia al interpretar fechas y normativa del documento.",
+        "",
         "Analiza los documentos adjuntos (bases y anexos seleccionados por el usuario).",
         f"Archivos ({len(source_paths)}):",
     ]
@@ -74,6 +194,10 @@ def _build_user_context(process: Process, source_paths: list[Path]) -> str:
         lines.append(f"Objeto (ficha): {process.objeto}")
     if process.descripcion:
         lines.append(f"Descripción (ficha): {process.descripcion}")
+    if process.fecha_consultas:
+        lines.append(f"Inicio consultas (ficha SEACE): {process.fecha_consultas}")
+    if process.fecha_presentacion:
+        lines.append(f"Inicio presentación propuestas (ficha SEACE): {process.fecha_presentacion}")
     lines.append(
         "Recuerda: NO incluyas sección de cronograma del proceso; "
         "ese dato se toma de la ficha SEACE aparte."
@@ -134,8 +258,7 @@ def run_gemini_free_reader(
 
     try:
         for path in upload_paths:
-            uploaded = client.files.upload(file=str(path))
-            uploaded = _wait_file_active(client, uploaded)
+            uploaded = _upload_file_with_retry(api_key, path)
             uploaded_files.append(uploaded)
             mime_type = uploaded.mime_type or "application/pdf"
             parts.append(types.Part.from_uri(file_uri=uploaded.uri, mime_type=mime_type))
@@ -144,7 +267,8 @@ def run_gemini_free_reader(
         user = _build_user_context(process, source_paths)
         parts.append(types.Part.from_text(text=user))
 
-        response = client.models.generate_content(
+        response = _generate_content_with_retry(
+            client,
             model=fast_cfg.gemini_model or DEFAULT_MODEL,
             contents=[types.Content(role="user", parts=parts)],
             config=types.GenerateContentConfig(system_instruction=system),
@@ -185,6 +309,15 @@ def run_fast_analysis(
 
     sources = resolve_selected_documents(documents_dir, selected_rel_paths)
     pdfs = prepare_documents_for_llm(sources, workspace)
+    for source, pdf in zip(sources, pdfs, strict=True):
+        if source.suffix.lower() == ".pdf":
+            logger.info("PDF listo para Gemini: %s", source.name)
+        else:
+            logger.info(
+                "Convertido %s → %s para Gemini",
+                source.name,
+                pdf.name,
+            )
 
     try:
         summary_core = run_gemini_free_reader(config, pdfs, sources, process)

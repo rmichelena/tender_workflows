@@ -6,10 +6,13 @@ import logging
 import re
 import shutil
 import subprocess
+import threading
 import zipfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_LIBREOFFICE_LOCK = threading.Lock()
 
 ARCHIVE_SUFFIXES = {".zip", ".rar"}
 UPLOAD_SUFFIXES = {".pdf", ".docx", ".doc", ".xlsx", ".xls"}
@@ -167,20 +170,21 @@ def select_bases_document(documents_dir: Path) -> Path:
 
 def _convert_to_pdf(source: Path, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run(
-        [
-            "soffice",
-            "--headless",
-            "--convert-to",
-            "pdf",
-            "--outdir",
-            str(out_dir),
-            str(source),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
+    with _LIBREOFFICE_LOCK:
+        proc = subprocess.run(
+            [
+                "soffice",
+                "--headless",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                str(out_dir),
+                str(source),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
     if proc.returncode != 0:
         raise RuntimeError(
             f"LibreOffice no convirtió {source.name}: {(proc.stderr or proc.stdout)[-1000:]}"

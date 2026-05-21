@@ -11,8 +11,10 @@
       <th class="col-entidad">Entidad</th>
       <th>Nomenclatura</th>
       <th>Estado</th>
-      <th>Alcance</th>
-      <th>Requisitos</th>
+      <th>Objeto</th>
+      <th>Descripción</th>
+      <th>F. consultas</th>
+      <th>F. presentación</th>
       <th>Acciones</th>
     </tr>
   </thead>
@@ -22,14 +24,10 @@
       <td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
       <td>{{ p.nomenclatura }}</td>
       <td class="status-cell">{{ status_cell(p) }}</td>
-      <td class="desc">
-        {% if p.analysis and p.analysis.alcance %}{{ p.analysis.alcance[:120] }}{% if p.analysis.alcance|length > 120 %}…{% endif %}
-        {% else %}<span class="muted">—</span>{% endif %}
-      </td>
-      <td class="desc">
-        {% if p.analysis and p.analysis.requisitos %}{{ p.analysis.requisitos[:80] }}…
-        {% else %}<span class="muted">—</span>{% endif %}
-      </td>
+      <td>{{ p.objeto or '—' }}</td>
+      <td class="desc">{{ p.descripcion or '—' }}</td>
+      <td>{{ p.fecha_consultas or '—' }}</td>
+      <td>{{ p.fecha_presentacion or '—' }}</td>
       <td class="actions-cell">
         <div class="actions-stack">
         <a href="/analizados/{{ p.id }}" class="btn btn-secondary btn-sm">Ver</a>
@@ -51,7 +49,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="6" class="muted">Aún no hay procesos analizados.</td></tr>
+    <tr><td colspan="8" class="muted">Aún no hay procesos analizados.</td></tr>
     {% endfor %}
   </tbody>
 </table>

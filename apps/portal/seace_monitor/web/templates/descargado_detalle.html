@@ -120,9 +120,6 @@
       btn.disabled = true;
       btn.textContent = "Analizando…";
     }
-    form.querySelectorAll('input[name="selected_files"]').forEach(function (cb) {
-      cb.disabled = true;
-    });
     var discard = document.querySelector('form[action*="/descartar"] button');
     if (discard) discard.disabled = true;
   });

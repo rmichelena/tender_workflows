@@ -11,7 +11,10 @@
       <th class="col-entidad">Entidad</th>
       <th>Nomenclatura</th>
       <th>Estado</th>
+      <th>Objeto</th>
       <th>Descripción</th>
+      <th>F. consultas</th>
+      <th>F. presentación</th>
       <th>Acciones</th>
     </tr>
   </thead>
@@ -21,10 +24,17 @@
       <td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
       <td>{{ p.nomenclatura }}</td>
       <td class="status-cell">{{ status_cell(p) }}</td>
+      <td>{{ p.objeto or '—' }}</td>
       <td class="desc">{{ p.descripcion or '—' }}</td>
+      <td>{{ p.fecha_consultas or '—' }}</td>
+      <td>{{ p.fecha_presentacion or '—' }}</td>
       <td class="actions-cell">
         <div class="actions-stack">
+        {% if p.analysis and p.analysis.status == 'running' %}
+        <a href="/descargados/{{ p.id }}" class="btn btn-analyzing btn-sm">Analizando</a>
+        {% else %}
         <a href="/descargados/{{ p.id }}" class="btn btn-primary btn-sm">Ver / Analizar</a>
+        {% endif %}
         <form method="post" action="/descargados/{{ p.id }}/descartar">
           <button type="submit" class="btn btn-danger btn-sm">Descartar</button>
         </form>
@@ -32,7 +42,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="5" class="muted">Aún no hay procesos descargados.</td></tr>
+    <tr><td colspan="8" class="muted">Aún no hay procesos descargados.</td></tr>
     {% endfor %}
   </tbody>
 </table>

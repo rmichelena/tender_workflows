@@ -391,10 +391,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
     ):
-        proc = db.get(Process, process_id)
+        proc = (
+            db.query(Process)
+            .options(joinedload(Process.analysis))
+            .filter(Process.id == process_id)
+            .one_or_none()
+        )
         if proc is None:
             raise HTTPException(404)
-        if proc.status != ProcessStatus.descargada:
+        if proc.status not in (ProcessStatus.descargada, ProcessStatus.analizada):
             raise HTTPException(400, "Solo procesos descargados pueden analizarse")
         if proc.analysis and proc.analysis.status == "running":
             return RedirectResponse(
@@ -419,9 +424,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             analysis = AnalysisResult(process_id=proc.id, status="running")
             db.add(analysis)
         else:
-            analysis.status = "running"
-            analysis.error_message = None
+            AnalysisRunner._reset_analysis_for_rerun(analysis)
         analysis.started_at = utcnow()
+        if proc.status == ProcessStatus.analizada:
+            proc.status = ProcessStatus.descargada
         db.commit()
         db.expunge_all()
 

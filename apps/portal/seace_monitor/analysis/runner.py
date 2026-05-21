@@ -53,9 +53,16 @@ class AnalysisRunner:
         docs_dir = proc_dir / "documentos"
         docs_dir.mkdir(parents=True, exist_ok=True)
 
-        self._download_documents(process, entity.ruc, docs_dir)
+        docs = self._resolve_document_list(process, entity.ruc)
+        # Commit antes de la descarga larga (SEACE) para no bloquear SQLite.
+        self.session.commit()
+
+        self._fetch_documents(docs, docs_dir)
         extract_archives(docs_dir)
 
+        process = self.session.get(Process, process_id)
+        if process is None:
+            raise ValueError(f"Proceso {process_id} no encontrado")
         process.status = ProcessStatus.descargada
         process.data_dir = str(proc_dir)
         self.session.commit()
@@ -83,11 +90,13 @@ class AnalysisRunner:
             analysis = AnalysisResult(process_id=process.id, status="running")
             self.session.add(analysis)
         else:
-            analysis.status = "running"
-            analysis.error_message = None
+            self._reset_analysis_for_rerun(analysis)
 
         analysis.started_at = utcnow()
-        self.session.flush()
+        if process.status == ProcessStatus.analizada:
+            process.status = ProcessStatus.descargada
+        # Commit antes del pipeline largo (Gemini) para no bloquear SQLite.
+        self.session.commit()
 
         proc_dir = Path(process.data_dir)
         docs_dir = proc_dir / "documentos"
@@ -96,15 +105,25 @@ class AnalysisRunner:
             result_data = self._run_pipeline(
                 proc_dir, docs_dir, process, selected_rel_paths
             )
+            process = self.session.get(Process, process_id)
+            if process is None:
+                raise RuntimeError(f"Proceso {process_id} desapareció durante el análisis")
+            analysis = process.analysis
+            if analysis is None:
+                raise RuntimeError(f"Sin registro de análisis para proceso {process_id}")
             self._apply_result(analysis, result_data)
             process.status = ProcessStatus.analizada
             analysis.status = "done"
             analysis.finished_at = utcnow()
         except Exception as exc:
-            analysis.status = "error"
-            analysis.error_message = str(exc)
-            analysis.finished_at = utcnow()
-            process.status = ProcessStatus.descargada
+            process = self.session.get(Process, process_id)
+            if process is not None:
+                analysis = process.analysis
+                if analysis is not None:
+                    analysis.status = "error"
+                    analysis.error_message = str(exc)
+                    analysis.finished_at = utcnow()
+                process.status = ProcessStatus.descargada
             logger.exception("Análisis fallido para proceso %s", process_id)
             self.session.commit()
             raise
@@ -112,7 +131,7 @@ class AnalysisRunner:
         self.session.commit()
         return analysis
 
-    def _download_documents(self, process: Process, ruc: str, docs_dir: Path) -> None:
+    def _resolve_document_list(self, process: Process, ruc: str) -> list[dict]:
         docs = json.loads(process.documentos_json or "[]")
         if not docs:
             if process.nid_convocatoria and process.link_id:
@@ -121,7 +140,9 @@ class AnalysisRunner:
                 raise RuntimeError(
                     "Sin documentos en BD. Vuelve a escanear el proceso antes de descargar."
                 )
+        return docs
 
+    def _fetch_documents(self, docs: list[dict], docs_dir: Path) -> None:
         for doc in docs:
             uuid = doc["uuid"]
             nombre = doc.get("nombre", uuid)
@@ -241,6 +262,18 @@ class AnalysisRunner:
             "requisitos": "",
             "note": "Coloca tus scripts y define analysis_output.json en proc_dir",
         }
+
+    @staticmethod
+    def _reset_analysis_for_rerun(analysis: AnalysisResult) -> None:
+        analysis.status = "running"
+        analysis.error_message = None
+        analysis.alcance = None
+        analysis.incluye = None
+        analysis.requisitos = None
+        analysis.entregables = None
+        analysis.equipos = None
+        analysis.raw_json = None
+        analysis.finished_at = None
 
     def _apply_result(self, analysis: AnalysisResult, data: dict) -> None:
         stage1 = data.get("stage1", data)
