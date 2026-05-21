@@ -57,15 +57,28 @@ def delete_process_data_dir(config: AppConfig, process: Process) -> bool:
     return False
 
 
+def clear_process_download_metadata(process: Process) -> None:
+    """Quita metadatos de descarga en BD (documentos, ruta)."""
+    process.documentos_json = None
+    process.data_dir = None
+
+
+def delete_process_analysis(session: Session, process: Process) -> None:
+    if process.analysis is not None:
+        session.delete(process.analysis)
+        process.analysis = None
+
+
 def cleanup_stale_process_data(config: AppConfig, processes: list[Process]) -> int:
     """Quita data_dir en BD/disco para procesos que no deben conservar archivos."""
     removed = 0
     for proc in processes:
-        if not proc.data_dir:
-            continue
         if proc.status in _STATUSES_WITH_DATA:
             continue
+        if not proc.data_dir and not proc.documentos_json:
+            continue
         delete_process_data_dir(config, proc)
+        clear_process_download_metadata(proc)
         removed += 1
     return removed
 
@@ -106,11 +119,10 @@ def resolve_restore_status(config: AppConfig, process: Process) -> ProcessStatus
 def discard_process_downloads(
     config: AppConfig, process: Process, session: Session
 ) -> None:
-    """Descarte con datos locales: borra carpeta y resultado de análisis en BD."""
+    """Descarte con datos locales: disco, metadatos de descarga y análisis."""
     delete_process_data_dir(config, process)
-    if process.analysis is not None:
-        session.delete(process.analysis)
-        process.analysis = None
+    clear_process_download_metadata(process)
+    delete_process_analysis(session, process)
 
 
 def repair_processes_missing_data(config: AppConfig, session: Session) -> int:
@@ -125,11 +137,26 @@ def repair_processes_missing_data(config: AppConfig, session: Session) -> int:
     for proc in session.query(Process).filter(Process.status.in_(needs_data)):
         if process_data_dir_exists(config, proc):
             continue
-        if proc.analysis is not None:
-            session.delete(proc.analysis)
-            proc.analysis = None
-        proc.data_dir = None
+        clear_process_download_metadata(proc)
+        delete_process_analysis(session, proc)
         proc.status = ProcessStatus.publicada
+        repaired += 1
+    return repaired
+
+
+def repair_discarded_processes(config: AppConfig, session: Session) -> int:
+    """Descartados con restos de descarga/análisis en BD o disco."""
+    repaired = 0
+    for proc in session.query(Process).filter(Process.status == ProcessStatus.descartada):
+        if (
+            proc.data_dir is None
+            and proc.documentos_json is None
+            and proc.analysis is None
+        ):
+            continue
+        delete_process_data_dir(config, proc)
+        clear_process_download_metadata(proc)
+        delete_process_analysis(session, proc)
         repaired += 1
     return repaired
 

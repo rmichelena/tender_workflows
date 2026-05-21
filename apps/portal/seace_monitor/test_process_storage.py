@@ -6,6 +6,7 @@ from .config import AppConfig
 from .db.models import Process, ProcessStatus
 from .process_storage import (
     cleanup_orphan_process_dirs,
+    clear_process_download_metadata,
     delete_process_data_dir,
     discard_process_downloads,
     purge_all_stale_process_data,
@@ -48,6 +49,23 @@ def test_delete_rejects_path_outside_procesos(tmp_path: Path):
     assert outside.exists()
 
 
+def test_discard_clears_metadata(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path)
+    proc_dir = tmp_path / "procesos" / "123_TEST"
+    proc_dir.mkdir(parents=True)
+    proc = _proc(str(proc_dir))
+    proc.documentos_json = '[{"uuid":"x","nombre":"a.pdf"}]'
+
+    class FakeSession:
+        def delete(self, _obj):
+            pass
+
+    discard_process_downloads(cfg, proc, FakeSession())
+    assert proc.data_dir is None
+    assert proc.documentos_json is None
+    assert not proc_dir.exists()
+
+
 def test_purge_orphans_and_descartada(tmp_path: Path, monkeypatch):
     cfg = AppConfig(data_dir=tmp_path)
     root = tmp_path / "procesos"
@@ -62,18 +80,21 @@ def test_purge_orphans_and_descartada(tmp_path: Path, monkeypatch):
             return self
 
         def all(self):
-            return [
-                _proc(str(keep), ProcessStatus.descargada),
-                _proc(str(stale), ProcessStatus.descartada),
-            ]
+            keep_proc = _proc(str(keep), ProcessStatus.descargada)
+            stale_proc = _proc(str(stale), ProcessStatus.descartada)
+            stale_proc.documentos_json = '[{"uuid":"x","nombre":"a.pdf"}]'
+            return [keep_proc, stale_proc]
 
     session = FakeSession()
     db_cleaned, orphans = purge_all_stale_process_data(cfg, session)
-    assert db_cleaned == 2
+    assert db_cleaned == 1
     assert orphans == 1
     assert not stale.exists()
     assert not orphan.exists()
-    assert not keep.exists()
+    assert keep.exists()
+    for proc in session.all():
+        if proc.status == ProcessStatus.descartada:
+            assert proc.documentos_json is None
 
 
 def test_resolve_restore_status_without_files(tmp_path: Path):

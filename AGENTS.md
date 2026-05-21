@@ -8,7 +8,7 @@
 - Prefer preserving scroll position on portal list actions (analizar/descartar) after page refresh.
 - Portal list views should show SEACE **objeto** and **descripción** (not Gemini markdown extracts like alcance/requisitos).
 - Cronograma date columns in all list views use **fin** of consultas and presentación propuestas, not inicio.
-- Discarding from descargados or analizados should delete the process folder under `data_dir` on disk (detail pages use the same POST endpoints).
+- Discarding from descargados or analizados should delete disk data and clear download/analysis metadata (`data_dir`, `documentos_json`, `AnalysisResult`); detail pages use the same POST endpoints.
 
 ## Learned Workspace Facts
 

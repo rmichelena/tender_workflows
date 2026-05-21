@@ -48,18 +48,27 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "cleanup-data":
         from .db.session import init_db, session_factory
-        from .process_storage import purge_all_stale_process_data
+        from .process_storage import (
+            purge_all_stale_process_data,
+            repair_discarded_processes,
+            repair_processes_missing_data,
+        )
 
         cfg = AppConfig.load(args.config)
         init_db(cfg.database_url)
         session = session_factory()
         try:
             db_cleaned, orphans = purge_all_stale_process_data(cfg, session)
+            repaired = repair_processes_missing_data(cfg, session)
+            discarded = repair_discarded_processes(cfg, session)
             session.commit()
             logging.info(
-                "Limpieza completada: %s proceso(s) en BD, %s carpeta(s) huérfana(s)",
+                "Limpieza completada: %s descartado(s), %s huérfana(s), "
+                "%s inconsistente(s), %s descartado(s) con metadatos",
                 db_cleaned,
                 orphans,
+                repaired,
+                discarded,
             )
         finally:
             session.close()

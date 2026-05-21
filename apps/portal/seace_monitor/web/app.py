@@ -21,8 +21,11 @@ from ..db.models import AnalysisResult, Entity, Process, ProcessStatus, utcnow
 from ..db.session import init_db, session_factory
 from ..document_storage import cleanup_partial_downloads
 from ..process_storage import (
+    clear_process_download_metadata,
+    delete_process_analysis,
     discard_process_downloads,
     purge_all_stale_process_data,
+    repair_discarded_processes,
     repair_processes_missing_data,
     resolve_restore_status,
 )
@@ -94,13 +97,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 )
             db_cleaned, orphans = purge_all_stale_process_data(_config, db)
             repaired = repair_processes_missing_data(_config, db)
-            if db_cleaned or orphans or repaired:
+            discarded = repair_discarded_processes(_config, db)
+            if db_cleaned or orphans or repaired or discarded:
                 db.commit()
                 logger.info(
-                    "Limpieza data/procesos: %s descartado(s), %s huérfana(s), %s inconsistente(s)",
+                    "Limpieza data/procesos: %s descartado(s), %s huérfana(s), "
+                    "%s inconsistente(s), %s descartado(s) con metadatos",
                     db_cleaned,
                     orphans,
                     repaired,
+                    discarded,
                 )
         finally:
             db.close()
@@ -312,7 +318,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if proc is None:
             raise HTTPException(404)
-        proc.status = resolve_restore_status(_config, proc)
+        new_status = resolve_restore_status(_config, proc)
+        if new_status == ProcessStatus.publicada:
+            clear_process_download_metadata(proc)
+            delete_process_analysis(db, proc)
+        proc.status = new_status
         return RedirectResponse("/descartados", status_code=303)
 
     @app.post("/publicaciones/{process_id}/descargar")
