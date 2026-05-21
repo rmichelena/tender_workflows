@@ -20,7 +20,12 @@ from ..db.maintenance import is_stale_running_analysis, recover_stale_analyses
 from ..db.models import AnalysisResult, Entity, Process, ProcessStatus, utcnow
 from ..db.session import init_db, session_factory
 from ..document_storage import cleanup_partial_downloads
-from ..process_storage import delete_process_data_dir, purge_all_stale_process_data
+from ..process_storage import (
+    discard_process_downloads,
+    purge_all_stale_process_data,
+    repair_processes_missing_data,
+    resolve_restore_status,
+)
 from .detail_data import (
     download_filename_for_path,
     list_analyzable_files,
@@ -88,12 +93,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     recovered,
                 )
             db_cleaned, orphans = purge_all_stale_process_data(_config, db)
-            if db_cleaned or orphans:
+            repaired = repair_processes_missing_data(_config, db)
+            if db_cleaned or orphans or repaired:
                 db.commit()
                 logger.info(
-                    "Limpieza data/procesos: %s proceso(s) en BD, %s carpeta(s) huérfana(s)",
+                    "Limpieza data/procesos: %s descartado(s), %s huérfana(s), %s inconsistente(s)",
                     db_cleaned,
                     orphans,
+                    repaired,
                 )
         finally:
             db.close()
@@ -305,13 +312,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if proc is None:
             raise HTTPException(404)
-        if proc.analysis and proc.analysis.status == "done":
-            proc.status = ProcessStatus.analizada
-        elif proc.data_dir:
-            proc.status = ProcessStatus.descargada
-        else:
-            proc.status = ProcessStatus.publicada
-        db.commit()
+        proc.status = resolve_restore_status(_config, proc)
         return RedirectResponse("/descartados", status_code=303)
 
     @app.post("/publicaciones/{process_id}/descargar")
@@ -496,7 +497,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             ):
                 raise HTTPException(409, "Análisis en curso")
         proc.status = ProcessStatus.descartada
-        delete_process_data_dir(_config, proc)
+        discard_process_downloads(_config, proc, db)
         return RedirectResponse(redirect, status_code=303)
 
     @app.post("/descargados/{process_id}/descartar")

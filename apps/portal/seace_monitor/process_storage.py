@@ -87,6 +87,53 @@ def cleanup_orphan_process_dirs(config: AppConfig, *, keep_paths: set[Path]) -> 
     return removed
 
 
+def process_data_dir_exists(config: AppConfig, process: Process) -> bool:
+    if not process.data_dir:
+        return False
+    path = resolve_process_data_dir(config, process.data_dir)
+    return path is not None and path.is_dir()
+
+
+def resolve_restore_status(config: AppConfig, process: Process) -> ProcessStatus:
+    """Estado al restaurar desde descartados según archivos reales en disco."""
+    if not process_data_dir_exists(config, process):
+        return ProcessStatus.publicada
+    if process.analysis and process.analysis.status == "done":
+        return ProcessStatus.analizada
+    return ProcessStatus.descargada
+
+
+def discard_process_downloads(
+    config: AppConfig, process: Process, session: Session
+) -> None:
+    """Descarte con datos locales: borra carpeta y resultado de análisis en BD."""
+    delete_process_data_dir(config, process)
+    if process.analysis is not None:
+        session.delete(process.analysis)
+        process.analysis = None
+
+
+def repair_processes_missing_data(config: AppConfig, session: Session) -> int:
+    """Procesos descargados/analizados sin carpeta en disco → publicada."""
+    needs_data = {
+        ProcessStatus.descargando,
+        ProcessStatus.descargada,
+        ProcessStatus.analizada,
+        ProcessStatus.portafolio,
+    }
+    repaired = 0
+    for proc in session.query(Process).filter(Process.status.in_(needs_data)):
+        if process_data_dir_exists(config, proc):
+            continue
+        if proc.analysis is not None:
+            session.delete(proc.analysis)
+            proc.analysis = None
+        proc.data_dir = None
+        proc.status = ProcessStatus.publicada
+        repaired += 1
+    return repaired
+
+
 def purge_all_stale_process_data(config: AppConfig, session: Session) -> tuple[int, int]:
     """Retroactivo: procesos descartados/publicados con data_dir + dirs huérfanas."""
     processes = session.query(Process).all()

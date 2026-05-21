@@ -7,7 +7,9 @@ from .db.models import Process, ProcessStatus
 from .process_storage import (
     cleanup_orphan_process_dirs,
     delete_process_data_dir,
+    discard_process_downloads,
     purge_all_stale_process_data,
+    resolve_restore_status,
 )
 
 
@@ -72,3 +74,20 @@ def test_purge_orphans_and_descartada(tmp_path: Path, monkeypatch):
     assert not stale.exists()
     assert not orphan.exists()
     assert not keep.exists()
+
+
+def test_resolve_restore_status_without_files(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path)
+    proc = _proc(None, ProcessStatus.descartada)
+    proc.analysis = type("A", (), {"status": "done"})()
+    assert resolve_restore_status(cfg, proc) == ProcessStatus.publicada
+
+
+def test_resolve_restore_status_with_files(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path)
+    proc_dir = tmp_path / "procesos" / "123_TEST"
+    proc_dir.mkdir(parents=True)
+    proc = _proc(str(proc_dir), ProcessStatus.descartada)
+    assert resolve_restore_status(cfg, proc) == ProcessStatus.descargada
+    proc.analysis = type("A", (), {"status": "done"})()
+    assert resolve_restore_status(cfg, proc) == ProcessStatus.analizada
