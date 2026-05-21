@@ -179,9 +179,6 @@ class MultiEntityScanner:
         proc.cronograma_json = json.dumps(
             [asdict(c) for c in ficha.cronograma], ensure_ascii=False
         )
-        proc.documentos_json = json.dumps(
-            [asdict(d) for d in ficha.documentos], ensure_ascii=False
-        )
         proc.ficha_url = ficha_result.url
         proc.list_hash = row_snapshot_hash(row)
         proc.content_hash = ficha.content_hash()

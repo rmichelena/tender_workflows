@@ -9,6 +9,7 @@
 - Portal list views should show SEACE **objeto** and **descripción** (not Gemini markdown extracts like alcance/requisitos).
 - Cronograma date columns in all list views use **fin** of consultas and presentación propuestas, not inicio.
 - Discarding from descargados or analizados should delete disk data and clear download/analysis metadata (`data_dir`, `documentos_json`, `AnalysisResult`); detail pages use the same POST endpoints.
+- `documentos_json` is populated only when downloading (fresh ficha fetch), not during scan.
 
 ## Learned Workspace Facts
 

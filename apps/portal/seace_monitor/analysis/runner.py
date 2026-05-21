@@ -141,15 +141,11 @@ class AnalysisRunner:
         return analysis
 
     def _resolve_document_list(self, process: Process, ruc: str) -> list[dict]:
-        docs = json.loads(process.documentos_json or "[]")
-        if not docs:
-            if process.nid_convocatoria and process.link_id:
-                docs = self._refresh_documentos(process, ruc)
-            else:
-                raise RuntimeError(
-                    "Sin documentos en BD. Vuelve a escanear el proceso antes de descargar."
-                )
-        return docs
+        if not process.nid_convocatoria or not process.link_id:
+            raise RuntimeError(
+                "Sin metadatos SEACE para abrir la ficha. Vuelve a escanear el proceso."
+            )
+        return self._refresh_documentos(process, ruc)
 
     def _fetch_documents(self, docs: list[dict], docs_dir: Path) -> None:
         for doc in docs:

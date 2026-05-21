@@ -101,8 +101,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             if db_cleaned or orphans or repaired or discarded:
                 db.commit()
                 logger.info(
-                    "Limpieza data/procesos: %s descartado(s), %s huérfana(s), "
-                    "%s inconsistente(s), %s descartado(s) con metadatos",
+                    "Limpieza data/procesos: %s metadato(s) obsoleto(s), %s huérfana(s), "
+                    "%s inconsistente(s), %s descartado(s) reparado(s)",
                     db_cleaned,
                     orphans,
                     repaired,

@@ -63,8 +63,8 @@ def main(argv: list[str] | None = None) -> int:
             discarded = repair_discarded_processes(cfg, session)
             session.commit()
             logging.info(
-                "Limpieza completada: %s descartado(s), %s huérfana(s), "
-                "%s inconsistente(s), %s descartado(s) con metadatos",
+                "Limpieza completada: %s metadato(s) obsoleto(s), %s huérfana(s), "
+                "%s inconsistente(s), %s descartado(s) reparado(s)",
                 db_cleaned,
                 orphans,
                 repaired,
