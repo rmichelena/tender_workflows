@@ -1,0 +1,46 @@
+# VPS: HTTP directo, sin Traefik, SQLite embebido.
+# Uso (desde deploy/):
+#   cp config.example.vps.yaml config.yaml
+#   cp ../entities.csv.example ../entities.csv
+#   docker compose -p tender-workflows -f docker-compose.vps.yml up -d --build
+
+name: tender-workflows
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ../entities.csv:/app/entities.csv:ro
+      - tender_data:/app/data
+    environment:
+      TENDER_REPO_ROOT: /app
+      # GEMINI_API_KEY: ...  # requerido para Analizar (fast-path)
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ../entities.csv:/app/entities.csv:ro
+      - tender_data:/app/data
+    environment:
+      TENDER_REPO_ROOT: /app
+    command: >
+      python -m seace_monitor scan -c /app/config.yaml
+    restart: unless-stopped
+
+volumes:
+  tender_data:

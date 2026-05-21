@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -27,8 +28,11 @@ class Base(DeclarativeBase):
 
 class ProcessStatus(str, enum.Enum):
     publicada = "publicada"
+    descargando = "descargando"
+    descargada = "descargada"
     analizada = "analizada"
     portafolio = "portafolio"
+    descartada = "descartada"
 
 
 class Entity(Base):
@@ -47,6 +51,8 @@ class Process(Base):
     __tablename__ = "processes"
     __table_args__ = (
         UniqueConstraint("entity_id", "nid_proceso", name="uq_entity_nid_proceso"),
+        Index("ix_processes_status_entity", "status", "entity_id"),
+        Index("ix_processes_status_objeto", "status", "objeto"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -68,7 +74,7 @@ class Process(Base):
     fecha_publicacion: Mapped[str | None] = mapped_column(String(32))
     nomenclatura: Mapped[str] = mapped_column(String(256), index=True)
     reiniciado_desde: Mapped[str | None] = mapped_column(String(256))
-    objeto: Mapped[str | None] = mapped_column(String(64))
+    objeto: Mapped[str | None] = mapped_column(String(64), index=True)
     descripcion: Mapped[str | None] = mapped_column(Text)
     cuantia: Mapped[str | None] = mapped_column(String(64))
     moneda: Mapped[str | None] = mapped_column(String(64))

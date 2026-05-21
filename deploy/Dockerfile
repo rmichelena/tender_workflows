@@ -5,6 +5,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libreoffice-writer \
+    p7zip-full \
     && rm -rf /var/lib/apt/lists/*
 
 ENV TENDER_REPO_ROOT=/app

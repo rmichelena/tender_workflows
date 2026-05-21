@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "_macros.html" import entidad_nombre, status_cell %}
+{% block title %}Descartados — SEACE Monitor{% endblock %}
+{% block content %}
+<h2>Descartados</h2>
+<p class="muted">Procesos ocultos del listado de publicaciones. Puedes restaurarlos cuando quieras.</p>
+
+<table class="data">
+  <thead>
+    <tr>
+      <th class="col-entidad">Entidad</th>
+      <th>Nomenclatura</th>
+      <th>Estado</th>
+      <th>Fecha pub.</th>
+      <th>Descripción</th>
+      <th>Acciones</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in processes %}
+    <tr>
+      <td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
+      <td>{{ p.nomenclatura }}</td>
+      <td class="status-cell">{{ status_cell(p) }}</td>
+      <td>{{ p.fecha_publicacion or '—' }}</td>
+      <td class="desc">{{ p.descripcion or '—' }}</td>
+      <td>
+        <form method="post" action="/descartados/{{ p.id }}/restaurar">
+          <button type="submit" class="btn btn-secondary btn-sm">Restaurar</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="muted">No hay procesos descartados.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

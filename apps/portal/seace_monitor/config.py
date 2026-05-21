@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from .entities import resolve_entities_csv
+
 _DURATION_RE = re.compile(
     r"^(\d+(?:\.\d+)?)\s*(s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?|d|day|days?)$",
     re.I,
@@ -39,6 +41,13 @@ def parse_duration(value: str | int | float) -> int:
 
 
 @dataclass
+class FastAnalysisConfig:
+    enabled: bool = True
+    gemini_model: str = "gemini-2.5-pro"
+    gemini_api_key_env: str = "GEMINI_API_KEY"
+
+
+@dataclass
 class TenderProcurementConfig:
     """Integración con repo tender_procurement (pasos 1.0–1.3 + eje 0)."""
 
@@ -57,6 +66,7 @@ class AnalysisConfig:
     stage1_script: Path | None = None
     stage2_script: Path | None = None
     scripts_timeout_seconds: int = 3600
+    fast_path: FastAnalysisConfig = field(default_factory=FastAnalysisConfig)
     tender: TenderProcurementConfig = field(default_factory=TenderProcurementConfig)
 
 
@@ -69,6 +79,7 @@ class AppConfig:
     max_pages: int = 1
     rows_per_page: int = 15
     data_dir: Path = Path("./data")
+    http_proxy: str | None = None
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
 
     @property
@@ -86,8 +97,15 @@ class AppConfig:
         if os.environ.get("DATABASE_URL"):
             raw["database_url"] = os.environ["DATABASE_URL"]
 
+        http_proxy = (
+            os.environ.get("SEACE_HTTP_PROXY")
+            or os.environ.get("HTTP_PROXY")
+            or raw.get("http_proxy")
+        )
+
         analysis_raw = raw.pop("analysis", {}) or {}
         tender_raw = analysis_raw.pop("tender_procurement", {}) or {}
+        fast_raw = analysis_raw.pop("fast_path", {}) or {}
         tender = TenderProcurementConfig(
             repo_path=_optional_path(tender_raw.get("repo_path")),
             planos_mode=str(tender_raw.get("planos_mode", "auto_leave")),
@@ -101,13 +119,20 @@ class AppConfig:
             scripts_timeout_seconds=int(
                 analysis_raw.get("scripts_timeout_seconds", 3600)
             ),
+            fast_path=FastAnalysisConfig(
+                enabled=bool(fast_raw.get("enabled", True)),
+                gemini_model=str(fast_raw.get("gemini_model", "gemini-2.5-pro")),
+                gemini_api_key_env=str(
+                    fast_raw.get("gemini_api_key_env", "GEMINI_API_KEY")
+                ),
+            ),
             tender=tender,
         )
 
         return cls(
             poll_interval=str(raw.get("poll_interval", raw.get("poll_interval_seconds", "6h"))),
             anio=int(raw.get("anio", 2026)),
-            entities_csv=Path(raw.get("entities_csv", "entities.csv")),
+            entities_csv=resolve_entities_csv(raw.get("entities_csv", "entities.csv")),
             database_url=str(
                 raw.get(
                     "database_url",
@@ -117,6 +142,7 @@ class AppConfig:
             max_pages=int(raw.get("max_pages", 1)),
             rows_per_page=int(raw.get("rows_per_page", 15)),
             data_dir=Path(raw.get("data_dir", "./data")),
+            http_proxy=str(http_proxy).strip() if http_proxy else None,
             analysis=analysis,
         )
 

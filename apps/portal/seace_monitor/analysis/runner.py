@@ -1,12 +1,10 @@
-"""Ejecuta scripts externos de análisis (etapas 1 y 2)."""
+"""Ejecuta descarga de documentos y análisis (fast-path o scripts externos)."""
 
 from __future__ import annotations
 
 import json
 import logging
 import subprocess
-from dataclasses import asdict
-from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -15,7 +13,10 @@ from ..client import ProcessRow, SeaceClient
 from ..config import AppConfig
 from ..db.models import AnalysisResult, Process, ProcessStatus, utcnow
 from ..downloader import download_file
+from ..document_storage import normalize_legacy_filenames, prepare_download_dest, write_manifest
 from ..parser import parse_ficha
+from .document_prep import extract_archives, resolve_selected_documents
+from .fast_reader import run_fast_analysis
 from .tender_bridge import run_tender_stage1
 
 logger = logging.getLogger(__name__)
@@ -29,18 +30,54 @@ def process_data_dir(config: AppConfig, process: Process) -> Path:
 
 
 class AnalysisRunner:
-    """Descarga documentos y lanza scripts configurados por el usuario."""
+    """Descarga documentos y lanza análisis configurado."""
 
     def __init__(self, config: AppConfig, session: Session) -> None:
         self.config = config
         self.session = session
 
-    def analyze(self, process_id: int) -> AnalysisResult:
+    def download(self, process_id: int) -> Process:
+        process = self.session.get(Process, process_id)
+        if process is None:
+            raise ValueError(f"Proceso {process_id} no encontrado")
+        if process.status not in (
+            ProcessStatus.descargando,
+            ProcessStatus.publicada,
+        ):
+            raise RuntimeError(
+                f"Estado inválido para descarga: {process.status.value}"
+            )
+
+        entity = process.entity
+        proc_dir = process_data_dir(self.config, process)
+        docs_dir = proc_dir / "documentos"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+
+        self._download_documents(process, entity.ruc, docs_dir)
+        extract_archives(docs_dir)
+
+        process.status = ProcessStatus.descargada
+        process.data_dir = str(proc_dir)
+        self.session.commit()
+        logger.info("Descarga completada para proceso %s → %s", process_id, proc_dir)
+        return process
+
+    def analyze(
+        self, process_id: int, selected_rel_paths: list[str]
+    ) -> AnalysisResult:
         process = self.session.get(Process, process_id)
         if process is None:
             raise ValueError(f"Proceso {process_id} no encontrado")
 
-        entity = process.entity
+        if process.status not in (ProcessStatus.descargada, ProcessStatus.analizada):
+            raise RuntimeError(
+                f"El proceso debe estar descargado antes de analizar (estado: {process.status.value})"
+            )
+        if not process.data_dir:
+            raise RuntimeError("Sin data_dir; descarga los documentos primero.")
+        if not selected_rel_paths:
+            raise RuntimeError("Selecciona al menos un archivo para analizar.")
+
         analysis = process.analysis
         if analysis is None:
             analysis = AnalysisResult(process_id=process.id, status="running")
@@ -52,23 +89,24 @@ class AnalysisRunner:
         analysis.started_at = utcnow()
         self.session.flush()
 
-        proc_dir = process_data_dir(self.config, process)
+        proc_dir = Path(process.data_dir)
         docs_dir = proc_dir / "documentos"
-        docs_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            self._download_documents(process, entity.ruc, docs_dir)
-            result_data = self._run_pipeline(proc_dir, docs_dir)
+            result_data = self._run_pipeline(
+                proc_dir, docs_dir, process, selected_rel_paths
+            )
             self._apply_result(analysis, result_data)
             process.status = ProcessStatus.analizada
-            process.data_dir = str(proc_dir)
             analysis.status = "done"
             analysis.finished_at = utcnow()
         except Exception as exc:
             analysis.status = "error"
             analysis.error_message = str(exc)
             analysis.finished_at = utcnow()
+            process.status = ProcessStatus.descargada
             logger.exception("Análisis fallido para proceso %s", process_id)
+            self.session.commit()
             raise
 
         self.session.commit()
@@ -81,29 +119,31 @@ class AnalysisRunner:
                 docs = self._refresh_documentos(process, ruc)
             else:
                 raise RuntimeError(
-                    "Sin documentos en BD. Vuelve a escanear el proceso antes de analizar."
+                    "Sin documentos en BD. Vuelve a escanear el proceso antes de descargar."
                 )
 
         for doc in docs:
             uuid = doc["uuid"]
             nombre = doc.get("nombre", uuid)
-            ext = Path(nombre).suffix or ".pdf"
-            dest = docs_dir / f"{uuid}{ext}"
-            if dest.exists():
+            dest, exists = prepare_download_dest(docs_dir, doc)
+            if exists:
                 continue
             tipo = doc.get("tipo_descarga", "3")
-            download_file(uuid, dest, guest=tipo != "3")
-            logger.info("Descargado %s", nombre)
+            download_file(uuid, dest, guest=tipo != "3", http_proxy=self.config.http_proxy)
+            logger.info("Descargado %s → %s", nombre, dest.name)
 
-        manifest = docs_dir / "manifest.json"
-        manifest.write_text(json.dumps(docs, ensure_ascii=False, indent=2), encoding="utf-8")
+        normalize_legacy_filenames(docs_dir, docs)
+        write_manifest(docs_dir, docs)
 
     def _refresh_documentos(self, process: Process, ruc: str) -> list[dict]:
         from dataclasses import asdict
 
-        from ..client import ProcessRow
-
-        client = SeaceClient(ruc, process.anio, self.config.rows_per_page)
+        client = SeaceClient(
+            ruc,
+            process.anio,
+            self.config.rows_per_page,
+            http_proxy=self.config.http_proxy,
+        )
         row = ProcessRow(
             row_index=0,
             numero=process.numero or "",
@@ -128,19 +168,38 @@ class AnalysisRunner:
         self.session.flush()
         return docs
 
-    def _run_pipeline(self, proc_dir: Path, documents_dir: Path) -> dict:
-        """Ejecuta etapa análisis: tender_procurement 1.x o scripts legacy."""
+    def _run_pipeline(
+        self,
+        proc_dir: Path,
+        documents_dir: Path,
+        process: Process,
+        selected_rel_paths: list[str],
+    ) -> dict:
+        """Ejecuta fast-path Gemini o pipeline tender_procurement legacy."""
         result: dict = {}
         cfg = self.config.analysis
 
-        if cfg.tender.repo_path and cfg.tender.repo_path.exists():
+        if cfg.fast_path.enabled:
+            logger.info(
+                "Análisis fast-path Gemini para proceso %s (%s archivo(s))",
+                process.id,
+                len(selected_rel_paths),
+            )
+            result["stage1"] = run_fast_analysis(
+                self.config,
+                proc_dir,
+                documents_dir,
+                process,
+                selected_rel_paths,
+            )
+        elif cfg.tender.repo_path and cfg.tender.repo_path.exists():
             result["stage1"] = run_tender_stage1(
                 self.config, proc_dir, documents_dir
             )
         elif cfg.stage1_script and cfg.stage1_script.exists():
             result["stage1"] = self._run_script(cfg.stage1_script, proc_dir)
         else:
-            logger.warning("Sin tender_procurement ni stage1_script")
+            logger.warning("Sin fast_path, tender_procurement ni stage1_script")
             result["stage1"] = self._placeholder_result(proc_dir)
 
         if cfg.stage2_script and cfg.stage2_script.exists():
@@ -175,7 +234,6 @@ class AnalysisRunner:
         return {"ok": True}
 
     def _placeholder_result(self, proc_dir: Path) -> dict:
-        """Resultado mínimo cuando aún no hay scripts del usuario."""
         docs = list((proc_dir / "documentos").glob("*"))
         return {
             "alcance": "(pendiente: configurar analysis.stage1_script)",
@@ -187,15 +245,20 @@ class AnalysisRunner:
     def _apply_result(self, analysis: AnalysisResult, data: dict) -> None:
         stage1 = data.get("stage1", data)
         if isinstance(stage1, dict):
-            axis0 = stage1.get("axis0")
-            if isinstance(axis0, dict):
-                analysis.alcance = axis0.get("alcance") or analysis.alcance
-                analysis.incluye = axis0.get("incluye") or analysis.incluye
-                analysis.requisitos = axis0.get("requisitos") or analysis.requisitos
-            else:
+            if stage1.get("mode") == "fast_gemini":
                 analysis.alcance = stage1.get("alcance") or analysis.alcance
                 analysis.incluye = stage1.get("incluye") or analysis.incluye
                 analysis.requisitos = stage1.get("requisitos") or analysis.requisitos
+            else:
+                axis0 = stage1.get("axis0")
+                if isinstance(axis0, dict):
+                    analysis.alcance = axis0.get("alcance") or analysis.alcance
+                    analysis.incluye = axis0.get("incluye") or analysis.incluye
+                    analysis.requisitos = axis0.get("requisitos") or analysis.requisitos
+                else:
+                    analysis.alcance = stage1.get("alcance") or analysis.alcance
+                    analysis.incluye = stage1.get("incluye") or analysis.incluye
+                    analysis.requisitos = stage1.get("requisitos") or analysis.requisitos
 
         stage2 = data.get("stage2")
         if isinstance(stage2, dict):

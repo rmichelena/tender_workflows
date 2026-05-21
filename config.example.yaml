@@ -1,5 +1,8 @@
 # Copia a config.yaml en la raíz del repo
 
+# Proxy HTTP para SEACE/Alfresco (requerido desde IPs de datacenter).
+# http_proxy: http://server.maczona.com:18081
+
 poll_interval: 6h
 anio: 2026
 entities_csv: entities.csv

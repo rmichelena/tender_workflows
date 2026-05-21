@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_macros.html" import entidad_nombre, status_cell %}
+{% block title %}Descargados — SEACE Monitor{% endblock %}
+{% block content %}
+<h2>Procesos descargados</h2>
+<p class="muted">Documentos en disco listos para revisión y análisis manual.</p>
+
+<table class="data">
+  <thead>
+    <tr>
+      <th class="col-entidad">Entidad</th>
+      <th>Nomenclatura</th>
+      <th>Estado</th>
+      <th>Descripción</th>
+      <th>Acciones</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in processes %}
+    <tr>
+      <td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
+      <td>{{ p.nomenclatura }}</td>
+      <td class="status-cell">{{ status_cell(p) }}</td>
+      <td class="desc">{{ p.descripcion or '—' }}</td>
+      <td class="actions-cell">
+        <div class="actions-stack">
+        <a href="/descargados/{{ p.id }}" class="btn btn-primary btn-sm">Ver / Analizar</a>
+        <form method="post" action="/descargados/{{ p.id }}/descartar">
+          <button type="submit" class="btn btn-danger btn-sm">Descartar</button>
+        </form>
+        </div>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">Aún no hay procesos descargados.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

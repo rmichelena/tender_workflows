@@ -1,26 +1,25 @@
 {% extends "base.html" %}
+{% from "_macros.html" import entidad_nombre, status_cell %}
 {% block title %}Publicaciones — SEACE Monitor{% endblock %}
 {% block content %}
 <h2>Seguimiento de publicaciones</h2>
 
-{% if request.query_params.get('msg') == 'analisis_iniciado' %}
-<div class="alert">Análisis iniciado en segundo plano. Actualiza en unos minutos.</div>
-{% endif %}
-
 <form class="filters" method="get" action="/publicaciones">
-  <label>Estado
-    <select name="estado">
-      <option value="">Todos</option>
-      {% for s in statuses %}
-      <option value="{{ s.value }}" {% if filtro_estado == s.value %}selected{% endif %}>{{ s.value }}</option>
-      {% endfor %}
-    </select>
-  </label>
+  <input type="hidden" name="sort" value="{{ sort }}"/>
+  <input type="hidden" name="dir" value="{{ sort_dir }}"/>
   <label>Entidad
     <select name="entidad">
       <option value="">Todas</option>
       {% for e in entities %}
       <option value="{{ e.ruc }}" {% if filtro_entidad == e.ruc %}selected{% endif %}>{{ e.nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Objeto
+    <select name="objeto">
+      <option value="">Todos</option>
+      {% for o in objetos %}
+      <option value="{{ o }}" {% if filtro_objeto == o %}selected{% endif %}>{{ o }}</option>
       {% endfor %}
     </select>
   </label>
@@ -30,25 +29,19 @@
 <table class="data">
   <thead>
     <tr>
-      <th>N°</th>
-      <th>Entidad</th>
-      <th>Fecha pub.</th>
-      <th>Nomenclatura</th>
-      <th>Objeto</th>
-      <th>Descripción</th>
-      <th>Cuantía</th>
-      <th>Moneda</th>
-      <th>F. consultas</th>
-      <th>F. presentación</th>
-      <th>Estado</th>
+      {% for col, label in sort_columns.items() %}
+      <th class="sortable{% if col == 'entidad' %} col-entidad{% endif %}{% if sort == col %} sorted sorted-{{ sort_dir }}{% endif %}">
+        <a href="{{ sort_href(col) }}">{{ label }}</a>
+      </th>
+      {% endfor %}
       <th>Acciones</th>
     </tr>
   </thead>
   <tbody>
     {% for p in processes %}
-    <tr>
+    <tr data-process-id="{{ p.id }}"{% if p.status.value == 'descargando' %} data-downloading="1"{% endif %}>
       <td>{{ p.numero or '—' }}</td>
-      <td class="muted">{{ p.entity.nombre[:30] }}{% if p.entity.nombre|length > 30 %}…{% endif %}</td>
+      <td class="muted col-entidad">{{ entidad_nombre(p.entity) }}</td>
       <td>{{ p.fecha_publicacion or '—' }}</td>
       <td>{{ p.nomenclatura }}</td>
       <td>{{ p.objeto or '—' }}</td>
@@ -57,23 +50,30 @@
       <td>{{ p.moneda or '—' }}</td>
       <td>{{ p.fecha_consultas or '—' }}</td>
       <td>{{ p.fecha_presentacion or '—' }}</td>
-      <td><span class="badge badge-{{ p.status.value }}">{{ p.status.value }}</span></td>
-      <td>
-        <form method="post" action="/publicaciones/{{ p.id }}/analizar" style="display:inline">
-          <button type="submit" class="btn btn-primary btn-sm">Analizar</button>
+      <td class="status-cell">{{ status_cell(p) }}</td>
+      <td class="actions-cell">
+        <div class="actions-stack js-action-row">
+        <form method="post" action="/publicaciones/{{ p.id }}/descargar" class="js-keep-scroll js-descargar-form">
+          <input type="hidden" name="entidad" value="{{ filtro_entidad }}"/>
+          <input type="hidden" name="objeto" value="{{ filtro_objeto }}"/>
+          <input type="hidden" name="sort" value="{{ sort }}"/>
+          <input type="hidden" name="dir" value="{{ sort_dir }}"/>
+          <input type="hidden" name="scroll" value=""/>
+          {% if p.status.value == 'descargando' %}
+          <button type="button" class="btn btn-primary btn-sm" disabled>Descargando…</button>
+          {% else %}
+          <button type="submit" class="btn btn-primary btn-sm js-descargar-btn">Descargar</button>
+          {% endif %}
         </form>
-        {% if p.status.value == 'analizada' %}
-        <form method="post" action="/publicaciones/{{ p.id }}/estado" style="display:inline">
-          <input type="hidden" name="estado" value="portafolio"/>
-          <button type="submit" class="btn btn-secondary btn-sm">→ Portafolio</button>
+        <form method="post" action="/publicaciones/{{ p.id }}/descartar" class="js-keep-scroll js-descartar-form">
+          <input type="hidden" name="entidad" value="{{ filtro_entidad }}"/>
+          <input type="hidden" name="objeto" value="{{ filtro_objeto }}"/>
+          <input type="hidden" name="sort" value="{{ sort }}"/>
+          <input type="hidden" name="dir" value="{{ sort_dir }}"/>
+          <input type="hidden" name="scroll" value=""/>
+          <button type="submit" class="btn btn-danger btn-sm js-descartar-btn"{% if p.status.value == 'descargando' %} disabled{% endif %}>Descartar</button>
         </form>
-        {% endif %}
-        {% if p.status.value == 'portafolio' %}
-        <form method="post" action="/publicaciones/{{ p.id }}/estado" style="display:inline">
-          <input type="hidden" name="estado" value="analizada"/>
-          <button type="submit" class="btn btn-secondary btn-sm">Quitar portafolio</button>
-        </form>
-        {% endif %}
+        </div>
       </td>
     </tr>
     {% else %}
@@ -81,4 +81,76 @@
     {% endfor %}
   </tbody>
 </table>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  function lockDownloadRow(row) {
+    if (!row) return;
+    row.dataset.downloading = "1";
+    row.querySelectorAll(".js-action-row button").forEach(function (btn) {
+      btn.disabled = true;
+    });
+    var dl = row.querySelector(".js-descargar-btn");
+    if (dl) {
+      dl.textContent = "Descargando…";
+    }
+  }
+
+  document.querySelectorAll("form.js-descargar-form").forEach(function (form) {
+    form.addEventListener("submit", function () {
+      var field = form.querySelector('input[name="scroll"]');
+      if (field) field.value = String(Math.round(window.scrollY));
+      lockDownloadRow(form.closest("tr"));
+    });
+  });
+
+  document.querySelectorAll("form.js-keep-scroll").forEach(function (form) {
+    if (form.classList.contains("js-descargar-form")) return;
+    form.addEventListener("submit", function () {
+      var field = form.querySelector('input[name="scroll"]');
+      if (field) field.value = String(Math.round(window.scrollY));
+    });
+  });
+
+  var params = new URLSearchParams(window.location.search);
+  var scroll = params.get("scroll");
+  if (scroll) {
+    var y = parseInt(scroll, 10);
+    if (Number.isFinite(y) && y >= 0) {
+      function restore() { window.scrollTo(0, y); }
+      restore();
+      requestAnimationFrame(restore);
+      window.addEventListener("load", restore);
+    }
+    params.delete("scroll");
+    var query = params.toString();
+    var next = window.location.pathname + (query ? "?" + query : "") + window.location.hash;
+    history.replaceState(null, "", next);
+  }
+
+  var downloadingRows = document.querySelectorAll('tr[data-downloading="1"]');
+  if (!downloadingRows.length) return;
+
+  var ids = Array.from(downloadingRows).map(function (row) {
+    return row.getAttribute("data-process-id");
+  }).filter(Boolean);
+
+  function pollDownloads() {
+    Promise.all(ids.map(function (id) {
+      return fetch("/api/processes/" + id + "/workflow")
+        .then(function (r) { return r.json(); });
+    })).then(function (rows) {
+      var pending = rows.some(function (row) {
+        return row.status === "descargando";
+      });
+      if (!pending) {
+        window.location.reload();
+      }
+    }).catch(function () {});
+  }
+
+  window.setInterval(pollDownloads, 3000);
+})();
+</script>
 {% endblock %}

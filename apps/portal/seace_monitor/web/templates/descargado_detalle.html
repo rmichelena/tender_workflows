@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_cell, file_icon %}
+{% block title %}{{ process.nomenclatura }} — Descargado{% endblock %}
+{% block content %}
+{% set analizando = process.analysis and process.analysis.status == 'running' %}
+<h2>{{ process.nomenclatura }}</h2>
+{% if process.descripcion %}
+<p class="detail-subtitle">{{ process.descripcion }}</p>
+{% elif process.objeto %}
+<p class="detail-subtitle">{{ process.objeto }}</p>
+{% endif %}
+<p class="muted">{{ process.entity.nombre }}</p>
+<div class="status-cell" style="margin-bottom:1rem">{{ status_cell(process) }}</div>
+
+{% if request.query_params.get('msg') == 'descarga_iniciada' %}
+<div class="alert">Descarga en curso… actualiza en unos segundos.</div>
+{% elif request.query_params.get('msg') == 'analisis_iniciado' %}
+<div class="alert">Análisis iniciado en segundo plano. Cuando termine aparecerá en Analizados.</div>
+{% elif request.query_params.get('msg') == 'selecciona_archivos' %}
+<div class="alert" style="background:#fef2f2;border-color:#fca5a5">Selecciona al menos un archivo para analizar.</div>
+{% endif %}
+
+{% if process.analysis and process.analysis.status == 'error' %}
+<div class="alert" style="background:#fef2f2;border-color:#fca5a5">
+  Error en análisis: {{ process.analysis.error_message }}
+</div>
+{% elif analizando %}
+<div class="alert">Análisis en curso…</div>
+{% endif %}
+
+<div class="detail-grid">
+  <div class="detail-box detail-box-wide">
+    <h3>Cronograma</h3>
+    {% if cronograma %}
+    <table class="data cronograma-table">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Inicio</th>
+          <th>Fin</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in cronograma %}
+        <tr>
+          <td>{{ row.etapa or '—' }}</td>
+          <td>{{ row.fecha_inicio or '—' }}</td>
+          <td>{{ row.fecha_fin or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">—</p>
+    {% endif %}
+  </div>
+
+  <div class="detail-box detail-box-wide">
+    <h3>Archivos ({{ archivos|length }})</h3>
+    <p class="muted">ZIP/RAR ya descomprimidos. Marca los documentos a enviar al análisis.</p>
+    {% if archivos %}
+    <form method="post" action="/descargados/{{ process.id }}/analizar" id="form-analizar"{% if analizando %} data-analyzing="1"{% endif %}>
+      <ul class="doc-list doc-list-selectable">
+        {% for archivo in archivos %}
+        <li class="doc-item">
+          <label class="doc-select-label">
+            <input type="checkbox" name="selected_files" value="{{ archivo.rel_path }}"
+              {% if archivo.default_checked %}checked{% endif %}
+              {% if analizando %}disabled{% endif %}/>
+            {{ file_icon(archivo) }}
+            <div class="doc-meta">
+              <div class="doc-name">
+                <a href="/descargados/{{ process.id }}/documentos/{{ archivo.rel_path }}">{{ archivo.nombre }}</a>
+              </div>
+              <div class="doc-sub muted">
+                {{ archivo.origen }}
+                {% if archivo.tipo_documento %} · {{ archivo.tipo_documento }}{% endif %}
+              </div>
+            </div>
+            <span class="doc-size muted">{{ archivo.size_label }}</span>
+          </label>
+        </li>
+        {% endfor %}
+      </ul>
+      <p style="margin-top:1rem">
+        {% if analizando %}
+        <button type="button" class="btn btn-primary" disabled>Analizando…</button>
+        {% else %}
+        <button type="submit" class="btn btn-primary js-analizar-btn">Analizar seleccionados</button>
+        {% endif %}
+      </p>
+    </form>
+    {% else %}
+    <p class="muted">Sin archivos analizables. Si acabas de descargar, espera unos segundos y recarga.</p>
+    {% endif %}
+  </div>
+</div>
+
+<p style="margin-top:1.5rem">
+  <a href="/descargados" class="btn btn-secondary">← Volver</a>
+  <form method="post" action="/descargados/{{ process.id }}/descartar" style="display:inline">
+    <button type="submit" class="btn btn-danger"{% if analizando %} disabled{% endif %}>Descartar</button>
+  </form>
+</p>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var form = document.getElementById("form-analizar");
+  if (!form) return;
+
+  form.addEventListener("submit", function (ev) {
+    var checked = form.querySelectorAll('input[name="selected_files"]:checked');
+    if (!checked.length) {
+      ev.preventDefault();
+      return;
+    }
+    var btn = form.querySelector(".js-analizar-btn");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Analizando…";
+    }
+    form.querySelectorAll('input[name="selected_files"]').forEach(function (cb) {
+      cb.disabled = true;
+    });
+    var discard = document.querySelector('form[action*="/descartar"] button');
+    if (discard) discard.disabled = true;
+  });
+
+  if (form.getAttribute("data-analyzing") !== "1") return;
+
+  var processId = {{ process.id }};
+  window.setInterval(function () {
+    fetch("/api/processes/" + processId + "/workflow")
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.analysis_status === "done") {
+          window.location.href = "/analizados/" + processId;
+        } else if (data.analysis_status === "error") {
+          window.location.reload();
+        }
+      })
+      .catch(function () {});
+  }, 4000);
+})();
+</script>
+{% endblock %}

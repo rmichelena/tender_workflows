@@ -108,6 +108,17 @@ def _label_value(soup: BeautifulSoup, label: str) -> str:
 
 
 _DATE_RE = re.compile(r"^\d{2}/\d{2}/\d{4}")
+_ETAPA_NOISE_RE = (
+    re.compile(r"\s*A TRAV[EÉ]S DEL SEACE\s*", re.I),
+    re.compile(r"\s*\(Electr[oó]nica\)\s*", re.I),
+)
+
+
+def clean_cronograma_etapa(etapa: str) -> str:
+    text = etapa.strip()
+    for pattern in _ETAPA_NOISE_RE:
+        text = pattern.sub("", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _parse_cronograma(soup: BeautifulSoup) -> list[CronogramaEtapa]:
@@ -133,7 +144,11 @@ def _parse_cronograma(soup: BeautifulSoup) -> list[CronogramaEtapa]:
             if not _DATE_RE.match(inicio):
                 continue
             etapas.append(
-                CronogramaEtapa(etapa=etapa, fecha_inicio=inicio, fecha_fin=fin)
+                CronogramaEtapa(
+                    etapa=clean_cronograma_etapa(etapa),
+                    fecha_inicio=inicio,
+                    fecha_fin=fin,
+                )
             )
         if etapas:
             return etapas
@@ -151,7 +166,7 @@ class CronogramaFechasClave:
 def extract_cronograma_fechas(cronograma: list[CronogramaEtapa]) -> CronogramaFechasClave:
     """
     Mapea etapas del cronograma SEACE a columnas de la UI.
-    - fecha_consultas: etapa de consultas / absolución (fin de consultas)
+    - fecha_consultas: inicio de presentación de consultas (no absolución)
     - fecha_presentacion: inicio de presentación de propuestas
     """
     consultas = ""
@@ -159,16 +174,37 @@ def extract_cronograma_fechas(cronograma: list[CronogramaEtapa]) -> CronogramaFe
 
     for etapa in cronograma:
         nombre = etapa.etapa.lower()
-        if any(k in nombre for k in ("consulta", "absolución", "absolucion", "aclaracion", "aclaración")):
-            consultas = etapa.fecha_fin or etapa.fecha_inicio
-        if any(k in nombre for k in ("presentación", "presentacion", "propuesta")):
-            if not presentacion:
-                presentacion = etapa.fecha_inicio
+        if _is_presentacion_consultas(nombre):
+            consultas = etapa.fecha_inicio or consultas
+        elif _is_consultas_stage(nombre) and not _is_absolucion(nombre) and not consultas:
+            consultas = etapa.fecha_inicio
+        if _is_presentacion_propuestas(nombre) and not presentacion:
+            presentacion = etapa.fecha_inicio
 
     return CronogramaFechasClave(
         fecha_consultas=consultas,
         fecha_presentacion=presentacion,
     )
+
+
+def _is_absolucion(nombre: str) -> bool:
+    return any(k in nombre for k in ("absolución", "absolucion"))
+
+
+def _is_presentacion_consultas(nombre: str) -> bool:
+    if "consulta" not in nombre:
+        return False
+    return any(k in nombre for k in ("presentación", "presentacion", "registro"))
+
+
+def _is_consultas_stage(nombre: str) -> bool:
+    return any(k in nombre for k in ("consulta", "aclaracion", "aclaración"))
+
+
+def _is_presentacion_propuestas(nombre: str) -> bool:
+    if "consulta" in nombre:
+        return False
+    return any(k in nombre for k in ("presentación", "presentacion", "propuesta"))
 
 
 def _parse_documentos(soup: BeautifulSoup) -> list[Documento]:

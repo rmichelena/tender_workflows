@@ -51,6 +51,13 @@ body {
 }
 
 h2 { margin-top: 0; font-size: 1.35rem; }
+.detail-subtitle {
+  margin: 0.35rem 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text);
+}
 
 .cards {
   display: grid;
@@ -100,6 +107,20 @@ table.data th {
   font-weight: 600;
   white-space: nowrap;
 }
+table.data th.sortable a {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+table.data th.sortable a:hover { color: var(--accent); }
+table.data th.sortable.sorted a::after {
+  font-size: 0.65rem;
+  opacity: 0.7;
+}
+table.data th.sortable.sorted-asc a::after { content: "▲"; }
+table.data th.sortable.sorted-desc a::after { content: "▼"; }
 table.data tr:hover td { background: #f8fafc; }
 
 .badge {
@@ -111,8 +132,11 @@ table.data tr:hover td { background: #f8fafc; }
   text-transform: uppercase;
 }
 .badge-publicada { background: #dbeafe; color: #1e40af; }
+.badge-descargando { background: #fef3c7; color: #92400e; }
+.badge-descargada { background: #e0e7ff; color: #3730a3; }
 .badge-analizada { background: #d1fae5; color: #065f46; }
 .badge-portafolio { background: #fef3c7; color: #92400e; }
+.badge-descartada { background: #fee2e2; color: #991b1b; }
 
 .btn {
   display: inline-block;
@@ -125,7 +149,36 @@ table.data tr:hover td { background: #f8fafc; }
 }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-secondary { background: #e2e8f0; color: var(--text); }
+.btn-danger { background: #dc2626; color: #fff; }
 .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+.btn:disabled,
+button.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: grayscale(0.15);
+}
+
+table.data td.actions-cell {
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.actions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: flex-start;
+}
+.actions-stack form { margin: 0; }
+
+.status-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: flex-start;
+}
+table.data td.status-cell { vertical-align: top; white-space: nowrap; }
+.btn-seace { white-space: nowrap; }
 
 .alert {
   padding: 0.75rem 1rem;
@@ -152,6 +205,212 @@ table.data tr:hover td { background: #f8fafc; }
   font-size: 0.85rem;
   margin: 0;
 }
+.detail-box-wide {
+  grid-column: 1 / -1;
+}
+
+.detail-split {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 960px) {
+  .detail-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.detail-summary {
+  min-height: 12rem;
+}
+
+.detail-cronograma {
+  min-width: 0;
+}
+
+.detail-docs {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 0;
+}
+
+.detail-docs h3 { margin-top: 0; }
+
+.markdown-body {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--text);
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  margin: 1.25rem 0 0.5rem;
+  line-height: 1.3;
+}
+
+.markdown-body h1 { font-size: 1.25rem; }
+.markdown-body h2 { font-size: 1.1rem; }
+.markdown-body h3 { font-size: 1rem; }
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0.5rem 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.25rem;
+}
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.55rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-body th {
+  background: #eef2f7;
+  font-weight: 600;
+}
+
+.markdown-body code {
+  font-size: 0.85em;
+  background: #f1f5f9;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+}
+
+.markdown-body pre {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  overflow: auto;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+}
+
+.doc-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  align-items: flex-end;
+}
+
+.doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.doc-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.doc-item:last-child { border-bottom: none; }
+.doc-item-missing { opacity: 0.75; }
+
+.doc-select-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  width: 100%;
+  cursor: pointer;
+}
+.doc-select-label input[type="checkbox"] {
+  margin-top: 0.35rem;
+  flex-shrink: 0;
+}
+.doc-list-selectable .doc-item { padding: 0.35rem 0; }
+.doc-meta { flex: 1; min-width: 0; }
+.doc-name {
+  font-size: 0.88rem;
+  word-break: break-word;
+}
+.doc-name a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.doc-name a:hover { text-decoration: underline; }
+.doc-sub { margin-top: 0.15rem; }
+.doc-size {
+  white-space: nowrap;
+  font-size: 0.8rem;
+  padding-top: 0.1rem;
+}
+
+.file-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.4rem;
+  height: 1.65rem;
+  padding: 0 0.35rem;
+  border-radius: 4px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.file-badge-pdf { background: #fee2e2; color: #991b1b; }
+.file-badge-docx { background: #dbeafe; color: #1e40af; }
+.file-badge-xlsx { background: #d1fae5; color: #065f46; }
+.file-badge-dwg { background: #fef3c7; color: #92400e; }
+.file-badge-zip { background: #ede9fe; color: #5b21b6; }
+.file-badge-rar { background: #fce7f3; color: #9d174d; }
+.file-badge-file { background: #e2e8f0; color: #475569; }
+
+table.cronograma-table { font-size: 0.85rem; }
+table.cronograma-table th { white-space: nowrap; }
+
+pre.free-reader {
+  max-height: 36rem;
+  overflow: auto;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
 
 .muted { color: var(--muted); font-size: 0.8rem; }
 .desc { max-width: 280px; }
+
+table.data td.col-entidad,
+table.data th.col-entidad {
+  min-width: 10.5rem;
+  max-width: 14rem;
+}
+/* La fila define su alto (objeto, descripción…); la entidad solo llena ese alto. */
+table.data td.col-entidad {
+  height: 1px;
+  padding: 0;
+  vertical-align: top;
+}
+.entidad-nombre {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0.55rem 0.65rem;
+  overflow: hidden;
+  line-height: 1.35;
+  word-break: break-word;
+}

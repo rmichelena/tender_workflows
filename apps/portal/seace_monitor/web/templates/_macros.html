@@ -1,0 +1,16 @@
+{% macro entidad_nombre(entity) %}
+<div class="entidad-nombre" title="{{ entity.nombre }}">{{ entity.nombre }}</div>
+{% endmacro %}
+
+{% macro status_cell(process) %}
+<div class="status-stack">
+  <span class="badge badge-{{ process.status.value }}">{{ process.status.value }}</span>
+  {% if can_open_seace(process) %}
+  <a href="{{ seace_view_path(process.id) }}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm btn-seace">Ver en SEACE</a>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro file_icon(doc) %}
+<span class="file-badge file-badge-{{ doc.icon }}" title="{{ doc.extension|upper }}">{{ doc.icon[:4]|upper }}</span>
+{% endmacro %}

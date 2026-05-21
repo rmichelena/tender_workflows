@@ -49,10 +49,11 @@ class MultiEntityScanner:
             try:
                 n = self._scan_entity(entity)
                 new_count += n
+                self.session.commit()
             except Exception:
+                self.session.rollback()
                 logger.exception("Error escaneando entidad %s (%s)", entity.nombre, ruc)
 
-        self.session.commit()
         return new_count
 
     def _scan_entity(self, entity: Entity) -> int:
@@ -60,8 +61,10 @@ class MultiEntityScanner:
             ruc_entidad=entity.ruc,
             anio=self.config.anio,
             rows_per_page=self.config.rows_per_page,
+            http_proxy=self.config.http_proxy,
         )
         new_count = 0
+        seen_nids: set[str] = set()
 
         for page in range(self.config.max_pages):
             _, soup = client.fetch_list_page(page)
@@ -71,8 +74,9 @@ class MultiEntityScanner:
             )
 
             for row in rows:
-                if not row.nid_proceso:
+                if not row.nid_proceso or row.nid_proceso in seen_nids:
                     continue
+                seen_nids.add(row.nid_proceso)
                 list_hash = row_snapshot_hash(row)
                 proc = (
                     self.session.query(Process)
@@ -82,6 +86,10 @@ class MultiEntityScanner:
                     )
                     .one_or_none()
                 )
+
+                if proc is not None and proc.status == ProcessStatus.descartada:
+                    proc.last_seen_at = utcnow()
+                    continue
 
                 if proc is None:
                     if self._upsert_from_ficha(entity, client, row, proc=None):
@@ -142,6 +150,7 @@ class MultiEntityScanner:
         proc.content_hash = ficha.content_hash()
         proc.last_seen_at = utcnow()
         proc.updated_at = datetime.now(timezone.utc)
+        self.session.flush()
 
         logger.info(
             "%s %s — %s",

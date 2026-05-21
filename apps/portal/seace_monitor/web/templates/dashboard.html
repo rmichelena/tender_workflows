@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import entidad_nombre %}
 {% block title %}Dashboard — SEACE Monitor{% endblock %}
 {% block content %}
 <h2>Dashboard</h2>
@@ -28,7 +29,7 @@
 <table class="data">
   <thead>
     <tr>
-      <th>Entidad</th>
+      <th class="col-entidad">Entidad</th>
       <th>Nomenclatura</th>
       <th>Publicación</th>
       <th>Estado</th>
@@ -37,7 +38,7 @@
   <tbody>
     {% for p in recent %}
     <tr>
-      <td>{{ p.entity.nombre[:40] }}{% if p.entity.nombre|length > 40 %}…{% endif %}</td>
+      <td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
       <td>{{ p.nomenclatura }}</td>
       <td>{{ p.fecha_publicacion or '—' }}</td>
       <td><span class="badge badge-{{ p.status.value }}">{{ p.status.value }}</span></td>

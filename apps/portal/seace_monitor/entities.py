@@ -13,6 +13,40 @@ class EntityRow:
     nombre: str
 
 
+def resolve_entities_csv(path: Path | str | None = None) -> Path:
+    """Resuelve la ruta del CSV de entidades (repo root, entities.csv, entidades.csv)."""
+    from .tender_repo import resolve_tender_repo_root
+
+    configured = Path(path or "entities.csv")
+    candidates: list[Path] = []
+    if configured.is_absolute():
+        candidates.append(configured)
+    else:
+        candidates.append(configured)
+        try:
+            root = resolve_tender_repo_root()
+            candidates.extend(
+                [
+                    root / configured,
+                    root / "entities.csv",
+                    root / "entidades.csv",
+                ]
+            )
+        except RuntimeError:
+            candidates.append(Path("entidades.csv"))
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.is_file():
+            return resolved
+
+    return configured.resolve() if configured.is_absolute() else configured
+
+
 def load_entities_csv(path: Path) -> list[EntityRow]:
     if not path.exists():
         raise FileNotFoundError(f"No existe el archivo de entidades: {path}")
@@ -25,7 +59,7 @@ def load_entities_csv(path: Path) -> list[EntityRow]:
             reader = csv.DictReader(f)
             for row in reader:
                 ruc = _pick(row, "ruc", "RUC", "ruc_entidad")
-                nombre = _pick(row, "nombre", "Nombre", "entidad", "name")
+                nombre = _pick(row, "nombre", "Nombre", "entidad", "entidades", "name")
                 if ruc:
                     rows.append(EntityRow(ruc=_normalize_ruc(ruc), nombre=nombre or ruc))
         else:

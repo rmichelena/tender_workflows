@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -9,6 +10,10 @@ from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
+
+from .http_util import requests_proxies
+
+logger = logging.getLogger(__name__)
 
 BASE_URL = "https://prod2.seace.gob.pe/seacebus-uiwd-pub"
 USER_AGENT = (
@@ -50,7 +55,13 @@ class FichaResult:
 
 
 class SeaceClient:
-    def __init__(self, ruc_entidad: str, anio: int, rows_per_page: int = 15) -> None:
+    def __init__(
+        self,
+        ruc_entidad: str,
+        anio: int,
+        rows_per_page: int = 15,
+        http_proxy: str | None = None,
+    ) -> None:
         self.ruc_entidad = ruc_entidad
         self.anio = anio
         self.rows_per_page = rows_per_page
@@ -60,6 +71,10 @@ class SeaceClient:
         )
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
+        proxies = requests_proxies(http_proxy)
+        if proxies:
+            self.session.proxies.update(proxies)
+            logger.info("SEACE client using HTTP proxy")
 
     def _view_state(self, soup: BeautifulSoup) -> str:
         el = soup.find("input", {"name": "javax.faces.ViewState"})
@@ -104,6 +119,7 @@ class SeaceClient:
             return []
 
         rows: list[ProcessRow] = []
+        seen_nids: set[str] = set()
         for tr in tbody.find_all("tr", recursive=False):
             ri = int(tr.get("data-ri", len(rows)))
             cells = tr.find_all("td", recursive=False)
@@ -115,6 +131,18 @@ class SeaceClient:
                 continue
 
             params = dict(re.findall(r"'([^']+)':'([^']*)'", link.get("onclick", "")))
+            nid = params.get("nidProceso", "")
+            if not nid:
+                continue
+            if nid in seen_nids:
+                logger.warning(
+                    "SEACE listado: fila duplicada nidProceso=%s (%s)",
+                    nid,
+                    _cell_text(cells[2]),
+                )
+                continue
+            seen_nids.add(nid)
+
             link_id = link.get("id", "")
             for k, v in params.items():
                 if k.startswith("formBuscador:dtProcesos") and k == v:

@@ -1,0 +1,24 @@
+# Copiar a deploy/config.yaml en el VPS
+
+# Proxy HTTP para SEACE/Alfresco (requerido desde IPs de datacenter).
+# También vía env SEACE_HTTP_PROXY o HTTP_PROXY.
+# http_proxy: http://server.maczona.com:18081
+
+poll_interval: 6h
+anio: 2026
+entities_csv: /app/entities.csv
+database_url: sqlite:////app/data/seace.db
+max_pages: 1
+rows_per_page: 15
+data_dir: /app/data
+
+analysis:
+  fast_path:
+    enabled: true
+    gemini_model: gemini-2.5-pro
+    gemini_api_key_env: GEMINI_API_KEY
+  tender_procurement:
+    repo_path: null
+    planos_mode: auto_leave
+    run_axis0: false
+  scripts_timeout_seconds: 3600

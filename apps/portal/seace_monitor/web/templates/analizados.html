@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import entidad_nombre, status_cell %}
 {% block title %}Analizados — SEACE Monitor{% endblock %}
 {% block content %}
 <h2>Procesos analizados</h2>
@@ -7,20 +8,20 @@
 <table class="data">
   <thead>
     <tr>
-      <th>Entidad</th>
+      <th class="col-entidad">Entidad</th>
       <th>Nomenclatura</th>
       <th>Estado</th>
       <th>Alcance</th>
       <th>Requisitos</th>
-      <th></th>
+      <th>Acciones</th>
     </tr>
   </thead>
   <tbody>
     {% for p in processes %}
     <tr>
-      <td>{{ p.entity.nombre[:35] }}{% if p.entity.nombre|length > 35 %}…{% endif %}</td>
+      <td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
       <td>{{ p.nomenclatura }}</td>
-      <td><span class="badge badge-{{ p.status.value }}">{{ p.status.value }}</span></td>
+      <td class="status-cell">{{ status_cell(p) }}</td>
       <td class="desc">
         {% if p.analysis and p.analysis.alcance %}{{ p.analysis.alcance[:120] }}{% if p.analysis.alcance|length > 120 %}…{% endif %}
         {% else %}<span class="muted">—</span>{% endif %}
@@ -29,7 +30,25 @@
         {% if p.analysis and p.analysis.requisitos %}{{ p.analysis.requisitos[:80] }}…
         {% else %}<span class="muted">—</span>{% endif %}
       </td>
-      <td><a href="/analizados/{{ p.id }}" class="btn btn-secondary btn-sm">Ver</a></td>
+      <td class="actions-cell">
+        <div class="actions-stack">
+        <a href="/analizados/{{ p.id }}" class="btn btn-secondary btn-sm">Ver</a>
+        {% if p.status.value == 'analizada' %}
+        <form method="post" action="/analizados/{{ p.id }}/estado">
+          <input type="hidden" name="estado" value="portafolio"/>
+          <button type="submit" class="btn btn-primary btn-sm">→ Portafolio</button>
+        </form>
+        {% elif p.status.value == 'portafolio' %}
+        <form method="post" action="/analizados/{{ p.id }}/estado">
+          <input type="hidden" name="estado" value="analizada"/>
+          <button type="submit" class="btn btn-secondary btn-sm">Quitar portafolio</button>
+        </form>
+        {% endif %}
+        <form method="post" action="/analizados/{{ p.id }}/descartar">
+          <button type="submit" class="btn btn-danger btn-sm">Descartar</button>
+        </form>
+        </div>
+      </td>
     </tr>
     {% else %}
     <tr><td colspan="6" class="muted">Aún no hay procesos analizados.</td></tr>

@@ -1,8 +1,15 @@
 {% extends "base.html" %}
+{% from "_macros.html" import status_cell, file_icon %}
 {% block title %}{{ process.nomenclatura }} — Análisis{% endblock %}
 {% block content %}
 <h2>{{ process.nomenclatura }}</h2>
-<p class="muted">{{ process.entity.nombre }} · <span class="badge badge-{{ process.status.value }}">{{ process.status.value }}</span></p>
+{% if process.descripcion %}
+<p class="detail-subtitle">{{ process.descripcion }}</p>
+{% elif process.objeto %}
+<p class="detail-subtitle">{{ process.objeto }}</p>
+{% endif %}
+<p class="muted">{{ process.entity.nombre }}</p>
+<div class="status-cell" style="margin-bottom:1rem">{{ status_cell(process) }}</div>
 
 {% if process.analysis and process.analysis.status == 'error' %}
 <div class="alert" style="background:#fef2f2;border-color:#fca5a5">
@@ -10,40 +17,88 @@
 </div>
 {% endif %}
 
-<div class="detail-grid">
-  <div class="detail-box">
-    <h3>Alcance</h3>
-    <pre>{{ process.analysis.alcance if process.analysis else '—' }}</pre>
+<div class="detail-split">
+  <div class="detail-box detail-summary">
+    <h3>Resumen del análisis</h3>
+    {% if free_reader_html %}
+    <div class="markdown-body">{{ free_reader_html | safe }}</div>
+    {% else %}
+    <p class="muted">Sin resumen disponible.</p>
+    {% endif %}
   </div>
-  <div class="detail-box">
-    <h3>Qué incluye</h3>
-    <pre>{{ process.analysis.incluye if process.analysis else '—' }}</pre>
-  </div>
-  <div class="detail-box">
-    <h3>Requisitos</h3>
-    <pre>{{ process.analysis.requisitos if process.analysis else '—' }}</pre>
-  </div>
-  <div class="detail-box">
-    <h3>Entregables (etapa 2)</h3>
-    <pre>{{ process.analysis.entregables if process.analysis and process.analysis.entregables else '—' }}</pre>
-  </div>
-  <div class="detail-box">
-    <h3>Equipos sugeridos (etapa 2)</h3>
-    <pre>{{ process.analysis.equipos if process.analysis and process.analysis.equipos else '—' }}</pre>
-  </div>
-  <div class="detail-box">
+
+  <div class="detail-box detail-cronograma">
     <h3>Cronograma</h3>
-    <pre>{{ process.cronograma_json or '—' }}</pre>
+    {% if cronograma %}
+    <table class="data cronograma-table">
+      <thead>
+        <tr>
+          <th>Etapa</th>
+          <th>Inicio</th>
+          <th>Fin</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in cronograma %}
+        <tr>
+          <td>{{ row.etapa or '—' }}</td>
+          <td>{{ row.fecha_inicio or '—' }}</td>
+          <td>{{ row.fecha_fin or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">—</p>
+    {% endif %}
   </div>
+</div>
+
+<div class="detail-box detail-docs">
+  <h3>Documentos descargados ({{ documentos|length }})</h3>
+  {% if documentos %}
+  <ul class="doc-list">
+    {% for doc in documentos %}
+    <li class="doc-item{% if not doc.downloaded %} doc-item-missing{% endif %}">
+      {{ file_icon(doc) }}
+      <div class="doc-meta">
+        <div class="doc-name">{{ doc.nombre }}</div>
+        {% if doc.etapa or doc.tipo_documento %}
+        <div class="doc-sub muted">{{ doc.etapa }}{% if doc.etapa and doc.tipo_documento %} · {% endif %}{{ doc.tipo_documento }}</div>
+        {% endif %}
+      </div>
+      <span class="doc-size muted">{{ doc.size_label }}</span>
+      {% if doc.downloaded and doc.filename %}
+      <div class="doc-actions">
+        {% if doc.icon == 'pdf' %}
+        <a href="/analizados/{{ process.id }}/preview/{{ doc.filename }}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">Preview</a>
+        {% endif %}
+        <a href="/analizados/{{ process.id }}/documentos/{{ doc.filename }}" class="btn btn-primary btn-sm" download>Descargar</a>
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Sin documentos registrados.</p>
+  {% endif %}
 </div>
 
 <p style="margin-top:1.5rem">
   <a href="/analizados" class="btn btn-secondary">← Volver</a>
   {% if process.status.value == 'analizada' %}
-  <form method="post" action="/publicaciones/{{ process.id }}/estado" style="display:inline">
+  <form method="post" action="/analizados/{{ process.id }}/estado" style="display:inline">
     <input type="hidden" name="estado" value="portafolio"/>
     <button type="submit" class="btn btn-primary">Marcar portafolio</button>
   </form>
+  {% elif process.status.value == 'portafolio' %}
+  <form method="post" action="/analizados/{{ process.id }}/estado" style="display:inline">
+    <input type="hidden" name="estado" value="analizada"/>
+    <button type="submit" class="btn btn-secondary">Quitar portafolio</button>
+  </form>
   {% endif %}
+  <form method="post" action="/analizados/{{ process.id }}/descartar" style="display:inline">
+    <button type="submit" class="btn btn-danger">Descartar</button>
+  </form>
 </p>
 {% endblock %}
