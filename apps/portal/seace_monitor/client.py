@@ -77,6 +77,7 @@ class SeaceClient:
             logger.info("SEACE client using HTTP proxy")
         self._list_form_action: str | None = None
         self._list_view_state: str | None = None
+        self._last_list_soup: BeautifulSoup | None = None
 
     def _capture_list_form_state(self, soup: BeautifulSoup) -> None:
         self._list_form_action = self._form_action(soup)
@@ -103,6 +104,7 @@ class SeaceClient:
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "lxml")
         self._capture_list_form_state(soup)
+        self._last_list_soup = soup
 
         if page_index > 0:
             action = self._list_form_action
@@ -123,6 +125,7 @@ class SeaceClient:
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "lxml")
             self._capture_list_form_state(soup)
+            self._last_list_soup = soup
 
         return r.text, soup
 
@@ -211,10 +214,17 @@ class SeaceClient:
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "lxml")
             self._capture_list_form_state(soup)
+            self._last_list_soup = soup
             action = self._list_form_action
             vs = self._list_view_state
             if not action or not vs:
                 raise RuntimeError("Estado JSF del listado no disponible para abrir ficha")
+
+        if self._last_list_soup is not None:
+            for parsed in self.parse_rows(self._last_list_soup):
+                if parsed.nid_proceso == row.nid_proceso:
+                    row = parsed
+                    break
 
         post_data: dict[str, str] = {
             "formBuscador": "formBuscador",

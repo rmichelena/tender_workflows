@@ -13,10 +13,13 @@ import requests
 from fastapi import Request, Response
 from fastapi.responses import RedirectResponse
 
+from bs4 import BeautifulSoup
+
+from ..client import ProcessRow
 from ..config import AppConfig
 from ..db.models import Process
 from ..http_util import requests_proxies
-from .seace_view import can_open_seace, process_row_from_model
+from .seace_view import can_open_seace, process_row_from_model, row_from_list_html
 
 logger = logging.getLogger(__name__)
 
@@ -112,8 +115,101 @@ def _rewrite_text(text: str) -> str:
     return text
 
 
-def _auto_open_script(process: Process) -> str:
-    row = process_row_from_model(process)
+def _buscador_list_url(process: Process) -> str:
+    return (
+        f"{SEACE_ORIGIN}{SEACE_APP}/buscadorPublico/ongei/buscadorPublico.xhtml"
+        f"?ruc_entidad={process.entity.ruc}&anio={process.anio}"
+    )
+
+
+def _buscador_form_action(soup: BeautifulSoup, list_url: str) -> str:
+    form = soup.find("form", id="formBuscador")
+    if not form:
+        raise RuntimeError("No se encontró formBuscador")
+    action = form.get("action", "")
+    if not action or action == ".":
+        return list_url
+    return urljoin(list_url, action)
+
+
+def _proxy_location_from_absolute(absolute_url: str) -> str | None:
+    if not absolute_url:
+        return None
+    parsed = urlparse(absolute_url)
+    if not parsed.netloc.endswith("seace.gob.pe") or SEACE_APP not in parsed.path:
+        return None
+    suffix = parsed.path.split(SEACE_APP, 1)[1].lstrip("/")
+    location = f"{PROXY_ROOT}/{suffix}"
+    if parsed.query:
+        location = f"{location}?{parsed.query}"
+    return location
+
+
+def _row_for_open(process: Process, list_html: str) -> ProcessRow:
+    resolved = row_from_list_html(list_html, process.nid_proceso)
+    if resolved is not None:
+        if resolved.link_id != (process.link_id or ""):
+            logger.info(
+                "SEACE proxy: link_id %s → %s (nid=%s)",
+                process.link_id,
+                resolved.link_id,
+                process.nid_proceso,
+            )
+        return resolved
+    return process_row_from_model(process)
+
+
+def _try_server_open_ficha(
+    session: requests.Session,
+    process: Process,
+    list_html: str,
+    list_url: str,
+) -> str | None:
+    soup = BeautifulSoup(list_html, "lxml")
+    vs_el = soup.find("input", {"name": "javax.faces.ViewState"})
+    if not vs_el or not vs_el.get("value"):
+        return None
+    row = _row_for_open(process, list_html)
+    if not row.link_id:
+        return None
+    try:
+        action = _buscador_form_action(soup, list_url)
+    except RuntimeError:
+        return None
+    post_data = {
+        "formBuscador": "formBuscador",
+        "javax.faces.ViewState": vs_el["value"],
+        "ntipo": row.ntipo,
+        row.link_id: row.link_id,
+        "nidConvocatoria": row.nid_convocatoria,
+        "nidProceso": row.nid_proceso,
+        "nidSistema": row.nid_sistema,
+        "ptoRetorno": "LOCAL_ONGEI",
+    }
+    try:
+        resp = session.post(
+            action,
+            data=post_data,
+            headers={"User-Agent": USER_AGENT},
+            timeout=60,
+            allow_redirects=True,
+        )
+    except requests.RequestException:
+        logger.exception(
+            "SEACE proxy: falló POST apertura ficha nid=%s", process.nid_proceso
+        )
+        return None
+    if "fichaSeleccion" not in resp.url:
+        logger.warning(
+            "SEACE proxy: POST ficha no redirigió (nid=%s url=%s)",
+            process.nid_proceso,
+            resp.url[:120],
+        )
+        return None
+    return _proxy_location_from_absolute(resp.url)
+
+
+def _auto_open_script(row: ProcessRow) -> str:
     payload: dict[str, str] = {
         "formBuscador": "formBuscador",
         "ntipo": row.ntipo,
@@ -134,7 +230,9 @@ def _auto_open_script(process: Process) -> str:
         "if(!vs)return;"
         "var f=document.createElement('form');"
         "f.method='POST';"
-        "f.action=form.getAttribute('action')||form.action;"
+        "var action=form.getAttribute('action')||form.action||'';"
+        "if(!action||action==='.'){action=window.location.pathname+window.location.search;}"
+        "f.action=action;"
         "var payload="
         + payload_json
         + ";"
@@ -151,8 +249,9 @@ def _auto_open_script(process: Process) -> str:
     )
 
 
-def _inject_auto_open(html: str, process: Process) -> str:
-    script = _auto_open_script(process)
+def _inject_auto_open(html: str, process: Process, *, list_html: str) -> str:
+    row = _row_for_open(process, list_html)
+    script = _auto_open_script(row)
     if re.search(r"</body>", html, re.I):
         return re.sub(r"</body>", script + "</body>", html, count=1, flags=re.I)
     return html + script
@@ -180,6 +279,7 @@ def _build_response(
     upstream: requests.Response,
     *,
     process_for_inject: Process | None = None,
+    list_html_for_open: str | None = None,
 ) -> Response:
     if upstream.status_code in (301, 302, 303, 307, 308):
         location = upstream.headers.get("Location", "")
@@ -202,7 +302,8 @@ def _build_response(
         text = content.decode(upstream.encoding or "utf-8", errors="replace")
         text = _rewrite_text(text)
         if process_for_inject is not None and "html" in media_type:
-            text = _inject_auto_open(text, process_for_inject)
+            source_html = list_html_for_open or text
+            text = _inject_auto_open(text, process_for_inject, list_html=source_html)
         content = text.encode("utf-8")
         content_type = content_type.split(";", 1)[0] + "; charset=utf-8"
 
@@ -273,8 +374,25 @@ def proxy_seace_request(
         logger.exception("Proxy SEACE falló: %s", upstream_url)
         return Response(f"Error conectando con SEACE: {exc}", status_code=502)
 
+    if (
+        request.method == "GET"
+        and inject_process is not None
+        and "buscadorPublico.xhtml" in path
+        and upstream.status_code == 200
+    ):
+        list_url = f"{SEACE_ORIGIN}{upstream_url}"
+        proxied = _try_server_open_ficha(
+            session,
+            inject_process,
+            upstream.text,
+            list_url,
+        )
+        if proxied:
+            return RedirectResponse(proxied, status_code=302)
+
     should_inject = inject_process is not None and "buscadorPublico.xhtml" in path
     return _build_response(
         upstream,
         process_for_inject=inject_process if should_inject else None,
+        list_html_for_open=upstream.text if should_inject else None,
     )
