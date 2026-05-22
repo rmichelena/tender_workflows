@@ -42,6 +42,7 @@ Roadmap del producto integrado (portal + ingesta + análisis + agentes).
 |------|-------------|-----------|
 | 1.1 | Botón **Continuar extracción** en portafolio → sesión Hermes con expediente precargado | Alta |
 | 1.2 | Chat embebido (Hermes gateway u Open WebUI acoplado) | Alta |
+| 1.0 | **Volumen compartido VPS:** bind `/data` con layout `tenants/default/`; montar en Hermes (0–1 contenedor) | Alta — prereq |
 | 1.3 | Errores visibles: descarga/análisis fallido con mensaje en UI | Media |
 | 1.4 | Modo **Análisis completo** opcional (Paso 1.0–1.3 + eje 0) además de fast-path | Media |
 | 1.5 | Traefik + `licitaciones.infinitek.pe` | Baja |
@@ -114,20 +115,25 @@ Reglas compuestas que disparan pipeline sin intervención:
 
 ## Fase 4 — Multiusuario (overhaul mayor) 📋
 
-**Objetivo:** varios usuarios/equipos con permisos, auditoría y aislamiento.
+**Objetivo:** varios usuarios/equipos con permisos, auditoría y aislamiento — **sin** stack Docker por usuario.
+
+**Diseño:** [MULTI_TENANCY.md](MULTI_TENANCY.md)
 
 | Ítem | Descripción |
 |------|-------------|
+| 4.0 | Layout `data/tenants/{tenant_id}/` (settings, seace, procesos, agent) — empezar con `default` |
 | 4.1 | Auth (sessions/OAuth); login en portal |
 | 4.2 | Roles: admin, analista, viewer |
-| 4.3 | Entidades visibles por usuario/equipo |
+| 4.3 | `entities.csv` y prefiltros **por tenant** |
 | 4.4 | Acciones auditadas (descargar, analizar, descartar, portafolio) |
-| 4.5 | API keys LLM y reglas: scope global vs por organización |
-| 4.6 | Migración schema: `users`, `organizations`, `memberships` |
+| 4.5 | Settings LLM por tenant (providers/modelos) |
+| 4.6 | Schema: `users`, `organizations`, `memberships`, `tenant_id` en `Process` |
 
-**Impacto:** toca casi todas las rutas web, BD, deploy y Settings. Planificar antes de segundo cliente externo.
+**Hermes en multi-tenant:** como mucho **un** gateway; `home_dir` por tenant bajo `tenants/{id}/agent/` cuando exista multi-agent estable upstream — no contenedores `hermes-N` por persona. Plan B: agente vía SDK + mismo árbol en disco.
 
-**Preparación ya acordada:** `Process` → `Opportunity` + `source`; no acoplar nombres SEACE al core.
+**Impacto:** toca rutas web, BD, paths en código y deploy. Preparar `tenant_id=default` **antes** del overhaul reduce el dolor.
+
+**Preparación ya acordada:** `Process` → `Opportunity` + `source`; paths vía `tenant_data_dir()`; Dropbox fuera del flujo automático.
 
 ---
 

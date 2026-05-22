@@ -10,6 +10,7 @@
 - Cronograma date columns in all list views use **fin** of consultas and presentación propuestas, not inicio.
 - Discarding from descargados or analizados should delete disk data and clear download/analysis metadata (`data_dir`, `documentos_json`, `AnalysisResult`); detail pages use the same POST endpoints.
 - `documentos_json` is populated only when downloading (fresh ficha fetch), not during scan.
+- Design for multi-user: single deploy, `data/tenants/{tenant_id}/` (settings, seace, procesos, agent); no Docker stack per user; Dropbox out of automated flow; see `docs/MULTI_TENANCY.md`.
 
 ## Learned Workspace Facts
 
@@ -23,6 +24,6 @@
 - Cronograma columns **Fin consultas** / **Fin presentación** use `fecha_fin` from `cronograma_json` (`extract_cronograma_fechas`; `fecha_inicio` fallback); list views use `ProcessListView` (no ORM mutation on render).
 - Monitored entities live in gitignored `entities.csv` at repo root (user-maintained, not committed); config key `entities_csv`.
 - VPS production: `ssh bots-sysop`, project `tender-workflows` under `~/tender_workflows/deploy/`; secrets in gitignored `deploy/.env` (from `deploy/.env.example`: `GEMINI_API_KEY`, `SEACE_HTTP_PROXY`); `cp config.example.vps.yaml config.yaml`; deploy via `git pull` + `docker compose -f docker-compose.vps.yml up -d --build` (avoid rsync on tracked app files—causes drift vs `origin/main`); UI at http://bots.infinitek.pe:8080/.
-- Product docs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/ROADMAP.md](docs/ROADMAP.md), [docs/INTEGRATION.md](docs/INTEGRATION.md).
+- Product docs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/ROADMAP.md](docs/ROADMAP.md), [docs/MULTI_TENANCY.md](docs/MULTI_TENANCY.md), [docs/INTEGRATION.md](docs/INTEGRATION.md), [docs/HERMES_VPS.md](docs/HERMES_VPS.md).
 - Portal routes: `/publicaciones` (`publicada`, Descargar→`descargando`→`descargada`); `/descargados` (select PDFs, Analizar); `/analizados` (`analizada`/`portafolio`); `/descartados`; lists show objeto+descripción and fin-date columns; publicaciones default sort fecha publicación desc; descargados/analizados de-emphasize fecha publicación.
 - Background jobs: commit SQLite before long I/O; multi-entity scanner commits per entity; per-process DB savepoints in scanner (one ficha failure must not roll back whole entity); concurrent download/analyze per distinct process (paid Gemini key, no global analyze lock); 503/upload retry with fresh Gemini client; system prompt anchors today (America/Lima) and avoids boilerplate future-legislation dudas; `normalize_legacy_filenames` must not suffix `_2` when dest already matches manifest `nombre`.

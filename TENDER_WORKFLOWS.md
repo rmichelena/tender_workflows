@@ -47,5 +47,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — capas, componentes, diagramas, despliegue
 - [docs/ROADMAP.md](docs/ROADMAP.md) — fases, prefiltros, multiusuario, WhatsApp, providers LLM
+- [docs/MULTI_TENANCY.md](docs/MULTI_TENANCY.md) — partición por tenant, Hermes vs SDK
+- [docs/HERMES_VPS.md](docs/HERMES_VPS.md) — Hermes en VPS, volumen compartido
 - [docs/INTEGRATION.md](docs/INTEGRATION.md) — SEACE + análisis + estados
 - [README.md](README.md) — pipeline documental y extractores (Paso 1)

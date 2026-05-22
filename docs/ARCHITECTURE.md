@@ -78,7 +78,9 @@ flowchart TB
 | **Proposal** | Redacción, pricing | No implementado |
 | **Finance** | Flujo de caja vs hitos licitación | No implementado |
 
-Los contextos se acoplan por **ID de oportunidad** y paths bajo `data/procesos/`, no por un mega-schema único.
+Los contextos se acoplan por **ID de oportunidad** y paths bajo `data/tenants/{tenant_id}/procesos/`, no por un mega-schema único.
+
+**Multi-usuario:** ver [MULTI_TENANCY.md](MULTI_TENANCY.md) — un despliegue, subdirectorios por tenant (settings, seace, procesos, agent), sin contenedor por usuario.
 
 ---
 
@@ -108,9 +110,11 @@ tender_workflows/
 |----------|-----|
 | `web` | UI en `:8080`, jobs background descarga/análisis |
 | `worker` | `python -m seace_monitor scan` cada `poll_interval` |
-| Volumen `tender_data` | SQLite + `data/procesos/` |
+| Volumen `tender_data` | SQLite + `data/tenants/{tenant_id}/` (hoy `default`) |
 
 Secrets: `deploy/.env` (`GEMINI_API_KEY`, `SEACE_HTTP_PROXY`).
+
+**Hermes (opcional):** un gateway, mount del mismo `/data`; no un contenedor por usuario. Ver [HERMES_VPS.md](HERMES_VPS.md), [MULTI_TENANCY.md](MULTI_TENANCY.md).
 
 ---
 
