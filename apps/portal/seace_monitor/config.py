@@ -46,6 +46,7 @@ class FastAnalysisConfig:
     enabled: bool = True
     gemini_model: str = "gemini-2.5-pro"
     gemini_api_key_env: str = "GEMINI_API_KEY"
+    gemini_cache_ttl: str = "86400s"
 
 
 @dataclass
@@ -139,6 +140,7 @@ class AppConfig:
                 gemini_api_key_env=str(
                     fast_raw.get("gemini_api_key_env", "GEMINI_API_KEY")
                 ),
+                gemini_cache_ttl=str(fast_raw.get("gemini_cache_ttl", "86400s")),
             ),
             tender=tender,
         )

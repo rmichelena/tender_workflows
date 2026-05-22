@@ -43,3 +43,7 @@ def render_markdown(text: str) -> str:
 def render_free_reader_summary(text: str) -> str:
     body = strip_appended_cronograma(strip_llm_preamble(text))
     return render_markdown(body)
+
+
+def render_chat_reply(text: str) -> str:
+    return render_free_reader_summary(text)

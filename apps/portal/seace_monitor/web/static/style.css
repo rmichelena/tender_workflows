@@ -311,6 +311,98 @@ table.data td.status-cell { vertical-align: top; white-space: nowrap; }
   white-space: pre-wrap;
 }
 
+.detail-chat {
+  margin-top: 1rem;
+  margin-bottom: 0;
+}
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chat-messages {
+  max-height: 28rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.25rem 0;
+}
+
+.chat-bubble {
+  max-width: 92%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.chat-bubble-user {
+  align-self: flex-end;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.chat-bubble-model {
+  align-self: flex-start;
+  background: #fff;
+}
+
+.chat-bubble-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.chat-bubble-body {
+  font-size: 0.88rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-bubble-model .chat-bubble-body.markdown-body {
+  max-height: none;
+  overflow: visible;
+  font-size: 0.88rem;
+}
+
+.chat-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.chat-form textarea {
+  width: 100%;
+  min-height: 3.25rem;
+  resize: vertical;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  line-height: 1.4;
+}
+
+.chat-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.chat-status {
+  flex: 1;
+}
+
+.chat-unavailable {
+  margin: 0;
+}
+
 .doc-actions {
   display: flex;
   flex-direction: column;

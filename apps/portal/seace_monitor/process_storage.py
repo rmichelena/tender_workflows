@@ -131,6 +131,10 @@ def discard_process_downloads(
     config: AppConfig, process: Process, session: Session
 ) -> None:
     """Descarte desde descargada: borra disco, metadatos de descarga y análisis."""
+    if process.data_dir:
+        from .analysis.gemini_session import cleanup_gemini_session
+
+        cleanup_gemini_session(config, Path(process.data_dir))
     delete_process_data_dir(config, process)
     clear_process_download_metadata(process)
     delete_process_analysis(session, process)

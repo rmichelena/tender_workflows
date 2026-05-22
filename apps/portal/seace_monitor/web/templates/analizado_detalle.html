@@ -54,6 +54,37 @@
   </div>
 </div>
 
+{% if process.analysis and process.analysis.status == 'done' %}
+<div class="detail-box detail-chat" id="analysis-chat" data-process-id="{{ process.id }}">
+  <h3>Preguntas sobre las bases</h3>
+  <p id="chat-unavailable" class="muted chat-unavailable"{% if chat.available %} hidden{% endif %}>
+    {{ chat.message or 'El chat estará disponible tras re-analizar el proceso con Gemini.' }}
+  </p>
+  <div id="chat-panel" class="chat-panel"{% if not chat.available %} hidden{% endif %}>
+    <div id="chat-messages" class="chat-messages" aria-live="polite">
+      {% for turn in chat.turns %}
+      <div class="chat-bubble chat-bubble-{{ turn.role }}">
+        {% if turn.role == 'user' %}
+        <div class="chat-bubble-label">Tú</div>
+        <div class="chat-bubble-body">{{ turn.text }}</div>
+        {% else %}
+        <div class="chat-bubble-label">Gemini</div>
+        <div class="chat-bubble-body markdown-body">{{ turn.html | safe }}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <form id="chat-form" class="chat-form">
+      <textarea id="chat-input" rows="2" maxlength="8000" placeholder="Ej: ¿Cuál es el plazo de entrega y las penalidades?"></textarea>
+      <div class="chat-form-actions">
+        <span id="chat-status" class="muted chat-status" hidden></span>
+        <button type="submit" class="btn btn-primary" id="chat-submit">Enviar</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
 <div class="detail-box detail-docs">
   <h3>Documentos descargados ({{ documentos|length }})</h3>
   {% if documentos %}
@@ -101,4 +132,10 @@
     <button type="submit" class="btn btn-danger">Archivar</button>
   </form>
 </p>
+{% endblock %}
+
+{% block scripts %}
+{% if process.analysis and process.analysis.status == 'done' %}
+<script src="/static/analizado_chat.js"></script>
+{% endif %}
 {% endblock %}

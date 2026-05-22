@@ -49,6 +49,7 @@ from .seace_proxy import (
     seace_view_path,
 )
 from .seace_view import can_open_seace
+from .analysis_chat import register_analysis_chat_routes
 from .settings_entities import bootstrap_entities, register_settings_routes
 from .sorting import (
     SORTABLE_COLUMNS,
@@ -710,12 +711,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         documentos = list_downloaded_documents(proc)
         cronograma = parse_cronograma(proc.cronograma_json)
         free_reader_html = None
+        chat_payload = {"available": False, "turns": [], "message": None}
         if proc.data_dir:
-            summary_path = Path(proc.data_dir) / "free_reader_summary.md"
+            proc_dir = Path(proc.data_dir)
+            summary_path = proc_dir / "free_reader_summary.md"
             if summary_path.is_file():
                 free_reader_html = render_free_reader_summary(
                     summary_path.read_text(encoding="utf-8")
                 )
+            from .analysis_chat import api_chat_payload
+            from ..analysis.gemini_session import load_session
+
+            chat_payload = api_chat_payload(load_session(proc_dir))
         return render(
             request,
             "analizado_detalle.html",
@@ -724,6 +731,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             documentos=documentos,
             cronograma=cronograma,
             free_reader_html=free_reader_html,
+            chat=chat_payload,
             ProcessStatus=ProcessStatus,
         )
 
@@ -785,5 +793,6 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         }
 
     register_settings_routes(app, _config, render, get_db)
+    register_analysis_chat_routes(app, _config, get_db)
 
     return app
