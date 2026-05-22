@@ -9,8 +9,8 @@
     </div>
     <div class="settings-header-actions">
       <span id="selection-summary" class="muted"></span>
-      <button type="button" id="btn-discard" class="btn btn-secondary" disabled>Descartar cambios</button>
-      <button type="button" id="btn-save" class="btn btn-primary" disabled>Guardar cambios</button>
+      <button type="button" id="btn-discard" class="btn btn-secondary js-btn-discard" disabled>Descartar cambios</button>
+      <button type="button" id="btn-save" class="btn btn-primary js-btn-save" disabled>Guardar cambios</button>
     </div>
   </header>
 
@@ -30,9 +30,17 @@
     <div id="entity-loading" class="muted">Cargando entidades…</div>
     <ul id="entity-list" class="entity-list" hidden></ul>
   </div>
+
+  <footer class="settings-footer">
+    <span id="selection-summary-footer" class="muted settings-footer-summary"></span>
+    <div class="settings-footer-actions">
+      <button type="button" class="btn btn-secondary js-btn-discard" disabled>Descartar cambios</button>
+      <button type="button" class="btn btn-primary js-btn-save" disabled>Guardar cambios</button>
+    </div>
+  </footer>
 </div>
 
-<div id="save-modal" class="modal-overlay" hidden>
+<div id="save-modal" class="modal-overlay" hidden aria-hidden="true">
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="save-modal-title">
     <h3 id="save-modal-title">Confirmar cambios</h3>
 

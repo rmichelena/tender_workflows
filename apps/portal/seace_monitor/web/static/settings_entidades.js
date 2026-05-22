@@ -6,6 +6,7 @@
   var selected = new Set();
   var dirty = false;
   var preview = null;
+  var saving = false;
 
   var listEl = document.getElementById("entity-list");
   var loadingEl = document.getElementById("entity-loading");
@@ -13,8 +14,7 @@
   var filterSelectedEl = document.getElementById("filter-selected-only");
   var filterActivoEl = document.getElementById("filter-activo-only");
   var summaryEl = document.getElementById("selection-summary");
-  var btnSave = document.getElementById("btn-save");
-  var btnDiscard = document.getElementById("btn-discard");
+  var summaryFooterEl = document.getElementById("selection-summary-footer");
   var modal = document.getElementById("save-modal");
   var modalAdded = document.getElementById("modal-added-section");
   var modalRemoved = document.getElementById("modal-removed-section");
@@ -23,27 +23,76 @@
   var sinceDateInput = document.getElementById("since-date-input");
   var sinceDateError = document.getElementById("since-date-error");
 
+  if (modal && modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
+
   function normalizeRuc(ruc) {
     return String(ruc || "").replace(/\D/g, "");
   }
 
   function setDirty(value) {
     dirty = value;
-    btnSave.disabled = !dirty;
-    btnDiscard.disabled = !dirty;
+    document.querySelectorAll(".js-btn-save").forEach(function (btn) {
+      btn.disabled = !dirty || saving;
+    });
+    document.querySelectorAll(".js-btn-discard").forEach(function (btn) {
+      btn.disabled = !dirty || saving;
+    });
+  }
+
+  function setSaving(value) {
+    saving = value;
+    setDirty(dirty);
+    document.querySelectorAll(".js-btn-save").forEach(function (btn) {
+      btn.textContent = saving ? "Guardando…" : "Guardar cambios";
+    });
   }
 
   function updateSummary() {
-    summaryEl.textContent = selected.size + " seleccionada(s) de " + entities.length;
+    var text = selected.size + " seleccionada(s) de " + entities.length;
+    if (summaryEl) summaryEl.textContent = text;
+    if (summaryFooterEl) summaryFooterEl.textContent = text;
   }
 
   function matchesFilter(ent) {
     var q = (searchEl.value || "").trim().toLowerCase();
     if (filterSelectedEl.checked && !selected.has(ent.ruc)) return false;
-    if (filterActivoEl.checked && (ent.estado_osce || "").toLowerCase() !== "activo") return false;
+    if (filterActivoEl.checked && (ent.estado_osce || "").toLowerCase() !== "activo") {
+      return false;
+    }
     if (!q) return true;
-    var hay = (ent.nombre + " " + ent.ruc + " " + ent.departamento + " " + ent.provincia).toLowerCase();
+    var hay = (
+      ent.nombre + " " + ent.ruc + " " + ent.departamento + " " + ent.provincia
+    ).toLowerCase();
     return hay.indexOf(q) !== -1;
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function entityLineHtml(ent) {
+    var parts = [
+      '<span class="entity-row-line">',
+      escapeHtml(ent.nombre),
+      '<span class="entity-row-sep">·</span>',
+      escapeHtml(ent.ruc),
+    ];
+    if (ent.estado_osce) {
+      parts.push('<span class="entity-row-sep">·</span>');
+      parts.push('<span class="entity-row-extra">' + escapeHtml(ent.estado_osce) + "</span>");
+    }
+    if (ent.departamento) {
+      parts.push('<span class="entity-row-sep">·</span>');
+      parts.push('<span class="entity-row-extra">' + escapeHtml(ent.departamento) + "</span>");
+    }
+    parts.push("</span>");
+    return parts.join("");
   }
 
   function renderList() {
@@ -66,15 +115,10 @@
         setDirty(!setsEqual(selected, baseline));
         updateSummary();
       });
-      var meta = document.createElement("span");
-      meta.className = "entity-row-meta";
-      var estado = ent.estado_osce ? " · " + ent.estado_osce : "";
-      meta.innerHTML =
-        "<strong>" + escapeHtml(ent.nombre) + "</strong>" +
-        "<span class=\"entity-row-sub\">" + escapeHtml(ent.ruc) + estado +
-        (ent.departamento ? " · " + escapeHtml(ent.departamento) : "") + "</span>";
+      var line = document.createElement("span");
+      line.innerHTML = entityLineHtml(ent);
       label.appendChild(cb);
-      label.appendChild(meta);
+      label.appendChild(line);
       li.appendChild(label);
       listEl.appendChild(li);
     });
@@ -84,14 +128,6 @@
       empty.textContent = "Sin resultados.";
       listEl.appendChild(empty);
     }
-  }
-
-  function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
   }
 
   function setsEqual(a, b) {
@@ -186,7 +222,6 @@
       sinceDateError.hidden = true;
     }
     if (!modalRemoved.hidden) {
-      var c = data.removed_counts;
       modalRemovedText.textContent =
         "Está eliminando entidades de la lista que tienen procesos en la base de datos: " +
         c.publicados + " publicados, " + c.descargados + " descargados, " +
@@ -194,10 +229,14 @@
       buildRemovedPolicyOptions(c);
     }
     modal.hidden = false;
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("modal-open");
   }
 
   function closeModal() {
     modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("modal-open");
     preview = null;
   }
 
@@ -209,6 +248,15 @@
   function selectedRemovedPolicy() {
     var checked = modal.querySelector('input[name="removed_policy"]:checked');
     return checked ? checked.value : "keep_all";
+  }
+
+  function parseErrorDetail(errBody) {
+    if (!errBody) return "Error";
+    if (typeof errBody.detail === "string") return errBody.detail;
+    if (Array.isArray(errBody.detail)) {
+      return errBody.detail.map(function (d) { return d.msg || String(d); }).join("; ");
+    }
+    return "Error";
   }
 
   function confirmSave() {
@@ -238,29 +286,39 @@
         payload.removed_policy = selectedRemovedPolicy();
       }
     }
-    btnSave.disabled = true;
+    setSaving(true);
     fetch("/api/settings/entidades/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
       .then(function (r) {
-        if (!r.ok) return r.json().then(function (e) { throw new Error(e.detail || "Error"); });
+        if (!r.ok) {
+          return r.json().then(function (e) {
+            throw new Error(parseErrorDetail(e));
+          });
+        }
         return r.json();
       })
       .then(function () {
         baseline = new Set(selected);
         setDirty(false);
         closeModal();
-        alert("Cambios guardados." + (payload.added_scan_mode ? " Escaneo iniciado en segundo plano." : ""));
+        alert(
+          "Cambios guardados." +
+            (payload.added_scan_mode ? " Escaneo iniciado en segundo plano." : "")
+        );
       })
       .catch(function (err) {
         alert("No se pudo guardar: " + err.message);
-        btnSave.disabled = !dirty;
+      })
+      .finally(function () {
+        setSaving(false);
       });
   }
 
   function onSaveClick() {
+    setSaving(true);
     fetch("/api/settings/entidades/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -282,9 +340,11 @@
           confirmSave();
           return;
         }
+        setSaving(false);
         openModal(data);
       })
       .catch(function (err) {
+        setSaving(false);
         alert("Error al preparar guardado: " + err.message);
       });
   }
@@ -298,7 +358,9 @@
   document.querySelectorAll(".sidebar nav a").forEach(function (link) {
     link.addEventListener("click", function (e) {
       if (!dirty) return;
-      var ok = window.confirm("Tiene cambios sin guardar. ¿Está seguro que quiere salir de la página?");
+      var ok = window.confirm(
+        "Tiene cambios sin guardar. ¿Está seguro que quiere salir de la página?"
+      );
       if (!ok) e.preventDefault();
     });
   });
@@ -306,12 +368,19 @@
   searchEl.addEventListener("input", renderList);
   filterSelectedEl.addEventListener("change", renderList);
   filterActivoEl.addEventListener("change", renderList);
-  btnDiscard.addEventListener("click", discardChanges);
-  btnSave.addEventListener("click", onSaveClick);
+  document.querySelectorAll(".js-btn-discard").forEach(function (btn) {
+    btn.addEventListener("click", discardChanges);
+  });
+  document.querySelectorAll(".js-btn-save").forEach(function (btn) {
+    btn.addEventListener("click", onSaveClick);
+  });
   document.getElementById("modal-cancel").addEventListener("click", closeModal);
   document.getElementById("modal-confirm").addEventListener("click", confirmSave);
   modal.addEventListener("click", function (e) {
     if (e.target === modal) closeModal();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !modal.hidden) closeModal();
   });
 
   loadEntities();
