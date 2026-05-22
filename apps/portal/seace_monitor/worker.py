@@ -8,7 +8,7 @@ import time
 from .config import AppConfig
 from .db.session import init_db, session_factory
 from .scanner import MultiEntityScanner
-from .tenant_paths import migrate_legacy_layout
+from .tenant_paths import migrate_legacy_layout, migrate_process_data_dir_refs
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,18 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
     )
     if migrate_legacy_layout(cfg):
         logger.info("Layout de datos migrado a tenants/%s/", cfg.tenant_id)
+
+    session = session_factory()
+    try:
+        path_updates = migrate_process_data_dir_refs(session, cfg)
+        if path_updates:
+            session.commit()
+            logger.info(
+                "Actualizadas %s rutas data_dir tras migración de layout",
+                path_updates,
+            )
+    finally:
+        session.close()
 
     while True:
         session = session_factory()

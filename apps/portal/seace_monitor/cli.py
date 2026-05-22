@@ -53,13 +53,16 @@ def main(argv: list[str] | None = None) -> int:
             repair_discarded_processes,
             repair_processes_missing_data,
         )
-        from .tenant_paths import migrate_legacy_layout
+        from .tenant_paths import migrate_legacy_layout, migrate_process_data_dir_refs
 
         cfg = AppConfig.load(args.config)
         migrate_legacy_layout(cfg)
         init_db(cfg.database_url)
         session = session_factory()
         try:
+            path_updates = migrate_process_data_dir_refs(session, cfg)
+            if path_updates:
+                session.commit()
             db_cleaned, orphans = purge_all_stale_process_data(cfg, session)
             repaired = repair_processes_missing_data(cfg, session)
             discarded = repair_discarded_processes(cfg, session)

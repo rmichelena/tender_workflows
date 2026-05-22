@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .config import AppConfig
 from .db.models import Process, ProcessStatus
-from .tenant_paths import procesos_root
+from .tenant_paths import procesos_root, remap_process_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ _STATUSES_WITH_DATA = frozenset(
 def resolve_process_data_dir(config: AppConfig, data_dir: str | None) -> Path | None:
     if not data_dir:
         return None
+    data_dir = remap_process_data_dir(config, data_dir) or data_dir
     path = Path(data_dir).resolve()
     root = procesos_root(config)
     try:

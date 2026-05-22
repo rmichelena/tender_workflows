@@ -29,7 +29,7 @@ from ..process_storage import (
     repair_processes_missing_data,
     resolve_restore_status,
 )
-from ..tenant_paths import migrate_legacy_layout
+from ..tenant_paths import migrate_legacy_layout, migrate_process_data_dir_refs
 from .detail_data import (
     download_filename_for_path,
     list_analyzable_files,
@@ -96,6 +96,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             logger.info("Layout de datos migrado a tenants/%s/", _config.tenant_id)
         db = session_factory()
         try:
+            path_updates = migrate_process_data_dir_refs(db, _config)
+            if path_updates:
+                db.commit()
+                logger.info(
+                    "Actualizadas %s rutas data_dir tras migración de layout",
+                    path_updates,
+                )
             recovered = recover_stale_analyses(db, _config.stale_analysis_seconds)
             if recovered:
                 logger.warning(

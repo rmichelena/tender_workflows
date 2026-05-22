@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from .config import AppConfig
-from .tenant_paths import migrate_legacy_layout, procesos_root, tenant_root
+from .tenant_paths import migrate_legacy_layout, procesos_root, remap_process_data_dir
 
 
 def test_procesos_root_default_tenant(tmp_path: Path):
@@ -24,6 +24,13 @@ def test_migrate_legacy_layout(tmp_path: Path):
     assert (target / "marker.txt").read_text() == "x"
     assert not (tmp_path / "procesos").exists()
     assert migrate_legacy_layout(cfg) is False
+
+
+def test_remap_process_data_dir(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, tenant_id="default")
+    legacy = tmp_path / "procesos" / "123_TEST"
+    mapped = remap_process_data_dir(cfg, str(legacy))
+    assert mapped == str(tmp_path / "tenants" / "default" / "procesos" / "123_TEST")
 
 
 def test_migrate_skips_when_tenant_already_populated(tmp_path: Path):
