@@ -33,6 +33,7 @@ class ProcessStatus(str, enum.Enum):
     analizada = "analizada"
     portafolio = "portafolio"
     descartada = "descartada"
+    archivada = "archivada"
 
 
 class Entity(Base):

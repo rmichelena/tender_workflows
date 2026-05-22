@@ -100,7 +100,10 @@ class MultiEntityScanner:
                     .one_or_none()
                 )
 
-                if proc is not None and proc.status == ProcessStatus.descartada:
+                if proc is not None and proc.status in (
+                    ProcessStatus.descartada,
+                    ProcessStatus.archivada,
+                ):
                     proc.last_seen_at = utcnow()
                     continue
 

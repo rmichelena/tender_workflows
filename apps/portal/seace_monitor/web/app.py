@@ -23,10 +23,13 @@ from ..document_storage import cleanup_partial_downloads
 from ..process_storage import (
     clear_process_download_metadata,
     delete_process_analysis,
+    archive_analyzed_process,
     discard_process_downloads,
     purge_all_stale_process_data,
+    repair_archived_processes,
     repair_discarded_processes,
     repair_processes_missing_data,
+    restore_archived_process,
     resolve_restore_status,
 )
 from ..tenant_paths import migrate_legacy_layout, migrate_process_data_dir_refs
@@ -111,15 +114,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 )
             db_cleaned, orphans = purge_all_stale_process_data(_config, db)
             repaired = repair_processes_missing_data(_config, db)
+            archived = repair_archived_processes(_config, db)
             discarded = repair_discarded_processes(_config, db)
-            if db_cleaned or orphans or repaired or discarded:
+            if db_cleaned or orphans or repaired or archived or discarded:
                 db.commit()
                 logger.info(
                     "Limpieza data/procesos: %s metadato(s) obsoleto(s), %s huérfana(s), "
-                    "%s inconsistente(s), %s descartado(s) reparado(s)",
+                    "%s inconsistente(s), %s archivado(s) reparado(s), %s descartado(s) reparado(s)",
                     db_cleaned,
                     orphans,
                     repaired,
+                    archived,
                     discarded,
                 )
         finally:
@@ -339,6 +344,37 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         proc.status = new_status
         return RedirectResponse("/descartados", status_code=303)
 
+    @app.get("/archivados", response_class=HTMLResponse)
+    def archivados(request: Request, db: Session = Depends(get_db)):
+        rows = (
+            db.query(Process)
+            .options(joinedload(Process.entity), joinedload(Process.analysis))
+            .filter(Process.status == ProcessStatus.archivada)
+            .order_by(Process.updated_at.desc())
+            .all()
+        )
+        return render(
+            request,
+            "archivados.html",
+            active_page="archivados",
+            processes=rows,
+        )
+
+    @app.post("/archivados/{process_id}/restaurar")
+    def restaurar_archivado(process_id: int, db: Session = Depends(get_db)):
+        proc = (
+            db.query(Process)
+            .options(joinedload(Process.analysis))
+            .filter(Process.id == process_id)
+            .one_or_none()
+        )
+        if proc is None:
+            raise HTTPException(404)
+        if proc.status != ProcessStatus.archivada:
+            raise HTTPException(400, "Solo procesos archivados")
+        restore_archived_process(_config, proc)
+        return RedirectResponse("/archivados", status_code=303)
+
     @app.post("/publicaciones/{process_id}/descargar")
     def descargar(
         process_id: int,
@@ -510,10 +546,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             status_code=303,
         )
 
-    def _discard_downloaded_or_analyzed(
-        db: Session, proc: Process, *, allowed: set[ProcessStatus], redirect: str
+    def _discard_downloaded(
+        db: Session, proc: Process, *, redirect: str
     ) -> RedirectResponse:
-        if proc.status not in allowed:
+        if proc.status != ProcessStatus.descargada:
             raise HTTPException(400, "Estado no válido para descartar")
         if proc.analysis and proc.analysis.status == "running":
             if not is_stale_running_analysis(
@@ -522,6 +558,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 raise HTTPException(409, "Análisis en curso")
         proc.status = ProcessStatus.descartada
         discard_process_downloads(_config, proc, db)
+        return RedirectResponse(redirect, status_code=303)
+
+    def _archive_analyzed(
+        db: Session, proc: Process, *, redirect: str
+    ) -> RedirectResponse:
+        if proc.status not in (ProcessStatus.analizada, ProcessStatus.portafolio):
+            raise HTTPException(400, "Estado no válido para archivar")
+        if proc.analysis and proc.analysis.status == "running":
+            if not is_stale_running_analysis(
+                proc.analysis, _config.stale_analysis_seconds
+            ):
+                raise HTTPException(409, "Análisis en curso")
+        archive_analyzed_process(_config, proc)
         return RedirectResponse(redirect, status_code=303)
 
     @app.post("/descargados/{process_id}/descartar")
@@ -534,12 +583,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if proc is None:
             raise HTTPException(404)
-        return _discard_downloaded_or_analyzed(
-            db,
-            proc,
-            allowed={ProcessStatus.descargada},
-            redirect="/descargados",
-        )
+        return _discard_downloaded(db, proc, redirect="/descargados")
 
     @app.get("/descargados/{process_id}/documentos/{filename:path}")
     def descargar_documento_descargado(
@@ -599,8 +643,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             body=body,
         )
 
-    @app.post("/analizados/{process_id}/descartar")
-    def descartar_analizado(process_id: int, db: Session = Depends(get_db)):
+    @app.post("/analizados/{process_id}/archivar")
+    def archivar_analizado(process_id: int, db: Session = Depends(get_db)):
         proc = (
             db.query(Process)
             .options(joinedload(Process.analysis))
@@ -609,12 +653,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if proc is None:
             raise HTTPException(404)
-        return _discard_downloaded_or_analyzed(
-            db,
-            proc,
-            allowed={ProcessStatus.analizada, ProcessStatus.portafolio},
-            redirect="/analizados",
-        )
+        return _archive_analyzed(db, proc, redirect="/archivados")
+
+    @app.post("/analizados/{process_id}/descartar")
+    def descartar_analizado(process_id: int, db: Session = Depends(get_db)):
+        """Compat: redirige al flujo de archivar."""
+        return archivar_analizado(process_id, db)
 
     @app.post("/analizados/{process_id}/estado")
     def cambiar_estado_analizados(

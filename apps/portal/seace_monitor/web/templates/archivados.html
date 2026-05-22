@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% from "_macros.html" import entidad_nombre, status_cell %}
-{% block title %}Descartados — SEACE Monitor{% endblock %}
+{% block title %}Archivados — SEACE Monitor{% endblock %}
 {% block content %}
-<h2>Descartados</h2>
-<p class="muted">Procesos ocultos del listado de publicaciones, sin PDFs ni análisis guardados.</p>
+<h2>Archivados</h2>
+<p class="muted">Procesos analizados retirados del flujo activo. Se conservan PDFs y análisis en papelera separada de los descartados.</p>
 
 <table class="data">
   <thead>
@@ -24,14 +24,17 @@
       <td class="status-cell">{{ status_cell(p) }}</td>
       <td>{{ p.fecha_publicacion or '—' }}</td>
       <td class="desc">{{ p.descripcion or '—' }}</td>
-      <td>
-        <form method="post" action="/descartados/{{ p.id }}/restaurar">
-          <button type="submit" class="btn btn-secondary btn-sm">Restaurar</button>
-        </form>
+      <td class="actions-cell">
+        <div class="actions-stack">
+          <a href="/analizados/{{ p.id }}" class="btn btn-secondary btn-sm">Ver</a>
+          <form method="post" action="/archivados/{{ p.id }}/restaurar">
+            <button type="submit" class="btn btn-primary btn-sm">Restaurar</button>
+          </form>
+        </div>
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="6" class="muted">No hay procesos descartados.</td></tr>
+    <tr><td colspan="6" class="muted">No hay procesos archivados.</td></tr>
     {% endfor %}
   </tbody>
 </table>

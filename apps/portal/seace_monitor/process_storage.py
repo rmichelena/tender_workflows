@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .config import AppConfig
 from .db.models import Process, ProcessStatus
-from .tenant_paths import procesos_root, remap_process_data_dir
+from .tenant_paths import procesos_root, remap_process_data_dir, trash_root
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +20,13 @@ _STATUSES_WITH_DATA = frozenset(
         ProcessStatus.descargada,
         ProcessStatus.analizada,
         ProcessStatus.portafolio,
+        ProcessStatus.archivada,
     }
 )
+
+
+def _allowed_data_roots(config: AppConfig) -> tuple[Path, ...]:
+    return (procesos_root(config), trash_root(config))
 
 
 def resolve_process_data_dir(config: AppConfig, data_dir: str | None) -> Path | None:
@@ -29,13 +34,14 @@ def resolve_process_data_dir(config: AppConfig, data_dir: str | None) -> Path | 
         return None
     data_dir = remap_process_data_dir(config, data_dir) or data_dir
     path = Path(data_dir).resolve()
-    root = procesos_root(config)
-    try:
-        path.relative_to(root)
-    except ValueError:
-        logger.warning("data_dir fuera de procesos/, no se borra: %s", path)
-        return None
-    return path
+    for root in _allowed_data_roots(config):
+        try:
+            path.relative_to(root)
+            return path
+        except ValueError:
+            continue
+    logger.warning("data_dir fuera de procesos/trash, no se borra: %s", path)
+    return None
 
 
 def delete_process_data_dir(config: AppConfig, process: Process) -> bool:
@@ -81,9 +87,8 @@ def cleanup_stale_process_data(config: AppConfig, processes: list[Process]) -> i
     return removed
 
 
-def cleanup_orphan_process_dirs(config: AppConfig, *, keep_paths: set[Path]) -> int:
-    """Borra subcarpetas en data/procesos no referenciadas por procesos activos."""
-    root = procesos_root(config)
+def cleanup_orphan_dirs(config: AppConfig, root: Path, *, keep_paths: set[Path]) -> int:
+    """Borra subcarpetas no referenciadas por procesos activos."""
     if not root.is_dir():
         return 0
     removed = 0
@@ -96,6 +101,14 @@ def cleanup_orphan_process_dirs(config: AppConfig, *, keep_paths: set[Path]) -> 
         logger.info("Eliminada carpeta huérfana %s", path)
         removed += 1
     return removed
+
+
+def cleanup_orphan_process_dirs(config: AppConfig, *, keep_paths: set[Path]) -> int:
+    return cleanup_orphan_dirs(config, procesos_root(config), keep_paths=keep_paths)
+
+
+def cleanup_orphan_trash_dirs(config: AppConfig, *, keep_paths: set[Path]) -> int:
+    return cleanup_orphan_dirs(config, trash_root(config), keep_paths=keep_paths)
 
 
 def process_data_dir_exists(config: AppConfig, process: Process) -> bool:
@@ -117,10 +130,51 @@ def resolve_restore_status(config: AppConfig, process: Process) -> ProcessStatus
 def discard_process_downloads(
     config: AppConfig, process: Process, session: Session
 ) -> None:
-    """Descarte con datos locales: disco, metadatos de descarga y análisis."""
+    """Descarte desde descargada: borra disco, metadatos de descarga y análisis."""
     delete_process_data_dir(config, process)
     clear_process_download_metadata(process)
     delete_process_analysis(session, process)
+
+
+def archive_analyzed_process(config: AppConfig, process: Process) -> None:
+    """Archiva analizado/portafolio: mueve carpeta a trash/, conserva análisis."""
+    src = resolve_process_data_dir(config, process.data_dir)
+    trash = trash_root(config)
+    trash.mkdir(parents=True, exist_ok=True)
+
+    if src is not None and src.is_dir():
+        dest = trash / src.name
+        if dest.exists():
+            dest = trash / f"{process.id}_{src.name}"
+            if dest.exists():
+                shutil.rmtree(dest)
+        shutil.move(str(src), str(dest))
+        process.data_dir = str(dest.resolve())
+    process.status = ProcessStatus.archivada
+
+
+def restore_archived_process(config: AppConfig, process: Process) -> None:
+    """Restaura desde archivados: devuelve carpeta a procesos/ y estado analizada."""
+    src = resolve_process_data_dir(config, process.data_dir)
+    if src is None or not src.is_dir():
+        process.status = (
+            ProcessStatus.analizada
+            if process.analysis and process.analysis.status == "done"
+            else ProcessStatus.publicada
+        )
+        return
+
+    procesos = procesos_root(config)
+    procesos.mkdir(parents=True, exist_ok=True)
+    dest = procesos / src.name
+    if dest.exists():
+        dest = procesos / f"{process.id}_{src.name}"
+    shutil.move(str(src), str(dest))
+    process.data_dir = str(dest.resolve())
+    if process.analysis and process.analysis.status == "done":
+        process.status = ProcessStatus.analizada
+    else:
+        process.status = ProcessStatus.descargada
 
 
 def repair_processes_missing_data(config: AppConfig, session: Session) -> int:
@@ -138,6 +192,22 @@ def repair_processes_missing_data(config: AppConfig, session: Session) -> int:
         clear_process_download_metadata(proc)
         delete_process_analysis(session, proc)
         proc.status = ProcessStatus.publicada
+        repaired += 1
+    return repaired
+
+
+def repair_archived_processes(config: AppConfig, session: Session) -> int:
+    """Archivados sin carpeta en trash → analizada (si hay análisis) o publicada."""
+    repaired = 0
+    for proc in session.query(Process).filter(Process.status == ProcessStatus.archivada):
+        if process_data_dir_exists(config, proc):
+            continue
+        clear_process_download_metadata(proc)
+        if proc.analysis and proc.analysis.status == "done":
+            proc.status = ProcessStatus.analizada
+        else:
+            delete_process_analysis(session, proc)
+            proc.status = ProcessStatus.publicada
         repaired += 1
     return repaired
 
@@ -173,4 +243,5 @@ def purge_all_stale_process_data(config: AppConfig, session: Session) -> tuple[i
             keep_paths.add(path)
 
     orphans = cleanup_orphan_process_dirs(config, keep_paths=keep_paths)
-    return db_cleaned, orphans
+    trash_orphans = cleanup_orphan_trash_dirs(config, keep_paths=keep_paths)
+    return db_cleaned, orphans + trash_orphans

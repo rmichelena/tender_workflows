@@ -50,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         from .db.session import init_db, session_factory
         from .process_storage import (
             purge_all_stale_process_data,
+            repair_archived_processes,
             repair_discarded_processes,
             repair_processes_missing_data,
         )
@@ -65,14 +66,16 @@ def main(argv: list[str] | None = None) -> int:
                 session.commit()
             db_cleaned, orphans = purge_all_stale_process_data(cfg, session)
             repaired = repair_processes_missing_data(cfg, session)
+            archived = repair_archived_processes(cfg, session)
             discarded = repair_discarded_processes(cfg, session)
             session.commit()
             logging.info(
                 "Limpieza completada: %s metadato(s) obsoleto(s), %s huérfana(s), "
-                "%s inconsistente(s), %s descartado(s) reparado(s)",
+                "%s inconsistente(s), %s archivado(s) reparado(s), %s descartado(s) reparado(s)",
                 db_cleaned,
                 orphans,
                 repaired,
+                archived,
                 discarded,
             )
         finally:

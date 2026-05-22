@@ -19,6 +19,10 @@ def tenant_root(config: AppConfig) -> Path:
     return (config.data_dir / "tenants" / config.tenant_id).resolve()
 
 
+def trash_root(config: AppConfig) -> Path:
+    return (tenant_root(config) / "trash").resolve()
+
+
 def procesos_root(config: AppConfig) -> Path:
     return (tenant_root(config) / "procesos").resolve()
 
@@ -41,6 +45,7 @@ def ensure_tenant_layout(config: AppConfig) -> None:
         tenant_settings_dir(config),
         tenant_seace_dir(config),
         procesos_root(config),
+        trash_root(config),
         tenant_agent_dir(config),
     ):
         path.mkdir(parents=True, exist_ok=True)

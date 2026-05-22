@@ -137,6 +137,7 @@ table.data tr:hover td { background: #f8fafc; }
 .badge-analizada { background: #d1fae5; color: #065f46; }
 .badge-portafolio { background: #fef3c7; color: #92400e; }
 .badge-descartada { background: #fee2e2; color: #991b1b; }
+.badge-archivada { background: #f3e8ff; color: #6b21a8; }
 
 .btn {
   display: inline-block;
