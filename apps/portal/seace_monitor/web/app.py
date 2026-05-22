@@ -49,6 +49,7 @@ from .seace_proxy import (
     seace_view_path,
 )
 from .seace_view import can_open_seace
+from .settings_entities import bootstrap_entities, register_settings_routes
 from .sorting import (
     SORTABLE_COLUMNS,
     build_sort_query,
@@ -99,6 +100,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             logger.info("Layout de datos migrado a tenants/%s/", _config.tenant_id)
         db = session_factory()
         try:
+            bootstrap_entities(db, _config)
             path_updates = migrate_process_data_dir_refs(db, _config)
             if path_updates:
                 db.commit()
@@ -781,5 +783,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             "entities": db.query(Entity).count(),
             "total": db.query(Process).count(),
         }
+
+    register_settings_routes(app, _config, render, get_db)
 
     return app

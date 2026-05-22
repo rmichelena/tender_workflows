@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Entidades — Configuración{% endblock %}
+{% block content %}
+<div class="settings-page">
+  <header class="settings-header">
+    <div>
+      <h2>Entidades a escanear</h2>
+      <p class="muted">Catálogo oficial OSCE. Marca las entidades que el worker debe monitorear.</p>
+    </div>
+    <div class="settings-header-actions">
+      <span id="selection-summary" class="muted"></span>
+      <button type="button" id="btn-discard" class="btn btn-secondary" disabled>Descartar cambios</button>
+      <button type="button" id="btn-save" class="btn btn-primary" disabled>Guardar cambios</button>
+    </div>
+  </header>
+
+  <div class="settings-toolbar">
+    <input type="search" id="entity-search" class="filter-input" placeholder="Buscar por nombre, RUC, departamento…" autocomplete="off"/>
+    <label class="settings-filter-check">
+      <input type="checkbox" id="filter-selected-only"/>
+      Solo seleccionadas
+    </label>
+    <label class="settings-filter-check">
+      <input type="checkbox" id="filter-activo-only" checked/>
+      Solo Activo (OSCE)
+    </label>
+  </div>
+
+  <div id="entity-list-wrap" class="entity-list-wrap">
+    <div id="entity-loading" class="muted">Cargando entidades…</div>
+    <ul id="entity-list" class="entity-list" hidden></ul>
+  </div>
+</div>
+
+<div id="save-modal" class="modal-overlay" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="save-modal-title">
+    <h3 id="save-modal-title">Confirmar cambios</h3>
+
+    <section id="modal-added-section" hidden>
+      <p>Las nuevas entidades seleccionadas serán escaneadas ahora. Seleccione un criterio de fecha:</p>
+      <div class="modal-options">
+        <label class="modal-option">
+          <input type="radio" name="scan_mode" value="future_presentacion"/>
+          Solo procesos con fecha de presentación en el futuro
+        </label>
+        <label class="modal-option">
+          <input type="radio" name="scan_mode" value="current_year" checked/>
+          Solo procesos {{ current_year }}
+        </label>
+        <label class="modal-option modal-option-inline">
+          <input type="radio" name="scan_mode" value="since_date"/>
+          Procesos desde el
+          <input type="text" id="since-date-input" class="filter-input modal-date" placeholder="dd/mm/yy" value="{{ default_since_date }}" maxlength="8"/>
+        </label>
+        <p id="since-date-error" class="form-error" hidden>Fecha inválida (dd/mm/yy)</p>
+      </div>
+    </section>
+
+    <section id="modal-removed-section" hidden>
+      <p id="modal-removed-text"></p>
+      <div class="modal-options" id="removed-policy-options"></div>
+    </section>
+
+    <div class="modal-actions">
+      <button type="button" id="modal-cancel" class="btn btn-secondary">Cancelar</button>
+      <button type="button" id="modal-confirm" class="btn btn-primary">Aceptar</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/settings_entidades.js"></script>
+{% endblock %}

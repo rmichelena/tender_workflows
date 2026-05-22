@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from .client import ProcessRow, SeaceClient
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus, utcnow
-from .entities import EntityRow, load_entities_csv
 from .parser import extract_cronograma_fechas, parse_ficha, row_snapshot_hash
+from .scan_options import ScanOptions, passes_date_filter
 
 logger = logging.getLogger(__name__)
 
@@ -26,45 +26,47 @@ _FICHA_REFRESH_STATUSES = frozenset(
 )
 
 
-def sync_entities(session: Session, rows: list[EntityRow]) -> dict[str, Entity]:
-    by_ruc: dict[str, Entity] = {}
-    for row in rows:
-        ent = session.query(Entity).filter(Entity.ruc == row.ruc).one_or_none()
-        if ent is None:
-            ent = Entity(ruc=row.ruc, nombre=row.nombre)
-            session.add(ent)
-            session.flush()
-        else:
-            ent.nombre = row.nombre
-        by_ruc[row.ruc] = ent
-    session.commit()
-    return by_ruc
-
-
 class MultiEntityScanner:
     def __init__(self, config: AppConfig, session: Session) -> None:
         self.config = config
         self.session = session
 
-    def run_once(self) -> int:
-        entity_rows = load_entities_csv(self.config.entities_csv)
-        entities = sync_entities(self.session, entity_rows)
+    def run_once(self, options: ScanOptions | None = None) -> int:
+        opts = options or ScanOptions()
+        entities = self._entities_to_scan(opts)
         new_count = 0
 
-        for ruc, entity in entities.items():
-            if not entity.activa:
+        for entity in entities:
+            if not entity.activa and opts.entity_ids is None:
                 continue
             try:
-                n = self._scan_entity(entity)
+                n = self._scan_entity(entity, opts)
                 new_count += n
                 self.session.commit()
             except Exception:
                 self.session.rollback()
-                logger.exception("Error escaneando entidad %s (%s)", entity.nombre, ruc)
+                logger.exception(
+                    "Error escaneando entidad %s (%s)", entity.nombre, entity.ruc
+                )
 
         return new_count
 
-    def _scan_entity(self, entity: Entity) -> int:
+    def _entities_to_scan(self, options: ScanOptions) -> list[Entity]:
+        if options.entity_ids:
+            return (
+                self.session.query(Entity)
+                .filter(Entity.id.in_(sorted(options.entity_ids)))
+                .order_by(Entity.nombre)
+                .all()
+            )
+        return (
+            self.session.query(Entity)
+            .filter(Entity.activa.is_(True))
+            .order_by(Entity.nombre)
+            .all()
+        )
+
+    def _scan_entity(self, entity: Entity, options: ScanOptions) -> int:
         client = SeaceClient(
             ruc_entidad=entity.ruc,
             anio=self.config.anio,
@@ -74,17 +76,29 @@ class MultiEntityScanner:
         new_count = 0
         seen_nids: set[str] = set()
 
-        # Paginación SEACE (REVIEW M5 — omitido a propósito):
-        # Solo escaneamos config.max_pages (default 1 × rows_per_page filas). No llamamos
-        # SeaceClient.total_pages() ni avisamos si SEACE tiene más páginas: nuestras entidades
-        # caben en una página. Si alguna supera ~15 procesos visibles, subir max_pages en
-        # config.yaml (H1 ya preserva ViewState por página).
-        for page in range(self.config.max_pages):
-            _, soup = client.fetch_list_page(page)
+        first_soup = None
+        max_pages = self.config.max_pages
+        if options.multipage:
+            _, first_soup = client.fetch_list_page(0)
+            max_pages = min(
+                client.total_pages(first_soup),
+                options.max_pages_cap,
+            )
+            logger.info(
+                "[%s] escaneo multipágina: %s página(s)", entity.ruc, max_pages
+            )
+
+        for page in range(max_pages):
+            if page == 0 and first_soup is not None:
+                soup = first_soup
+            else:
+                _, soup = client.fetch_list_page(page)
             rows = client.parse_rows(soup)
             logger.info(
                 "[%s] página %s: %s procesos", entity.ruc, page + 1, len(rows)
             )
+            if not rows and page > 0:
+                break
 
             for row in rows:
                 if not row.nid_proceso or row.nid_proceso in seen_nids:
@@ -110,15 +124,23 @@ class MultiEntityScanner:
                 savepoint = self.session.begin_nested()
                 try:
                     if proc is None:
-                        if self._upsert_from_ficha(entity, client, row, proc=None):
+                        if self._upsert_from_ficha(
+                            entity, client, row, proc=None, options=options
+                        ):
                             new_count += 1
                     elif proc.list_hash != list_hash:
-                        self._upsert_from_ficha(entity, client, row, proc=proc)
+                        self._upsert_from_ficha(
+                            entity, client, row, proc=proc, options=options
+                        )
                     elif self._needs_ficha_refresh(proc):
-                        self._upsert_from_ficha(entity, client, row, proc=proc)
+                        self._upsert_from_ficha(
+                            entity, client, row, proc=proc, options=options
+                        )
                     else:
                         proc.last_seen_at = utcnow()
                     savepoint.commit()
+                except _DateFilterSkip:
+                    savepoint.rollback()
                 except Exception:
                     savepoint.rollback()
                     logger.exception(
@@ -147,11 +169,22 @@ class MultiEntityScanner:
         client: SeaceClient,
         row: ProcessRow,
         proc: Process | None,
+        *,
+        options: ScanOptions,
     ) -> bool:
         is_new = proc is None
         ficha_result = client.open_ficha(row)
         ficha = parse_ficha(ficha_result.html, ficha_result.ficha_id, row.nid_proceso)
         fechas = extract_cronograma_fechas(ficha.cronograma)
+        fecha_presentacion = fechas.fecha_presentacion or row.fecha_publicacion
+
+        if options.date_mode and not passes_date_filter(
+            fecha_presentacion,
+            fecha_publicacion=row.fecha_publicacion,
+            mode=options.date_mode,
+            since_date=options.since_date,
+        ):
+            raise _DateFilterSkip()
 
         if proc is None:
             proc = Process(
@@ -196,3 +229,7 @@ class MultiEntityScanner:
             row.nomenclatura,
         )
         return is_new
+
+
+class _DateFilterSkip(Exception):
+    """Fila omitida por filtro de fecha en escaneo acotado."""

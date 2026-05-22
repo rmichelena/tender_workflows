@@ -8,9 +8,9 @@
 - Prefer preserving scroll position on portal list actions (analizar/descartar) after page refresh.
 - Portal list views should show SEACE **objeto** and **descripción** (not Gemini markdown extracts like alcance/requisitos).
 - Cronograma date columns in all list views use **fin** of consultas and presentación propuestas, not inicio.
-- Discarding from descargados or analizados should delete disk data and clear download/analysis metadata (`data_dir`, `documentos_json`, `AnalysisResult`); detail pages use the same POST endpoints.
+- Descartar from `descargada` fully deletes disk data and clears download/analysis metadata (`data_dir`, `documentos_json`, `AnalysisResult`) → `descartada`; Archivar from `analizada`/`portafolio` moves folder to tenant trash preserving PDFs and analysis → `archivada`; publicaciones Descartar only hides from list (no local data).
 - `documentos_json` is populated only when downloading (fresh ficha fetch), not during scan.
-- Design for multi-user: single deploy, `data/tenants/{tenant_id}/` (settings, seace, procesos, agent); no Docker stack per user; Dropbox out of automated flow; see `docs/MULTI_TENANCY.md`.
+- Design for multi-user: single deploy, `data/tenants/{tenant_id}/` (settings, seace, procesos, trash, agent); no Docker stack per user; Dropbox out of automated flow; see `docs/MULTI_TENANCY.md`.
 
 ## Learned Workspace Facts
 
@@ -25,6 +25,6 @@
 - Monitored entities live in gitignored `entities.csv` at repo root (user-maintained, not committed); config key `entities_csv`.
 - VPS production: `ssh bots-sysop`, project `tender-workflows` under `~/tender_workflows/deploy/`; secrets in gitignored `deploy/.env` (from `deploy/.env.example`: `GEMINI_API_KEY`, `SEACE_HTTP_PROXY`); `cp config.example.vps.yaml config.yaml`; deploy via `git pull` + `docker compose -f docker-compose.vps.yml up -d --build` (avoid rsync on tracked app files—causes drift vs `origin/main`); UI at http://bots.infinitek.pe:8080/.
 - Product docs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/ROADMAP.md](docs/ROADMAP.md), [docs/MULTI_TENANCY.md](docs/MULTI_TENANCY.md), [docs/INTEGRATION.md](docs/INTEGRATION.md), [docs/HERMES_VPS.md](docs/HERMES_VPS.md).
-- Portal routes: `/publicaciones` (`publicada`, Descargar→`descargando`→`descargada`); `/descargados` (select PDFs, Analizar); `/analizados` (`analizada`/`portafolio`); `/descartados`; lists show objeto+descripción and fin-date columns; publicaciones default sort fecha publicación desc; descargados/analizados de-emphasize fecha publicación.
-- Process files live under `data/tenants/{tenant_id}/procesos/` (default tenant `default`); legacy `data/procesos/` auto-migrates on startup.
+- Portal routes: `/publicaciones` (`publicada`, Descargar→`descargando`→`descargada`); `/descargados` (select PDFs, Analizar, Descartar wipes data); `/analizados` (`analizada`/`portafolio`, Archivar); `/archivados` (`archivada`, PDFs+analysis in trash); `/descartados` (`descartada`, no local data); lists show objeto+descripción and fin-date columns; publicaciones default sort fecha publicación desc; descargados/analizados de-emphasize fecha publicación.
+- Process files under `data/tenants/{tenant_id}/procesos/`; archived copies under `.../trash/` (default tenant `default`); legacy `data/procesos/` auto-migrates on startup—update DB `data_dir` before orphan cleanup or repair may delete migrated folders.
 - Background jobs: commit SQLite before long I/O; multi-entity scanner commits per entity; per-process DB savepoints in scanner (one ficha failure must not roll back whole entity); concurrent download/analyze per distinct process (paid Gemini key, no global analyze lock); 503/upload retry with fresh Gemini client; system prompt anchors today (America/Lima) and avoids boilerplate future-legislation dudas; `normalize_legacy_filenames` must not suffix `_2` when dest already matches manifest `nombre`.

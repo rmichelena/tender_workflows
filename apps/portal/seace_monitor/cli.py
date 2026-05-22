@@ -27,6 +27,16 @@ def main(argv: list[str] | None = None) -> int:
     cleanup.add_argument("-c", "--config", default="config.yaml")
     cleanup.add_argument("-v", "--verbose", action="store_true")
 
+    sync_ent = sub.add_parser(
+        "sync-entities",
+        help="Sincronizar catálogo oficial OSCE de entidades contratantes",
+    )
+    sync_ent.add_argument("-c", "--config", default="config.yaml")
+    sync_ent.add_argument(
+        "--force", action="store_true", help="Aplicar aunque el hash no haya cambiado"
+    )
+    sync_ent.add_argument("-v", "--verbose", action="store_true")
+
     web = sub.add_parser("web", help="Servidor web UI")
     web.add_argument("-c", "--config", default="config.yaml")
     web.add_argument("--host", default="0.0.0.0")
@@ -78,6 +88,41 @@ def main(argv: list[str] | None = None) -> int:
                 archived,
                 discarded,
             )
+        finally:
+            session.close()
+        return 0
+
+    if args.command == "sync-entities":
+        from .db.session import init_db, session_factory
+        from .entity_catalog import (
+            apply_legacy_entities_csv,
+            sync_entity_catalog_if_changed,
+        )
+        from .tenant_paths import migrate_legacy_layout
+
+        cfg = AppConfig.load(args.config)
+        migrate_legacy_layout(cfg)
+        init_db(cfg.database_url)
+        session = session_factory()
+        try:
+            result = sync_entity_catalog_if_changed(
+                session, cfg, force=args.force
+            )
+            legacy = apply_legacy_entities_csv(session, cfg)
+            session.commit()
+            if result is None:
+                logging.info(
+                    "Catálogo OSCE sin cambios; legacy CSV activó %s entidad(es)",
+                    legacy,
+                )
+            else:
+                logging.info(
+                    "Catálogo OSCE: +%s nuevas, %s actualizadas, %s Inactivo omitidas; legacy +%s",
+                    result.added,
+                    result.updated,
+                    result.skipped_inactivo,
+                    legacy,
+                )
         finally:
             session.close()
         return 0

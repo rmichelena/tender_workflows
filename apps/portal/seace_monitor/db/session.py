@@ -43,6 +43,33 @@ def init_db(database_url: str) -> None:
     Base.metadata.create_all(_engine)
     if database_url.startswith("sqlite"):
         _ensure_sqlite_indexes(_engine)
+        _ensure_entity_columns(_engine)
+
+
+def _ensure_entity_columns(engine) -> None:
+    """Columnas nuevas en entities (create_all no altera tablas existentes)."""
+    with engine.begin() as conn:
+        cols = {
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(entities)")).fetchall()
+        }
+        additions = (
+            ("estado_osce", "VARCHAR(32)"),
+            ("departamento", "VARCHAR(128)"),
+            ("provincia", "VARCHAR(128)"),
+            ("distrito", "VARCHAR(128)"),
+            ("codigo_siaf", "VARCHAR(32)"),
+            ("codconsucode", "VARCHAR(32)"),
+            ("osce_ultima_actualizacion", "VARCHAR(32)"),
+        )
+        for name, col_type in additions:
+            if name not in cols:
+                conn.execute(text(f"ALTER TABLE entities ADD COLUMN {name} {col_type}"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_entities_activa ON entities (activa)"
+            )
+        )
 
 
 def _ensure_sqlite_indexes(engine) -> None:
