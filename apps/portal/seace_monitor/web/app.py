@@ -37,8 +37,11 @@ from .detail_data import (
     download_filename_for_path,
     list_analyzable_files,
     list_downloaded_documents,
+    load_analysis_selection,
+    media_type_for_path,
     parse_cronograma,
     resolve_document_path,
+    save_analysis_selection,
 )
 from .markdown_render import render_free_reader_summary
 from .filters import publicaciones_query
@@ -469,14 +472,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             if proc.status == ProcessStatus.publicada:
                 return RedirectResponse(f"/publicaciones", status_code=303)
             raise HTTPException(404)
-        archivos = list_analyzable_files(proc)
+        checked_paths = None
+        if proc.data_dir and proc.analysis and proc.analysis.status in ("running", "error"):
+            checked_paths = load_analysis_selection(Path(proc.data_dir))
+        archivos = list_analyzable_files(proc, checked_paths=checked_paths)
         cronograma = parse_cronograma(proc.cronograma_json)
+        archivos_analizando = [a.nombre for a in archivos if a.default_checked]
         return render(
             request,
             "descargado_detalle.html",
             active_page="descargados",
             process=proc,
             archivos=archivos,
+            archivos_analizando=archivos_analizando,
             cronograma=cronograma,
             ProcessStatus=ProcessStatus,
         )
@@ -518,6 +526,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 f"/descargados/{process_id}?msg=selecciona_archivos",
                 status_code=303,
             )
+
+        if proc.data_dir:
+            save_analysis_selection(Path(proc.data_dir), selected)
 
         analysis = proc.analysis
         if analysis is None:
@@ -598,7 +609,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         path = resolve_document_path(proc, filename)
         if path is None:
             raise HTTPException(404, "Documento no encontrado")
-        return FileResponse(path, filename=download_filename_for_path(proc, path))
+        return FileResponse(
+            path,
+            media_type=media_type_for_path(path),
+            filename=download_filename_for_path(proc, path),
+        )
 
     @app.get("/seace/open/{process_id}")
     def seace_open(process_id: int, request: Request, db: Session = Depends(get_db)):
@@ -761,7 +776,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         path = resolve_document_path(proc, filename)
         if path is None:
             raise HTTPException(404, "Documento no encontrado")
-        return FileResponse(path, filename=download_filename_for_path(proc, path))
+        return FileResponse(
+            path,
+            media_type=media_type_for_path(path),
+            filename=download_filename_for_path(proc, path),
+        )
 
     @app.get("/api/processes/{process_id}/workflow")
     def api_process_workflow(process_id: int, db: Session = Depends(get_db)):

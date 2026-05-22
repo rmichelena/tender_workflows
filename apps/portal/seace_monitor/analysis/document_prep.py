@@ -18,6 +18,19 @@ ARCHIVE_SUFFIXES = {".zip", ".rar"}
 UPLOAD_SUFFIXES = {".pdf", ".docx", ".doc", ".xlsx", ".xls"}
 CONVERTIBLE_SUFFIXES = {".docx", ".doc", ".xlsx", ".xls"}
 ANALYZABLE_SUFFIXES = UPLOAD_SUFFIXES
+GEMINI_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
+def validate_gemini_upload_size(path: Path) -> None:
+    size = path.stat().st_size
+    if size <= GEMINI_MAX_UPLOAD_BYTES:
+        return
+    size_mb = size / (1024 * 1024)
+    limit_mb = GEMINI_MAX_UPLOAD_BYTES / (1024 * 1024)
+    raise RuntimeError(
+        f"{path.name} pesa {size_mb:.1f} MB; Gemini acepta hasta ~{limit_mb:.0f} MB por archivo. "
+        "Elige un archivo más pequeño (p. ej. la versión DOCX editable en lugar del PDF firmado)."
+    )
 
 
 def normalize_doc_name(name: str) -> str:

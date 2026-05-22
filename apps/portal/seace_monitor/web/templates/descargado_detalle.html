@@ -25,7 +25,7 @@
   Error en análisis: {{ process.analysis.error_message }}
 </div>
 {% elif analizando %}
-<div class="alert">Análisis en curso…</div>
+<div class="alert">Análisis en curso{% if archivos_analizando %}: {{ archivos_analizando | join(', ') }}{% endif %}…</div>
 {% endif %}
 
 <div class="detail-grid">
@@ -70,7 +70,7 @@
             {{ file_icon(archivo) }}
             <div class="doc-meta">
               <div class="doc-name">
-                <a href="/descargados/{{ process.id }}/documentos/{{ archivo.rel_path }}">{{ archivo.nombre }}</a>
+                <a href="/descargados/{{ process.id }}/documentos/{{ archivo.rel_path }}" download="{{ archivo.nombre }}">{{ archivo.nombre }}</a>
               </div>
               <div class="doc-sub muted">
                 {{ archivo.origen }}

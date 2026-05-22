@@ -16,7 +16,7 @@ from ..document_storage import (
     manifest_path_for_doc,
     read_manifest,
 )
-from ..analysis.document_prep import ANALYZABLE_SUFFIXES, ARCHIVE_SUFFIXES
+from ..analysis.document_prep import ANALYZABLE_SUFFIXES, ARCHIVE_SUFFIXES, score_bases_candidate
 
 _GENERIC_DOCS_RE = re.compile(r"^\d+\s+documento\(s\)\s+descargado\(s\)\s*$", re.I)
 _SKIP_NAMES = {MANIFEST_NAME}
@@ -32,6 +32,20 @@ ICON_BY_EXT = {
     "rar": "rar",
     "7z": "zip",
 }
+
+DOWNLOAD_MEDIA_TYPES = {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".dwg": "application/acad",
+    ".zip": "application/zip",
+    ".rar": "application/vnd.rar",
+    ".7z": "application/x-7z-compressed",
+}
+
+SELECTED_FILES_NAME = "selected_files.json"
 
 
 @dataclass
@@ -108,12 +122,62 @@ def _index_manifest_by_path(docs_dir: Path) -> dict[Path, dict]:
     return index
 
 
-def _looks_like_bases(nombre: str, tipo_documento: str = "") -> bool:
-    text = f"{nombre} {tipo_documento}".lower()
-    return "bases" in text and "anexo" not in text
+def media_type_for_path(path: Path) -> str:
+    explicit = DOWNLOAD_MEDIA_TYPES.get(path.suffix.lower())
+    if explicit:
+        return explicit
+    import mimetypes
+
+    guessed, _ = mimetypes.guess_type(path.name)
+    return guessed or "application/octet-stream"
 
 
-def list_analyzable_files(process: Process) -> list[ArchivoAnalizable]:
+def selected_files_path(proc_dir: Path) -> Path:
+    return proc_dir / "fast_analysis" / SELECTED_FILES_NAME
+
+
+def save_analysis_selection(proc_dir: Path, rel_paths: list[str]) -> None:
+    path = selected_files_path(proc_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(rel_paths, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_analysis_selection(proc_dir: Path) -> set[str] | None:
+    path = selected_files_path(proc_dir)
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(raw, list):
+        return None
+    cleaned = {str(item).strip() for item in raw if str(item).strip()}
+    return cleaned or None
+
+
+def _assign_default_selection(rows: list[ArchivoAnalizable]) -> None:
+    if not rows:
+        return
+    best_score = -1
+    best_idx = 0
+    for index, row in enumerate(rows):
+        score = score_bases_candidate(Path(row.nombre))
+        if score > best_score:
+            best_score = score
+            best_idx = index
+    for index, row in enumerate(rows):
+        row.default_checked = index == best_idx
+
+
+def list_analyzable_files(
+    process: Process,
+    *,
+    checked_paths: set[str] | None = None,
+) -> list[ArchivoAnalizable]:
     docs_dir = _documents_dir(process)
     if not docs_dir:
         return []
@@ -141,7 +205,7 @@ def list_analyzable_files(process: Process) -> list[ArchivoAnalizable]:
                 size_label=format_bytes(path.stat().st_size),
                 origen="descarga SEACE",
                 tipo_documento=tipo,
-                default_checked=_looks_like_bases(nombre, tipo),
+                default_checked=False,
             )
         )
 
@@ -163,12 +227,15 @@ def list_analyzable_files(process: Process) -> list[ArchivoAnalizable]:
                     size_label=format_bytes(path.stat().st_size),
                     origen=f"extraído de {archive_label}",
                     tipo_documento="",
-                    default_checked=_looks_like_bases(path.name),
+                    default_checked=False,
                 )
             )
 
-    if rows and not any(r.default_checked for r in rows):
-        rows[0].default_checked = True
+    if checked_paths is not None:
+        for row in rows:
+            row.default_checked = row.rel_path in checked_paths
+    else:
+        _assign_default_selection(rows)
     return rows
 
 

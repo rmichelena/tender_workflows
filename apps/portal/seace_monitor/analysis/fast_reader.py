@@ -12,7 +12,12 @@ from ..config import AppConfig
 from ..db.models import Process
 from ..parser import clean_cronograma_etapa, fechas_listado_from_cronograma_json
 from ..tender_repo import resolve_tender_repo_root
-from .document_prep import merge_pdfs, prepare_documents_for_llm, resolve_selected_documents
+from .document_prep import (
+    merge_pdfs,
+    prepare_documents_for_llm,
+    resolve_selected_documents,
+    validate_gemini_upload_size,
+)
 from .gemini_client import (
     delete_remote_files,
     generate_content_with_retry,
@@ -228,6 +233,7 @@ def run_fast_analysis(
                 source.name,
                 pdf.name,
             )
+        validate_gemini_upload_size(pdf)
 
     uploaded_files: list = []
     bootstrap_user = ""
@@ -242,6 +248,7 @@ def run_fast_analysis(
         logger.warning("Gemini multi-archivo falló; combinando PDFs: %s", first_exc)
         merged = workspace / "merged_for_gemini.pdf"
         merge_pdfs(pdfs, merged)
+        validate_gemini_upload_size(merged)
         summary_core, uploaded_files, bootstrap_user = run_gemini_free_reader(
             config, [merged], sources, process
         )
