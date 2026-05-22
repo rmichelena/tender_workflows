@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from .entities import resolve_entities_csv
+from .tenant_paths import DEFAULT_TENANT_ID
 
 _DURATION_RE = re.compile(
     r"^(\d+(?:\.\d+)?)\s*(s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?|d|day|days?)$",
@@ -81,6 +82,7 @@ class AppConfig:
     max_pages: int = 1  # REVIEW M5: 1 página basta para nuestras entidades; ver scanner.py
     rows_per_page: int = 15
     data_dir: Path = Path("./data")
+    tenant_id: str = DEFAULT_TENANT_ID
     http_proxy: str | None = None
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
 
@@ -106,6 +108,8 @@ class AppConfig:
 
         if os.environ.get("DATABASE_URL"):
             raw["database_url"] = os.environ["DATABASE_URL"]
+        if os.environ.get("TENANT_ID"):
+            raw["tenant_id"] = os.environ["TENANT_ID"]
 
         http_proxy = (
             os.environ.get("SEACE_HTTP_PROXY")
@@ -156,6 +160,7 @@ class AppConfig:
             max_pages=int(raw.get("max_pages", 1)),
             rows_per_page=int(raw.get("rows_per_page", 15)),
             data_dir=Path(raw.get("data_dir", "./data")),
+            tenant_id=str(raw.get("tenant_id", DEFAULT_TENANT_ID)).strip() or DEFAULT_TENANT_ID,
             http_proxy=str(http_proxy).strip() if http_proxy else None,
             analysis=analysis,
         )

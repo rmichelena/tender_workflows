@@ -8,6 +8,7 @@ import time
 from .config import AppConfig
 from .db.session import init_db, session_factory
 from .scanner import MultiEntityScanner
+from .tenant_paths import migrate_legacy_layout
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +19,14 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
     interval = cfg.poll_interval_seconds
 
     logger.info(
-        "Worker iniciado — intervalo %s (%ss), entidades: %s",
+        "Worker iniciado — intervalo %s (%ss), entidades: %s, tenant: %s",
         cfg.poll_interval,
         interval,
         cfg.entities_csv,
+        cfg.tenant_id,
     )
+    if migrate_legacy_layout(cfg):
+        logger.info("Layout de datos migrado a tenants/%s/", cfg.tenant_id)
 
     while True:
         session = session_factory()

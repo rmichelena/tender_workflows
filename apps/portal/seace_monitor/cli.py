@@ -53,8 +53,10 @@ def main(argv: list[str] | None = None) -> int:
             repair_discarded_processes,
             repair_processes_missing_data,
         )
+        from .tenant_paths import migrate_legacy_layout
 
         cfg = AppConfig.load(args.config)
+        migrate_legacy_layout(cfg)
         init_db(cfg.database_url)
         session = session_factory()
         try:

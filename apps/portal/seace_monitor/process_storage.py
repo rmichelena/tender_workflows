@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .config import AppConfig
 from .db.models import Process, ProcessStatus
+from .tenant_paths import procesos_root
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +22,6 @@ _STATUSES_WITH_DATA = frozenset(
         ProcessStatus.portafolio,
     }
 )
-
-
-def procesos_root(config: AppConfig) -> Path:
-    return (config.data_dir / "procesos").resolve()
 
 
 def resolve_process_data_dir(config: AppConfig, data_dir: str | None) -> Path | None:

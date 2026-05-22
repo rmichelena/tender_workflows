@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..client import ProcessRow, SeaceClient
 from ..config import AppConfig
 from ..db.models import AnalysisResult, Process, ProcessStatus, utcnow
+from ..tenant_paths import procesos_root
 from ..downloader import download_file
 from ..document_storage import (
     cleanup_partial_downloads,
@@ -31,7 +32,7 @@ def process_data_dir(config: AppConfig, process: Process) -> Path:
     safe = "".join(
         c if c.isalnum() or c in "-_" else "_" for c in process.nomenclatura
     )
-    return config.data_dir / "procesos" / f"{process.nid_proceso}_{safe}"[:120]
+    return procesos_root(config) / f"{process.nid_proceso}_{safe}"[:120]
 
 
 class AnalysisRunner:

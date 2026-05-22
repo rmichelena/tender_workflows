@@ -11,6 +11,7 @@ database_url: sqlite:///./data/seace.db
 max_pages: 1
 rows_per_page: 15
 data_dir: ./data
+tenant_id: default
 
 analysis:
   tender_procurement:

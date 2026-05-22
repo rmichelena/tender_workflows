@@ -29,6 +29,7 @@ from ..process_storage import (
     repair_processes_missing_data,
     resolve_restore_status,
 )
+from ..tenant_paths import migrate_legacy_layout
 from .detail_data import (
     download_filename_for_path,
     list_analyzable_files,
@@ -86,7 +87,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        logger.info("SEACE Monitor web — DB: %s", _config.database_url)
+        logger.info(
+            "SEACE Monitor web — DB: %s tenant: %s",
+            _config.database_url,
+            _config.tenant_id,
+        )
+        if migrate_legacy_layout(_config):
+            logger.info("Layout de datos migrado a tenants/%s/", _config.tenant_id)
         db = session_factory()
         try:
             recovered = recover_stale_analyses(db, _config.stale_analysis_seconds)

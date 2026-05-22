@@ -13,6 +13,7 @@ from typing import Any
 from .client import ProcessRow, SeaceClient
 from .downloader import download_file
 from .parser import FichaData, parse_ficha, row_snapshot_hash
+from .tenant_paths import DEFAULT_TENANT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,9 @@ class SeaceMonitor:
             ficha_result.html, ficha_result.ficha_id, row.nid_proceso
         )
 
-        proc_dir = self.data_dir / "procesos" / process_slug(row)
+        proc_dir = (
+            self.data_dir / "tenants" / DEFAULT_TENANT_ID / "procesos" / process_slug(row)
+        )
         proc_dir.mkdir(parents=True, exist_ok=True)
 
         meta_path = proc_dir / "ficha.json"
