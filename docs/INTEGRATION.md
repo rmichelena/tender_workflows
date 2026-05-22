@@ -1,8 +1,8 @@
-# Integración SEACE Monitor ↔ tender_procurement
+# Integración SEACE Monitor ↔ pipeline documental
+
+**Documentación ampliada:** [ARCHITECTURE.md](ARCHITECTURE.md) (diagramas y componentes) · [ROADMAP.md](ROADMAP.md) (fases y prioridades).
 
 ## Visión del sistema completo
-
-Tu borrador (`workflow licitaciones.txt`) y los dos repos encajan así:
 
 ```mermaid
 flowchart TB
@@ -15,94 +15,97 @@ flowchart TB
   end
 
   subgraph gate [Gate humano]
-    UI -->|Analizar| DL[Descarga documentos]
-    DL --> TP[tender_procurement Paso 1]
-    TP --> A0[Eje 0 Gemini 1.3b]
-    A0 --> ST[estado: analizada]
+    UI -->|Descargar| DL[Descarga Alfresco]
+    DL --> DESC[estado: descargada]
+    DESC -->|Analizar N PDFs| FAST[Fast-path Gemini]
+    FAST --> ST[estado: analizada]
     UI -->|Portafolio| PF[estado: portafolio]
+    FAST -.->|opcional| TP[tender_procurement Paso 1]
   end
 
   subgraph entry2 [Entrypoint 2/3 - Manual]
     MAN[Proceso o docs manuales]
-    MAN --> TP
+    MAN --> DL
   end
 
-  subgraph later [Fase 2 - Agentes]
-    ST --> IDX[Paso 1.5 índice]
+  subgraph later [Fase agentica - planificado]
+    PF --> CHAT[Chat Hermes embebido]
+    CHAT --> IDX[Paso 1.5 índice]
     IDX --> T2A[Paso 2A temático]
     T2A --> BOM[Paso 2B BOM]
     BOM --> S6[Paso 6 búsqueda equipos]
   end
 ```
 
-| Fase | Qué es | Repo / componente |
-|------|--------|-------------------|
-| Monitoreo SEACE | Listado multi-entidad, cronograma, estados | **seace-monitor** |
-| Análisis documental (hasta go/no-go) | 1.0–1.3 determinístico + **1.2b** Gemini planos + **1.3b** eje 0 | **tender_procurement** + puente |
-| Extracción profunda + búsqueda | 1.5+, agentes, BOM, proveedores | **tender_procurement** (continuación manual o botón futuro) |
+| Fase | Qué es | Componente |
+|------|--------|--------------|
+| Monitoreo SEACE | Listado multi-entidad, cronograma, estados | `apps/portal/seace_monitor` |
+| Go/no-go rápido | Multi-PDF → Gemini free reader | `analysis/fast_reader.py` |
+| Análisis documental completo | 1.0–1.3 + **1.2b** planos + **1.3b** eje 0 | `scripts/run_step1_to_1_3.py` |
+| Extracción profunda | 1.5+, agentes, BOM | `instrucciones/` + Hermes (externo hoy) |
 
-## Qué hace cada parte de tender_procurement en «Analizar»
+## Análisis: fast-path vs Paso 1 completo
 
-| Paso | Tipo | Integración actual |
-|------|------|-------------------|
-| 1.0 Triage | Determinístico | `run_step1_to_1_3.py` |
-| 1.0.b XLSX | Determinístico | idem |
-| 1.1 DOCX→PDF | LibreOffice | idem |
-| 1.2 PDF clean | `pdf_image_audit.py` | idem |
-| **1.2b Planos** | **Gemini visión** | `planos_mode: auto_leave` (continúa sin Gemini) o `stop` (falla y pide JSON manual) |
-| 1.3 Modal Docling | API Modal | idem |
-| **1.3b Eje 0** | **Gemini texto** | `run_axis0_gemini()` si `GEMINI_API_KEY` |
-| 1.5+ | Agentes | **No** — solo tras gate «Continuar» en flujo completo |
+| Modo | Cuándo | Qué hace |
+|------|--------|----------|
+| **Fast-path** (default VPS) | Usuario selecciona PDFs en `/descargados` | Sube N PDFs a Gemini; un `generateContent`; `free_reader_summary.md` |
+| **Paso 1 completo** | `analysis.tender_procurement` + infra Modal/LibreOffice | Triage, clean, Docling, eje 0; layout `tender_project/` |
 
-## Layout de carpetas al analizar
+## Layout de carpetas
 
 ```
 data/procesos/{nid}_{nomenclatura}/
-  documentos/              ← PDFs/ZIPs descargados de SEACE (Alfresco)
-  tender_project/          ← layout esperado por tender_procurement
-    inputs/                ← copia de documentos/
+  documentos/              ← PDFs/ZIPs descargados (Alfresco)
+  documentos/_extracted/   ← contenido de ZIP/RAR
+  fast_analysis/           ← meta.json del fast-path
+  free_reader_summary.md   ← salida Gemini
+  tender_project/          ← Paso 1 completo (si se ejecuta)
+    inputs/
     artifacts/
-      step_1_normalizados/
-      step_1_axis0_preindex/axis0_go_no_go_summary.md
     logs/decision_log.md
 ```
 
 ## Configuración
 
-En `config.yaml`:
-
 ```yaml
 analysis:
+  fast_path:
+    enabled: true
+    gemini_model: gemini-2.5-pro
+    gemini_api_key_env: GEMINI_API_KEY
   tender_procurement:
-    repo_path: null   # auto-detect raíz monorepo
-    planos_mode: auto_leave   # auto_leave | stop
+    repo_path: null
+    planos_mode: auto_leave
     run_axis0: true
     gemini_model: gemini-2.5-flash
-    gemini_api_key_env: GEMINI_API_KEY
 ```
 
-Variables de entorno:
+Variables de entorno: `GEMINI_API_KEY`, `SEACE_HTTP_PROXY` (ver `deploy/.env.example`).
 
-- `GEMINI_API_KEY` — eje 0 (y futuro 1.2b visión)
-- Modal Docling — credenciales en `tender_procurement/scripts/extractors/extractors.conf`
+## Estados en la UI
 
-## Estados en la UI vs workflow
+| Estado | Significado |
+|--------|-------------|
+| `publicada` | Detectada en scan, sin descarga |
+| `descargando` | Descarga en curso |
+| `descargada` | Documentos en disco; pendiente analizar |
+| `analizada` | Fast-path o Paso 1 completado |
+| `portafolio` | Interés confirmado; candidata a 1.5+ |
+| `descartada` | Descartada; sin datos locales |
 
-| Estado SEACE Monitor | Equivalente conceptual |
-|---------------------|-------------------------|
-| `publicada` | Detectada (entrypoint 1), sin análisis documental |
-| `analizada` | Pasó descarga + etapa 1 (+ eje 0 si hubo API key) |
-| `portafolio` | Gate 9 «interés» — candidata a Paso 1.5+ / búsqueda |
+Al descartar desde descargados/analizados: se borran disco, `documentos_json` y `AnalysisResult`.
 
-## Próximos pasos naturales
+## Próximos pasos
 
-1. **1.2b Gemini real** — script que lea `step_1_planos_candidates_pending.json` y llame `prompt_planos_vision.md` (como subagente OpenClaw hoy).
-2. **Botón «Continuar extracción»** — lanzar 1.5 + 2A solo para `portafolio`.
-3. **Filtro entrypoint 1** — reglas de `workflow licitaciones.txt` §2 (entidad, tipo, objeto) antes de abrir ficha.
-4. **Otros portales** — mismo patrón: adapter + misma BD.
+Ver [ROADMAP.md](ROADMAP.md). Resumen:
+
+1. Portafolio → chat Hermes embebido
+2. Settings (GenAI / OpenRouter / Fireworks)
+3. Prefiltros descarte + auto-análisis
+4. Multiusuario
+5. WhatsApp (API existente en otro proyecto)
 
 ## Referencias
 
-- `tender_procurement/instrucciones/01_workflow.md` — runbook canónico
-- `tender_procurement/scripts/run_step1_to_1_3.py` — runner determinístico hasta 1.3
-- `workflow licitaciones.txt` — bosquejo entrypoints 1–3
+- [instrucciones/01_workflow.md](../instrucciones/01_workflow.md) — runbook agentico
+- [scripts/run_step1_to_1_3.py](../scripts/run_step1_to_1_3.py) — runner Paso 1

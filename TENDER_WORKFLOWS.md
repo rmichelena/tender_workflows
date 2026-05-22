@@ -45,5 +45,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 ## Documentación
 
-- [README.md](README.md) — pipeline documental y extractores
-- [docs/INTEGRATION.md](docs/INTEGRATION.md) — SEACE + Paso 1 + estados
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — capas, componentes, diagramas, despliegue
+- [docs/ROADMAP.md](docs/ROADMAP.md) — fases, prefiltros, multiusuario, WhatsApp, providers LLM
+- [docs/INTEGRATION.md](docs/INTEGRATION.md) — SEACE + análisis + estados
+- [README.md](README.md) — pipeline documental y extractores (Paso 1)
