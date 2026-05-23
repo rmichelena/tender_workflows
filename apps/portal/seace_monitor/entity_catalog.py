@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 
 from .config import AppConfig
 from .db.models import Entity
-from .entities import EntityRow, load_entities_csv, resolve_entities_csv
 from .http_util import requests_proxies
 from .tenant_paths import tenant_settings_dir
 
@@ -198,37 +197,11 @@ def sync_entity_catalog_if_changed(
     return result
 
 
-def apply_legacy_entities_csv(session: Session, config: AppConfig) -> int:
-    """Marca activa=True las entidades listadas en entities.csv legacy."""
-    path = resolve_entities_csv(config.entities_csv)
-    if not path.is_file():
-        return 0
-    try:
-        rows = load_entities_csv(path)
-    except (FileNotFoundError, ValueError):
-        return 0
-    activated = 0
-    for row in rows:
-        ent = session.query(Entity).filter(Entity.ruc == row.ruc).one_or_none()
-        if ent is None:
-            ent = Entity(ruc=row.ruc, nombre=row.nombre, activa=True, estado_osce="Activo")
-            session.add(ent)
-            activated += 1
-        elif not ent.activa:
-            ent.activa = True
-            if row.nombre:
-                ent.nombre = row.nombre
-            activated += 1
-    session.flush()
-    return activated
-
-
 def ensure_entity_catalog(session: Session, config: AppConfig) -> None:
-    """Bootstrap: catálogo OSCE + activación desde entities.csv legacy."""
+    """Bootstrap: sincroniza catálogo OSCE si cambió el CSV oficial."""
     tenant_settings_dir(config).mkdir(parents=True, exist_ok=True)
     try:
         sync_entity_catalog_if_changed(session, config)
     except Exception:
         logger.exception("No se pudo sincronizar catálogo OSCE al inicio")
-    apply_legacy_entities_csv(session, config)
     session.commit()

@@ -9,7 +9,6 @@ from typing import Any
 
 import yaml
 
-from .entities import resolve_entities_csv
 from .tenant_paths import DEFAULT_TENANT_ID
 
 _DURATION_RE = re.compile(
@@ -78,7 +77,6 @@ class AppConfig:
     ficha_refresh_interval: str = "6h"
     stale_analysis_interval: str = "2h"
     anio: int = 2026
-    entities_csv: Path = Path("entities.csv")
     database_url: str = "sqlite:///./data/seace.db"
     max_pages: int = 1  # REVIEW M5: 1 página basta para nuestras entidades; ver scanner.py
     rows_per_page: int = 15
@@ -152,7 +150,6 @@ class AppConfig:
             ),
             stale_analysis_interval=str(raw.get("stale_analysis_interval", "2h")),
             anio=int(raw.get("anio", 2026)),
-            entities_csv=resolve_entities_csv(raw.get("entities_csv", "entities.csv")),
             database_url=str(
                 raw.get(
                     "database_url",

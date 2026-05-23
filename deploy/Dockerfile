@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements-portal.txt
 COPY apps/portal/seace_monitor ./apps/portal/seace_monitor
 COPY scripts ./scripts
 COPY instrucciones ./instrucciones
-COPY config.example.yaml entities.csv.example ./
+COPY config.example.yaml ./
 
 ENV PYTHONUNBUFFERED=1
 

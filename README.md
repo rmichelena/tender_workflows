@@ -34,12 +34,11 @@ tender_workflows/
   apps/portal/              # Portal FastAPI + worker (etapa A)
   instrucciones/          # Runbooks A–D, prompts, schemas (etapas C–D + perfiles A)
   scripts/                  # Pipeline determinístico etapa C (extractors, run_step1)
-  proyecto/                 # Plantilla de layout portafolio + scripts etapa D (legacy path)
+  older_useful_material/    # Material legacy (proyecto/, reviews) — referencia
   docs/                     # Arquitectura, roadmap, etapas
   deploy/                   # Docker Compose VPS
   data/                     # Gitignored — tenants, procesos, BD
   config.example.yaml
-  entities.csv.example
 ```
 
 Detalle de componentes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -52,7 +51,7 @@ No solo SEACE:
 
 | Entrypoint | Ejemplo | Estado inicial |
 |------------|---------|----------------|
-| Scan automático | Worker + `entities.csv` | `publicada` |
+| Scan automático | Worker + entidades activas (BD / Settings) | `publicada` |
 | Alta directa (entidad + N° proceso) | SEACE u otro portal soportado | `descargada` |
 | Creación manual | Invitación privada, RFP no público | `descargada` |
 
@@ -64,7 +63,6 @@ El usuario puede marcar **portafolio** sin **analizar**; el sistema ejecuta el f
 
 ```bash
 cp config.example.yaml config.yaml
-cp entities.csv.example entities.csv
 cd apps/portal && python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 export PYTHONPATH=.
@@ -79,7 +77,7 @@ UI local: `http://127.0.0.1:8000/` · Producción VPS: `http://bots.infinitek.pe
 ### Docker
 
 ```bash
-cp config.example.yaml config.yaml && cp entities.csv.example entities.csv
+cp config.example.yaml config.yaml
 cp deploy/.env.example deploy/.env
 docker compose -f deploy/docker-compose.yml up -d --build
 ```

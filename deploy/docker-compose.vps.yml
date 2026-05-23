@@ -1,7 +1,6 @@
 # VPS: HTTP directo, sin Traefik, SQLite embebido.
 # Uso (desde deploy/):
 #   cp config.example.vps.yaml config.yaml
-#   cp ../entities.csv.example ../entities.csv
 #   cp .env.example .env          # GEMINI_API_KEY, SEACE_HTTP_PROXY, etc.
 #   docker compose -f docker-compose.vps.yml up -d --build
 
@@ -26,7 +25,6 @@ services:
       - "${WEB_PORT:-8080}:8080"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-      - ../entities.csv:/app/entities.csv:ro
       - tender_data:/app/data
     environment: *app-environment
     restart: unless-stopped
@@ -43,7 +41,6 @@ services:
       dockerfile: deploy/Dockerfile
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-      - ../entities.csv:/app/entities.csv:ro
       - tender_data:/app/data
     environment: *app-environment
     command: >

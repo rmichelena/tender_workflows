@@ -8,8 +8,8 @@
 flowchart TB
   subgraph entry1 [Entrypoint 1 - Automático]
     SEACE[SEACE Monitor worker]
-    CSV[entities.csv]
-    SEACE --> CSV
+    OSCE[Catálogo OSCE]
+    SEACE --> OSCE
     SEACE --> DB[(SQLite/Postgres)]
     SEACE --> UI[Web UI publicaciones]
   end

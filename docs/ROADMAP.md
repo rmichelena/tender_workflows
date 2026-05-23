@@ -127,7 +127,7 @@ Reglas compuestas que disparan pipeline sin intervención:
 | 4.0 | Layout `data/tenants/{tenant_id}/` (settings, seace, procesos, agent) — empezar con `default` |
 | 4.1 | Auth (sessions/OAuth); login en portal |
 | 4.2 | Roles: admin, analista, viewer |
-| 4.3 | `entities.csv` y prefiltros **por tenant** |
+| 4.3 | Entidades activas y prefiltros **por tenant** (tabla `Entity` + settings) |
 | 4.4 | Acciones auditadas (descargar, analizar, descartar, portafolio) |
 | 4.5 | Settings LLM por tenant (providers/modelos) |
 | 4.6 | Schema: `users`, `organizations`, `memberships`, `tenant_id` en `Process` |

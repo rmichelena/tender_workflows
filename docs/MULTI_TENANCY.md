@@ -58,7 +58,6 @@ Volumen host compartido entre **portal**, **worker** y (si aplica) **un** conten
       settings/
         portal.yaml            # providers LLM, modelos, poll_interval, …
         filter_rules.yaml      # prefiltros descarte / auto-análisis
-        entities.csv           # entidades monitoreadas (por tenant)
       secrets/                 # gitignored; API keys si no van solo en env
       seace/
         cookies/               # sesión JSF por tenant (si no global)
@@ -90,7 +89,7 @@ El código actual usa `data/procesos/` → migración: `data_dir = {base}/tenant
 |------|-----------|-------|
 | Settings LLM (GenAI / OpenRouter / Fireworks) | `tenants/{id}/settings/portal.yaml` + UI | Fase 2 roadmap |
 | Reglas prefiltro | `filter_rules.yaml` + columnas BD | Evaluadas en scanner |
-| Entidades SEACE | `entities.csv` por tenant | Hoy global en repo |
+| Entidades SEACE | Tabla `Entity` (catálogo OSCE + flag `activa`) | UI Settings; hoy tenant `default` |
 | Documentos descargados | `tenants/{id}/procesos/.../documentos/` | Sin Dropbox |
 | Cookies SEACE | `tenants/{id}/seace/` | Si varios usuarios abren SEACE distinto |
 | Sesión chat agente | BD + `tenants/{id}/agent/sessions/` | Portal es dueño del `session_id` |

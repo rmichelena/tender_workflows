@@ -94,10 +94,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "sync-entities":
         from .db.session import init_db, session_factory
-        from .entity_catalog import (
-            apply_legacy_entities_csv,
-            sync_entity_catalog_if_changed,
-        )
+        from .entity_catalog import sync_entity_catalog_if_changed
         from .tenant_paths import migrate_legacy_layout
 
         cfg = AppConfig.load(args.config)
@@ -108,20 +105,15 @@ def main(argv: list[str] | None = None) -> int:
             result = sync_entity_catalog_if_changed(
                 session, cfg, force=args.force
             )
-            legacy = apply_legacy_entities_csv(session, cfg)
             session.commit()
             if result is None:
-                logging.info(
-                    "Catálogo OSCE sin cambios; legacy CSV activó %s entidad(es)",
-                    legacy,
-                )
+                logging.info("Catálogo OSCE sin cambios")
             else:
                 logging.info(
-                    "Catálogo OSCE: +%s nuevas, %s actualizadas, %s Inactivo omitidas; legacy +%s",
+                    "Catálogo OSCE: +%s nuevas, %s actualizadas, %s Inactivo omitidas",
                     result.added,
                     result.updated,
                     result.skipped_inactivo,
-                    legacy,
                 )
         finally:
             session.close()
