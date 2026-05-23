@@ -67,7 +67,7 @@ Ejemplo:
 
 ## Plantilla del archivo JSON (canónico)
 
-Conforme a `schemas/candidato_cumplimiento.schema.json`.
+Conforme a `instrucciones/D_portafolio/schemas/candidato_cumplimiento.schema.json`.
 
 ```json
 {

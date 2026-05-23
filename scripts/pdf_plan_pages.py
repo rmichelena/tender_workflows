@@ -8,7 +8,7 @@ Typical flow:
      python scripts/pdf_plan_pages.py audit input_clean.pdf --output-dir artifacts/step_1_planos --stem DOC
 
   2) analyze rendered PNGs with a visual LLM and write an analysis JSON matching
-     instrucciones/schemas/plan_pages_analysis.schema.json
+     instrucciones/C_conversion/schemas/plan_pages_analysis.schema.json
 
   3) build extracted-plans PDF and pre-OCR substituted PDF, only when the
      analysis contains at least one replace_page/replace_images action:

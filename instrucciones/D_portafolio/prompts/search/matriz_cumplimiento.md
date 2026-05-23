@@ -23,7 +23,7 @@ Eres un **generador de matriz de cumplimiento**. Tu tarea es comparar **un candi
   - `url_fabricante`
   - `url_datasheet`
   - `datasheet_source`: `manufacturer` | `external` (Google + filetype:pdf en distribuidor/tercero) | `none`. Si `external`, el subagente-item ya validó que el PDF corresponde al modelo correcto; el campo va a la matriz para trazabilidad. Si `none`, muchos requisitos quedarán como `parcial_sin_info`.
-- **Schema**: `instrucciones/schemas/candidato_cumplimiento.schema.json`.
+- **Schema**: `instrucciones/D_portafolio/schemas/candidato_cumplimiento.schema.json`.
 - **Output path**: ej. `/proyecto/artifacts/step_6_resultados/matrices/ITEM-{id}/ITEM-{id}_candidato_{n}_{marca}_{modelo}.json`.
 
 ## Tool budget
@@ -81,7 +81,7 @@ En v0.1 el estado `PARCIAL` conflaciona tres situaciones distintas y la decisió
 
 ## Output canónico (JSON)
 
-Conforme a `schemas/candidato_cumplimiento.schema.json`:
+Conforme a `instrucciones/D_portafolio/schemas/candidato_cumplimiento.schema.json`:
 
 ```json
 {

@@ -6,7 +6,7 @@ Este prompt se aplica tanto al BOM High-Level (paso 2.2) como al BOM Exploded (p
 
 ## Reglas no negociables
 
-- Sos un **modelo diferente** al productor (regla "revisor ≠ productor" de `agent_patterns.md` §2.4).
+- Sos un **modelo diferente** al productor (regla "revisor ≠ productor" de `shared/agent_patterns.md` §2.4).
 - Tu **handoff budget es 1**: revisás una sola vez. Si encontrás problemas mayores, **falla loud y escalá al humano** — NO devolvés al productor para "otra iteración".
 - Tu output debe ser un JSON estructurado, NO texto libre.
 
@@ -15,7 +15,7 @@ Este prompt se aplica tanto al BOM High-Level (paso 2.2) como al BOM Exploded (p
 - **BOM producido**: path al `BOM_highlevel.json` o `BOM_exploded.json` que el productor escribió.
 - **EETT aclaradas**: paths a markdown — para verificar que el productor no omitió cosas.
 - **Scratchpad**: `/proyecto/scratchpad/decisiones_bom.md` — para entender las decisiones del productor.
-- **Schema**: `instrucciones/schemas/bom_item.schema.json` — para validar shape.
+- **Schema**: `instrucciones/D_portafolio/schemas/bom_item.schema.json` — para validar shape.
 - **Tipo de auditoría**: `HIGH_LEVEL` o `EXPLODED` (lo pasa el orquestador en el context).
 - **Output path**: ruta donde escribir tu reporte JSON.
 

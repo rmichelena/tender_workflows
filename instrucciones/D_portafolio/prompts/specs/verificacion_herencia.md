@@ -12,7 +12,7 @@
 2. **Orden topológico obligatorio**: el orquestador procesa primero items con `parent_id: ""` (capa 0), después items cuyo padre ya está procesado, etc. Vos no te preocupás del orden — recibís el batch ya ordenado.
 3. **Context selectivo**: NO recibís todas las EETT — solo las secciones referenciadas por los items de tu batch + specs ya verificadas de los padres (si los items tienen `parent_id`). Esto evita context overload (causa del INC-005 de ICAO-00068).
 4. **Contexto = paths, no contenido**.
-5. **Schema validation**: tu output se valida contra `schemas/item_specs.schema.json`. Falla = retry una vez con error como feedback; segundo falla = falla loud.
+5. **Schema validation**: tu output se valida contra `instrucciones/D_portafolio/schemas/item_specs.schema.json`. Falla = retry una vez con error como feedback; segundo falla = falla loud.
 6. **Sin inventar**: solo requisitos EXPLÍCITOS en EETT/aclaradas (texto narrativo, listas, tablas, notas al pie) o explícitamente heredados del padre.
 
 ## Inputs (paths)
@@ -77,7 +77,7 @@ Si encontrás puntos ambiguos durante la verificación, agregalos a `tbd[]` (sin
 
 ## Output canónico — `ITEM-{id}_specs.json`
 
-Conforme a `schemas/item_specs.schema.json`.
+Conforme a `instrucciones/D_portafolio/schemas/item_specs.schema.json`.
 
 ```json
 {

@@ -46,7 +46,7 @@ No equivalentes:
 ## Output
 
 Escribe JSON compatible con:
-`/home/sysop/.openclaw/workspace/tender_procurement/instrucciones/schemas/axis_1_consolidated.schema.json`
+`instrucciones/D_portafolio/schemas/axis_1_consolidated.schema.json`
 
 en el path indicado por la tarea.
 

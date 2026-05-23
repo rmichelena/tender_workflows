@@ -3,13 +3,13 @@
 Documento de referencia del sistema integrado: monitoreo SEACE, portal, pipeline documental y fase agentica.
 
 **Estado:** refleja el código en `main` a mayo 2026.  
-**Relacionado:** [ROADMAP.md](ROADMAP.md), [INTEGRATION.md](INTEGRATION.md).
+**Relacionado:** [STAGES.md](STAGES.md) (modelo canónico A→D), [ROADMAP.md](ROADMAP.md), [INTEGRATION.md](INTEGRATION.md).
 
 ---
 
 ## Visión en una frase
 
-Un monorepo que **detecta oportunidades** (SEACE hoy, otros canales mañana), permite **decisión humana** (descargar → analizar → portafolio) y conecta con **extracción profunda** (Paso 1 determinístico + agentes Hermes/OpenClaw).
+Un monorepo que **ingiere oportunidades** por múltiples canales y entrypoints (SEACE hoy; alta directa, manual y email planificados), permite **decisión humana** en el portal (etapas A–B) y conecta con **conversión documental** (etapa C) y **trabajo agentico en portafolio** (etapa D). Ver [STAGES.md](STAGES.md).
 
 ---
 
@@ -19,7 +19,7 @@ Tres dimensiones que no deben mezclarse en el modelo de datos:
 
 | Dimensión | Qué es | Hoy | Futuro |
 |-----------|--------|-----|--------|
-| **Canal de ingesta** | De dónde llega la oportunidad | Adapter SEACE (`seace_monitor`) | Email, upload manual, otros portales |
+| **Canal de ingesta** | De dónde llega la oportunidad | Adapter SEACE (`seace_monitor`) | Alta directa (entidad+N°), manual, email, otros portales |
 | **Perfil de workflow** | Qué pasos ejecutar | `pe_public` implícito | `market_study`, `multilateral`, … |
 | **Contexto de negocio** | Qué hacemos después del go/no-go | Portafolio manual | Catálogo, propuesta, flujo de caja |
 
@@ -98,8 +98,8 @@ tender_workflows/
       tender_bridge.py  # Puente run_step1_to_1_3 + eje 0
     web/                # FastAPI + templates Jinja
     process_storage.py  # Descarte, limpieza disco/BD
-  instrucciones/        # Runbook agentico (Paso 1.5 → 7)
-  scripts/              # Pipeline determinístico Paso 1
+  instrucciones/        # Runbooks A–D (ver STAGES.md)
+  scripts/              # Pipeline determinístico etapa C
   deploy/               # Docker Compose VPS + .env
   data/                 # Gitignored: BD, procesos, artifacts
 ```
@@ -200,5 +200,7 @@ stateDiagram-v2
 
 - [ROADMAP.md](ROADMAP.md) — fases y prioridades
 - [INTEGRATION.md](INTEGRATION.md) — detalle Paso 1 ↔ portal
-- [instrucciones/01_workflow.md](../instrucciones/01_workflow.md) — runbook agentico
+- [STAGES.md](STAGES.md) — etapas A→D
+- [instrucciones/C_conversion/](../instrucciones/C_conversion/) — runbook conversión
+- [instrucciones/D_portafolio/](../instrucciones/D_portafolio/) — runbook agentico
 - [apps/REVIEW.md](../apps/REVIEW.md) — hallazgos de revisión de código

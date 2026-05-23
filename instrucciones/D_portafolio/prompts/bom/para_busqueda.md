@@ -68,7 +68,7 @@ A partir del BOM Exploded consolidado y los `ITEM-{id}_specs.json` ya verificado
 ```
 
 **Notas**:
-- `spec_clave_resumida`: 1-2 líneas con los 3-5 parámetros más diferenciadores. Útil para que el `prompt_search_worker.md` tenga un "hook" rápido. La lista completa de requerimientos vive en `ruta_specs`.
+- `spec_clave_resumida`: 1-2 líneas con los 3-5 parámetros más diferenciadores. Útil para que `search/search_worker.md` tenga un "hook" rápido. La lista completa de requerimientos vive en `ruta_specs`.
 - `ruta_specs`: el subagente-item del paso 6 carga este archivo para tener todos los requisitos verbatim.
 - `limpieza_aplicada`: registro de qué referencias no-buscables se modificaron y cómo.
 - `items_excluidos_por_servicio`: lista de IDs filtrados (servicios). Se conservan para que el paso 7 los reincluya en el consolidado final.

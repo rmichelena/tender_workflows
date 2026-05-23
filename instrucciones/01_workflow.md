@@ -1,9 +1,14 @@
+> **⚠ DEPRECADO como runbook único — mayo 2026**  
+> Contenido válido pero repartido por etapa. Usar como referencia detallada hasta migración completa.  
+> **Paso 1 →** [C_conversion/01_runbook.md](C_conversion/01_runbook.md) · **Pasos 2–7 →** [D_portafolio/01_runbook.md](D_portafolio/01_runbook.md)  
+> **Modelo producto:** [docs/STAGES.md](../docs/STAGES.md)
+
 # 01_workflow.md — Runbook operativo de procurement (v0.2)
 
 > **Regla general**: para cada subpaso, ejecutar exactamente lo indicado: Owner, Tipo, Prompt, Inputs, Modelo/Tools, Tool budget, Outputs, QA/Gate, Criterio Done.
-> Selección de modelo: desde `model_routing.yaml` (no de `catalog_modelos.md` directamente — ese describe capacidades; el routing decide quién hace qué basado en evidencia).
-> Selección de tools: desde `catalog_tools.md`, respetando primario+fallback.
-> Patrones de delegación: ver `agent_patterns.md` — leer antes de delegar.
+> Selección de modelo: desde `shared/model_routing.yaml` (no de `shared/catalog_modelos.md` directamente — ese describe capacidades; el routing decide quién hace qué basado en evidencia).
+> Selección de tools: desde `shared/catalog_tools.md`, respetando primario+fallback.
+> Patrones de delegación: ver `shared/agent_patterns.md` — leer antes de delegar.
 > **JSON como canónico**: cualquier paso que produce datos estructurados entrega JSON validado contra schema. El orquestador genera los derivados (TSV, MD, XLSX) automáticamente.
 
 
@@ -169,8 +174,8 @@ python3 scripts/pdf_image_audit.py input.pdf \
 
 **Owner**: Orquestador + subagente visual barato.
 **Script**: `scripts/pdf_plan_pages.py`
-**Prompt visual**: `prompts/prompt_planos_vision.md`
-**Schema**: `schemas/plan_pages_analysis.schema.json`
+**Prompt visual**: `C_conversion/prompts/planos_vision.md`
+**Schema**: `instrucciones/C_conversion/schemas/plan_pages_analysis.schema.json`
 **Modelo**: `model_routing.yaml → paso_1_2b_planos_vision` (primary: `google/gemini-2.5-flash`).
 
 **Tarea**: después del PDF limpio y antes de la conversión a markdown, detectar páginas/regiones con planos, diagramas, imágenes técnicas o contenido visual que el OCR genérico manejaría mal. La candidatura combina tamaño + análisis de contenido por página; la decisión final la hace un modelo visual.
@@ -266,7 +271,7 @@ python3 scripts/extractors/modal_docling_extract.py \
 
 **Tipo**: lectura libre híbrida + consolidación/verificación del orquestador.
 **Owner**: Orquestador → 1-2 subagentes lectores libres.
-**Prompt base**: `prompts/prompt_axis0_free_reader.md` pegado inline en el handoff cuando quepa.
+**Prompt base**: `C_conversion/prompts/axis0_free_reader.md` pegado inline en el handoff cuando quepa.
 **Inputs**:
 - carpeta `/proyecto/artifacts/step_1_aclaradas/` si existe y Paso 1.4 fue ejecutado;
 - si no hay aclaraciones aplicables, carpeta `/proyecto/artifacts/step_1_normalizados/`;
@@ -310,13 +315,13 @@ Presentar `axis0_go_no_go_summary.md` al humano y preguntar explícitamente:
 
 **Input de decisión**: respuesta humana de Gate 0.a con los archivos que son aclaraciones. El orquestador/subagente debe determinar qué documentos base y qué secciones son afectadas.
 
-**Tipo**: auditoría/revisor de ojos frescos con handoff acotado (ver `agent_patterns.md` §3.5).
+**Tipo**: auditoría/revisor de ojos frescos con handoff acotado (ver `shared/agent_patterns.md` §3.5).
 
 ### 1.4.1 Ejecutor
 
 **Owner**: Orquestador → 1 subagente
 **Tipo**: LLM call con tools `file` + `terminal`
-**Prompt**: `prompts/prompt_merge_aclaraciones_ejecutor.md`
+**Prompt**: `C_conversion/prompts/merge_aclaraciones_ejecutor.md`
 **Modelo**: desde `model_routing.yaml → paso_1_4_ejecutor` (primary: glm-5p1)
 **Context** (paths, NO contenido):
 - Rutas a EETT/anexos en MD (de step_1_normalizados)
@@ -333,7 +338,7 @@ Presentar `axis0_go_no_go_summary.md` al humano y preguntar explícitamente:
 
 **Owner**: Orquestador → 1 subagente
 **Modelo**: DISTINTO al ejecutor (`model_routing.yaml → paso_1_4_auditor`, primary: minimax-m2p7).
-**Prompt**: `prompts/prompt_merge_aclaraciones_auditor.md`
+**Prompt**: `C_conversion/prompts/merge_aclaraciones_auditor.md`
 **Handoff budget**: 1 (auditor revisa una vez, sin reverse edge).
 
 **Reglas**:
@@ -354,16 +359,16 @@ Presentar `axis0_go_no_go_summary.md` al humano y preguntar explícitamente:
 
 **Tipo**: LLM call / workflow de indexación, una llamada por documento.
 **Owner**: Orquestador → 1 subagente por documento Markdown.
-**Prompt**: `prompts/prompt_document_indexer.md`
-**Schema**: `schemas/document_index.schema.json`
+**Prompt**: `C_conversion/prompts/document_indexer.md`
+**Schema**: `instrucciones/C_conversion/schemas/document_index.schema.json`
 **Modelo**: `model_routing.yaml → paso_1_5_indexador`
 
 **Inputs** (paths, NO contenido):
 - Documento Markdown fuente:
   - si Paso 1.4 aplica: `/proyecto/artifacts/step_1_aclaradas/{stem}_aclarada_v1.md`
   - si no hay aclaraciones: `/proyecto/artifacts/step_1_normalizados/{stem}.md`
-- Schema: `instrucciones/schemas/document_index.schema.json`
-- Prompt: `instrucciones/prompts/prompt_document_indexer.md`
+- Schema: `instrucciones/C_conversion/schemas/document_index.schema.json`
+- Prompt: `instrucciones/C_conversion/prompts/document_indexer.md`
 
 **Outputs** (sin subcarpetas por documento):
 - Subagente indexador: `/proyecto/artifacts/step_1_index/{stem_original}_index.json`
@@ -438,7 +443,7 @@ El subagente **no** escribe Markdown humano; el orquestador lo genera con `scrip
 3. Producir JSON canónico si un paso posterior lo requiere.
 4. No usar chunk plans para eje 0 salvo experimento explícito.
 
-**Prompt base**: `prompts/prompt_axis0_free_reader.md` (contenido suficientemente corto para pegar inline).
+**Prompt base**: `C_conversion/prompts/axis0_free_reader.md` (contenido suficientemente corto para pegar inline).
 
 **La lectura libre debe pedir explícitamente**:
 - cronograma;
@@ -483,24 +488,24 @@ El subagente **no** escribe Markdown humano; el orquestador lo genera con `scrip
 ### 2A.1 Lectores temáticos JSON-only
 
 **Owner**: Orquestador → subagentes especializados.
-**Prompt template**: `prompts/prompt_thematic_reader.template.md`
-**Axis payloads**: `payloads/thematic_axes/{axis_id}.json`
-**Rendered prompts**: `prompts/rendered_thematic/{axis_id}.md`
+**Prompt template**: `D_portafolio/prompts/thematic/template.md`
+**Axis payloads**: `D_portafolio/payloads/thematic_axes/{axis_id}.json`
+**Rendered prompts**: `D_portafolio/prompts/thematic/rendered/{axis_id}.md`
 **Renderer**: `scripts/render_thematic_prompt.py`
-**Schema base**: `schemas/thematic_extraction.schema.json` v0.3
+**Schema base**: `instrucciones/D_portafolio/schemas/thematic_extraction.schema.json` v0.3
 **Schemas por eje**:
-- `schemas/axis_0_main_tender_data.schema.json`
-- `schemas/axis_1_proposal_signature_documents.schema.json`
-- `schemas/axis_2_execution_documentary_deliverables.schema.json`
-- `schemas/axis_3_execution_services_obligations.schema.json`
-- `schemas/axis_4_goods_licenses_equipment.schema.json`
+- `instrucciones/D_portafolio/schemas/axis_0_main_tender_data.schema.json`
+- `instrucciones/D_portafolio/schemas/axis_1_proposal_signature_documents.schema.json`
+- `instrucciones/D_portafolio/schemas/axis_2_execution_documentary_deliverables.schema.json`
+- `instrucciones/D_portafolio/schemas/axis_3_execution_services_obligations.schema.json`
+- `instrucciones/D_portafolio/schemas/axis_4_goods_licenses_equipment.schema.json`
 
 Usar el schema específico del eje al llamar subagentes; el schema base queda como shape común/referencia.
 
 **Modelo piloto**: `openai/gpt-5.4-mini`.
 
 **Inputs por subagente**:
-- prompt renderizado del eje (`prompts/rendered_thematic/{axis_id}.md`)
+- prompt renderizado del eje (`D_portafolio/prompts/thematic/rendered/{axis_id}.md`)
 - `source_md_path`
 - `document_index_path`
 - `chunk_plan_path`
@@ -575,11 +580,11 @@ Este archivo se enriquece a medida que el productor toma decisiones. El auditor 
 
 **Tipo**: LLM call con schema fuerte.
 **Owner**: Orquestador → 1 subagente
-**Prompt**: `prompts/prompt_bom_highlevel.md`
+**Prompt**: `D_portafolio/prompts/bom/highlevel.md`
 **Modelo**: `model_routing.yaml → paso_2_1_productor` (primary: glm-5p1).
 **Context** (paths):
 - Rutas a EETT aclaradas + anexos aclarados
-- Schema: `schemas/bom_item.schema.json`
+- Schema: `instrucciones/D_portafolio/schemas/bom_item.schema.json`
 - Scratchpad: `/proyecto/scratchpad/decisiones_bom.md` (lee y escribe decisiones nuevas)
 - Output path: `/proyecto/artifacts/step_2_bom/BOM_highlevel.json`
 **Tool budget**: `max_file_reads: 15`, `max_file_writes: 3`.
@@ -589,7 +594,7 @@ Este archivo se enriquece a medida que el productor toma decisiones. El auditor 
 
 **Tipo**: LLM call.
 **Owner**: Orquestador → 1 subagente (modelo DISTINTO).
-**Prompt**: `prompts/prompt_bom_auditor.md` (nuevo en v0.2)
+**Prompt**: `D_portafolio/prompts/bom/auditor.md` (nuevo en v0.2)
 **Modelo**: `model_routing.yaml → paso_2_1_auditor` (primary: Kimi-K2.6).
 **Context**: BOM HL JSON + EETT aclaradas + scratchpad.
 **Handoff budget**: 1.
@@ -610,13 +615,13 @@ Este archivo se enriquece a medida que el productor toma decisiones. El auditor 
 
 **Tipo**: LLM call con schema fuerte.
 **Owner**: Orquestador → 1 subagente
-**Prompt**: `prompts/prompt_bom_exploded.md`
+**Prompt**: `D_portafolio/prompts/bom/exploded.md`
 **Modelo**: `model_routing.yaml → paso_2_3_productor` (primary: glm-5p1).
 **Context** (paths):
 - BOM HL auditado (de 2.2)
 - EETT aclaradas (selección por sección, no documento completo — context engineering "select")
 - Scratchpad actualizado
-- Schema: `schemas/bom_item.schema.json`
+- Schema: `instrucciones/D_portafolio/schemas/bom_item.schema.json`
 - Output path: `/proyecto/artifacts/step_2_bom/BOM_exploded.json`
 **Tool budget**: `max_file_reads: 30`, `max_file_writes: 3`.
 **Output validation**: schema_validation strict.
@@ -629,7 +634,7 @@ Este archivo se enriquece a medida que el productor toma decisiones. El auditor 
 
 **Tipo**: LLM call.
 **Owner**: Orquestador → 1 subagente (modelo DISTINTO).
-**Prompt**: `prompts/prompt_bom_auditor.md`
+**Prompt**: `D_portafolio/prompts/bom/auditor.md`
 **Modelo**: `model_routing.yaml → paso_2_3_auditor` (primary: minimax-m2p7).
 **Handoff budget**: 1.
 
@@ -673,14 +678,14 @@ Este archivo se enriquece a medida que el productor toma decisiones. El auditor 
    - Capa 2: etc.
 2. Procesar capa 0 completa antes de capa 1, etc. Esto asegura que cuando un hijo necesita resolver herencia, su padre ya está procesado.
 
-**Prompt**: `prompts/prompt_specs_verificacion_herencia.md`
+**Prompt**: `D_portafolio/prompts/specs/verificacion_herencia.md`
 **Modelo**: `model_routing.yaml → paso_3_1_productor` (primary: glm-5p1).
-**Batching**: 5 items por batch (de `model_routing.yaml`).
+**Batching**: 5 items por batch (de `shared/model_routing.yaml`).
 **Context** (paths):
 - Items del batch: `ITEM-{id}.json` (con requisitos_en_contexto del paso 2)
 - EETT aclaradas: solo las secciones referenciadas por los items del batch (selective context)
 - Specs de padres ya procesados (si los items del batch tienen parent_id)
-- Schema: `schemas/item_specs.schema.json`
+- Schema: `instrucciones/D_portafolio/schemas/item_specs.schema.json`
 
 **Output validation**: schema_validation strict por batch. Si un batch falla, retry una vez; segundo fallo = falla loud para ese batch.
 
@@ -691,7 +696,7 @@ Este archivo se enriquece a medida que el productor toma decisiones. El auditor 
 
 **Tipo**: LLM call.
 **Owner**: Orquestador → 1 subagente.
-**Prompt**: `prompts/prompt_specs_revisor.md`
+**Prompt**: `D_portafolio/prompts/specs/revisor.md`
 **Modelo**: DISTINTO al de 3.1 (`model_routing.yaml → paso_3_2_revisor`, primary: minimax-m2p7).
 **Context** (paths):
 - Todos los `ITEM-{id}_specs.json` de 3.1
@@ -744,7 +749,7 @@ Si las preferencias cambian después, actualizar `overlay_usuario.yaml` y relanz
 
 ## Paso 6 — Búsqueda de candidatos (ÚNICO paso multi-agent del workflow)
 
-> **Tipo**: búsqueda externa con fan-out paralelo controlado (ver `agent_patterns.md` §3.6).
+> **Tipo**: búsqueda externa con fan-out paralelo controlado (ver `shared/agent_patterns.md` §3.6).
 > **Cambio v0.2**: matriz de cumplimiento como LLM call SEPARADA post-búsqueda + búsqueda bilingüe + tool budget explícito + pool de tools con fallback.
 
 ### Arquitectura
@@ -761,21 +766,21 @@ Orquestador
 ### 6.1 Lanzar Subagentes-Item (en batches)
 
 **Owner**: Orquestador.
-**Prompt**: `prompts/prompt_item_manager.md`
+**Prompt**: `D_portafolio/prompts/search/item_manager.md`
 **Modelo**: `model_routing.yaml → paso_6_item_manager` (primary: glm-5p1).
 **Context** (paths):
 - `ITEM-{id}_specs.json`
 - `/proyecto/overlay_usuario.yaml`
-- `catalog_tools.md`
-- `formato_matriz_cumplimiento.md`
-- Schema candidato: `schemas/candidato_cumplimiento.schema.json`
+- `shared/catalog_tools.md`
+- `shared/formato_matriz_cumplimiento.md`
+- Schema candidato: `instrucciones/D_portafolio/schemas/candidato_cumplimiento.schema.json`
 **Tool budget**: `model_routing.yaml → paso_6_item_manager.tool_budget` (12 search calls + 16 fetch + 6 PDF parses + 3 iteraciones max).
 **Timeout**: `params.yaml → timeouts.item_manager` (1500s).
 **Batch size**: `params.yaml → batching.batch_size_items_step6` (3 items simultáneos).
 
 ### 6.2 Lógica interna del Subagente-Item
 
-(Se define en detalle en `prompt_item_manager.md`. Resumen:)
+(Se define en detalle en `D_portafolio/prompts/search/item_manager.md`. Resumen:)
 
 1. **Fan-out a 2 search-workers en paralelo**:
    - Worker A: modelo `paso_6_search_worker_a` + tool `brave` + idioma EN priority.
@@ -787,7 +792,7 @@ Orquestador
 3. **Validación por candidato**:
    - Vigencia (página fabricante activa, no EOL).
    - Origen/marca según overlay.
-   - Capacidad de descargar datasheet PDF del fabricante (ver `catalog_tools.md` capa C).
+   - Capacidad de descargar datasheet PDF del fabricante (ver `shared/catalog_tools.md` capa C).
    - Verificación de requisitos Hard contra datasheet.
    - Clasificación: VALIDO | CONDICIONADO | DESCARTADO.
 
@@ -801,12 +806,12 @@ Orquestador
 ### 6.3 Generación de matriz de cumplimiento (LLM call separada)
 
 **Tipo**: LLM call invocada por el Subagente-Item para cada candidato Válido/Condicionado.
-**Prompt**: `prompts/prompt_matriz_cumplimiento.md` (nuevo en v0.2)
+**Prompt**: `D_portafolio/prompts/search/matriz_cumplimiento.md` (nuevo en v0.2)
 **Modelo**: `model_routing.yaml → paso_6_matriz_cumplimiento` (primary: glm-5p1).
 **Context** (paths):
 - `ITEM-{id}_specs.json` (requisitos verbatim)
 - Path al datasheet PDF descargado + parseado del candidato
-- Schema: `schemas/candidato_cumplimiento.schema.json`
+- Schema: `instrucciones/D_portafolio/schemas/candidato_cumplimiento.schema.json`
 **Output**: `/proyecto/artifacts/step_6_resultados/matrices/ITEM-{id}/ITEM-{id}_candidato_{n}_{marca}_{modelo}.json` + `.md`.
 **Handoff budget**: 1 (sin reverse edge).
 
@@ -826,14 +831,14 @@ Orquestador
 
 **Tipo**: LLM call con schema.
 **Owner**: Orquestador → 1 subagente.
-**Prompt**: `prompts/prompt_consolidacion_paso7.md`
+**Prompt**: `D_portafolio/prompts/consolidation/paso7.md`
 **Modelo**: `model_routing.yaml → paso_7_1_consolidador` (primary: glm-5p1).
 **Context** (paths):
 - `BOM_busqueda.json`
 - `BOM_exploded.json` (para incluir servicios en consolidado)
 - Todos los `ITEM-{id}_resultado.json`
 - Todas las matrices JSON
-- Schema: `schemas/consolidado_row.schema.json`
+- Schema: `instrucciones/D_portafolio/schemas/consolidado_row.schema.json`
 
 **Output canónico**: `/proyecto/outputs/consolidado.json`
 **Derivados (auto, determinísticos)**: `.tsv`, `.md`, `.xlsx`.
@@ -842,7 +847,7 @@ Orquestador
 
 **Tipo**: LLM call (critic terminal).
 **Owner**: Orquestador → 1 subagente.
-**Prompt**: `prompts/prompt_QA_final.md`
+**Prompt**: `D_portafolio/prompts/consolidation/QA_final.md`
 **Modelo**: DISTINTO al consolidador (`model_routing.yaml → paso_7_2_qa`, primary: minimax-m2p7).
 **Handoff budget**: 0 (sin reverse edge). Si QA encuentra problemas críticos: **falla loud y escala**, NO retorna al consolidador.
 
@@ -890,7 +895,7 @@ proyecto/
 Cada delegación se logea en `/proyecto/logs/decision_log.md` con:
 - Timestamp.
 - Paso + subpaso.
-- Modelo elegido (y motivo si difiere de `model_routing.yaml`).
+- Modelo elegido (y motivo si difiere de `shared/model_routing.yaml`).
 - Tools usadas (y motivo de fallback si aplica).
 - Tool budget consumido (búsquedas / fetches / parses / iteraciones).
 - Handoff budget consumido.
@@ -898,4 +903,4 @@ Cada delegación se logea en `/proyecto/logs/decision_log.md` con:
 - Errores y retries.
 - Escalamientos al humano.
 
-Tras cada licitación: producir `autoevaluacion_v{N}.md` con incidentes en formato post-mortem honesto (sin auto-justificación). Actualizar `model_routing.yaml → observations` y `catalog_tools.md` con aprendizajes.
+Tras cada licitación: producir `autoevaluacion_v{N}.md` con incidentes en formato post-mortem honesto (sin auto-justificación). Actualizar `model_routing.yaml → observations` y `shared/catalog_tools.md` con aprendizajes.

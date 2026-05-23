@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "staging_manifest.schema.json",
+  "title": "StagingManifest",
+  "description": "Expediente preparado en etapa B: documentos seleccionados, uploads y aclaraciones declaradas.",
+  "type": "object",
+  "required": ["version", "process_id", "source", "selected_documents", "prepared_at"],
+  "properties": {
+    "version": { "type": "string", "const": "0.1" },
+    "process_id": { "type": "integer" },
+    "tenant_id": { "type": "string", "default": "default" },
+    "source": {
+      "type": "string",
+      "description": "Canal de ingesta: seace, manual, adp_portal, ..."
+    },
+    "selected_documents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_path", "dest_path"],
+        "properties": {
+          "source_path": { "type": "string" },
+          "dest_path": { "type": "string" },
+          "original_name": { "type": "string" },
+          "sha256": { "type": "string" },
+          "included": { "type": "boolean", "default": true }
+        }
+      }
+    },
+    "uploads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["dest_path", "original_name"],
+        "properties": {
+          "dest_path": { "type": "string" },
+          "original_name": { "type": "string" },
+          "sha256": { "type": "string" }
+        }
+      }
+    },
+    "clarifications": {
+      "type": "array",
+      "description": "Archivos declarados como aclaración/addenda/enmienda por el usuario (Gate 0.a UI)",
+      "items": {
+        "type": "object",
+        "required": ["file", "clarification_type"],
+        "properties": {
+          "file": { "type": "string" },
+          "clarification_type": {
+            "type": "string",
+            "enum": ["aclaracion", "addenda", "enmienda"]
+          },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "free_reader_profile": {
+      "type": "object",
+      "properties": {
+        "profile_id": { "type": "string" },
+        "sections_requested": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "prompt_version": { "type": "string" }
+      }
+    },
+    "notes": { "type": "string" },
+    "prepared_at": { "type": "string", "format": "date-time" },
+    "prepared_by": { "type": "string" }
+  }
+}

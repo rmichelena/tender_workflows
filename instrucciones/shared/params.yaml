@@ -1,9 +1,9 @@
 # params.yaml — Parámetros operativos del workflow (v0.2)
 #
 # Reorganización v0.2: la información se reparte entre 3 archivos:
-#   - params.yaml (este): timeouts, batches, handoff budgets, política de derivados.
-#   - model_routing.yaml: selección de modelo por paso/función, basada en evidencia.
-#   - catalog_tools.md: stack de tools con primary+fallback.
+#   - shared/params.yaml (este archivo): timeouts, batches, handoff budgets, política de derivados.
+#   - shared/model_routing.yaml: selección de modelo por paso/función, basada en evidencia.
+#   - shared/catalog_tools.md: stack de tools con primary+fallback.
 #
 # Lo que SOLÍA estar acá y migró a model_routing.yaml:
 #   - step6_combos (combos modelo+tool por intento) → ahora viven en model_routing.yaml.
@@ -36,7 +36,7 @@ step_1_defaults:
     fail_policy: ask_human       # no fallback automático a otro extractor
   axis0_preindex:
     run_by_default: true
-    prompt: instrucciones/prompts/prompt_axis0_free_reader.md
+    prompt: instrucciones/C_conversion/prompts/axis0_free_reader.md
     input_dir: artifacts/step_1_normalizados
     output_dir: artifacts/step_1_axis0_preindex
     output_summary: artifacts/step_1_axis0_preindex/axis0_go_no_go_summary.md
@@ -139,7 +139,7 @@ retries:
     llamaparse: 1
 
 # ---------------------------------------------------------------
-# POLITICA DE DIVERSIDAD (refuerza model_routing.yaml)
+# POLITICA DE DIVERSIDAD (refuerza shared/model_routing.yaml)
 # ---------------------------------------------------------------
 
 diversity:

@@ -9,7 +9,7 @@ Producir el consolidado final unificando el BOM de búsqueda + BOM exploded (par
 ## Reglas v0.2
 
 1. **Output canónico = JSON**; derivados TSV/MD/XLSX se generan determinísticamente.
-2. **Schema validation**: el JSON canónico se valida contra `schemas/consolidado_row.schema.json`.
+2. **Schema validation**: el JSON canónico se valida contra `instrucciones/D_portafolio/schemas/consolidado_row.schema.json`.
 3. **Completitud**: todos los items del BOM Exploded (bienes + servicios) deben aparecer.
 4. **Items SIN_CANDIDATO y SERVICIOS**: incluir con `candidato_num: 0` (no omitir).
 5. **`datasheet_source` y `evidence_quality`** se propagan desde la matriz al consolidado para filtros downstream.
@@ -25,7 +25,7 @@ Producir el consolidado final unificando el BOM de búsqueda + BOM exploded (par
 
 ## Estructura de la tabla consolidada (formato "long")
 
-Una entrada por cada combinación (ítem, candidato). Conforme a `schemas/consolidado_row.schema.json`. Campos:
+Una entrada por cada combinación (ítem, candidato). Conforme a `instrucciones/D_portafolio/schemas/consolidado_row.schema.json`. Campos:
 
 | Campo | Contenido |
 |-------|-----------|

@@ -1,7 +1,7 @@
 {
   "axis_id": "axis_3_execution_services_obligations",
   "axis_name": "Servicios y obligaciones de ejecución",
-  "schema_path": "instrucciones/schemas/axis_3_execution_services_obligations.schema.json",
+  "schema_path": "instrucciones/D_portafolio/schemas/axis_3_execution_services_obligations.schema.json",
   "role_frame": "Tu función es identificar actividades, servicios y obligaciones que el contratista debe ejecutar. No te interesan bienes como entradas principales ni documentos como entregables principales, salvo como cruce.",
   "task_axis_definition": "Extrae transporte, instalación, desmontaje, configuración, pruebas, puesta en marcha, capacitación, mantenimiento, soporte, garantía operativa, coordinación, seguridad, embalaje, almacenamiento y obras/actividades constructivas de ejecución.",
   "inclusion_rules": ["El texto usa verbo de ejecución: instalar, construir, montar, configurar, probar, capacitar, mantener, transportar, desmontar, adecuar", "Obligación operativa o servicio durante ejecución", "Servicio posterior a aceptación: mantenimiento, soporte, garantía extendida", "Obra civil o resultado físico formulado como actividad constructiva"],

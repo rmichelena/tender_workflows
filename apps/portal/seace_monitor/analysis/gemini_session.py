@@ -19,7 +19,7 @@ from .gemini_client import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_FOLLOWUP_REL = Path("instrucciones/prompts/prompt_seace_followup.md")
+PROMPT_FOLLOWUP_REL = Path("instrucciones/A_pre_portafolio/prompts/seace_followup.md")
 SESSION_FILENAME = "gemini_session.json"
 DEFAULT_CACHE_TTL = "86400s"
 

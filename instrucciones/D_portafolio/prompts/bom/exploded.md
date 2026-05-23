@@ -16,7 +16,7 @@ En v0.1 había 4 variantes paralelas (2 con BOM HL, 2 sin BOM HL). En v0.2 sos *
 
 - **BOM High-Level auditado**: path al `BOM_highlevel.json` (versión final tras 2.2).
 - **EETT/anexos aclarados**: paths — usalos con lectura selectiva por sección.
-- **Schema**: `instrucciones/schemas/bom_item.schema.json`.
+- **Schema**: `instrucciones/D_portafolio/schemas/bom_item.schema.json`.
 - **Scratchpad**: `/proyecto/scratchpad/decisiones_bom.md` — leé las decisiones de HL, agregá las tuyas.
 - **Output path**: `/proyecto/artifacts/step_2_bom/BOM_exploded.json`.
 

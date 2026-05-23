@@ -49,7 +49,7 @@ Para cada candidato (hasta `max_fetches` de los más prometedores):
 
 1. **Fetch la página del producto** con `fetch_tool` (Jina Reader → fallback Firecrawl).
 2. **Verificar vigencia**: confirmar que la página está activa, sin mención de "discontinued", "EOL", "legacy", "replaced by".
-3. **Identificar el link al datasheet PDF** usando la heurística de `catalog_tools.md` §4.1:
+3. **Identificar el link al datasheet PDF** usando la heurística de `shared/catalog_tools.md` §4.1:
    - href termina en `.pdf` / contiene `/datasheet|/spec|/brochure|/download|/documentos|/ficha|/folleto`.
    - anchor text matchea `datasheet | spec sheet | technical specifications | brochure | ficha técnica | folleto técnico | hoja de datos | hoja técnica`.
 4. **Si no hay datasheet público accesible**: marcar `evidence_quality: weak`, NO usar todo el budget en bypass.

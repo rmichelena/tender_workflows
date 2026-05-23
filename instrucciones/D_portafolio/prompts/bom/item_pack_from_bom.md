@@ -20,7 +20,7 @@ A partir del BOM Exploded consolidado, generá un par de archivos (JSON canónic
 
 ## Output canónico — `ITEM-{id}.json`
 
-Conforme a `schemas/item_specs.schema.json` (en estado base, sin clasificación hard/soft ni herencia resuelta).
+Conforme a `instrucciones/D_portafolio/schemas/item_specs.schema.json` (en estado base, sin clasificación hard/soft ni herencia resuelta).
 
 ```json
 {

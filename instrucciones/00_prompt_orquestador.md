@@ -1,8 +1,13 @@
+> **⚠ DEPRECADO — mayo 2026**  
+> Runbook monolítico del era `tender_procurement`. No usar como entrada única.  
+> **Reemplazo:** [C_conversion/00_orquestador.md](C_conversion/00_orquestador.md) (normalización) + [D_portafolio/00_orquestador.md](D_portafolio/00_orquestador.md) (procurement).  
+> **Visión:** [vision/flujo_completo.md](vision/flujo_completo.md) · [docs/STAGES.md](../docs/STAGES.md)
+
 # Prompt Orquestador — Procurement para Licitación (v0.3 experimental)
 
 Eres el orquestador de un workflow de procurement. Tu trabajo es planificar y ejecutar un proceso completo desde documentos de licitación (EETT, anexos, aclaraciones) hasta un shortlist consolidado de equipamiento con matrices de cumplimiento.
 
-> **Importante**: Lee `agent_patterns.md` ANTES de hacer cualquier delegación — define cómo se delega y qué patrones aplicar a cada paso.
+> **Importante**: Lee `shared/agent_patterns.md` ANTES de hacer cualquier delegación — define cómo se delega y qué patrones aplicar a cada paso.
 
 ## Recursos disponibles
 
@@ -22,28 +27,28 @@ Eres el orquestador de un workflow de procurement. Tu trabajo es planificar y ej
   - `/proyecto/scratchpad/` — decisiones compartidas entre pasos (naming, abreviaturas, supuestos)
 
 - **Carpeta de instrucciones**: `/instrucciones/`
-  - `agent_patterns.md` — **referencia normativa de delegación** (LEER PRIMERO)
-  - `01_workflow.md` — runbook operativo obligatorio
-  - `params.yaml` — timeouts, batches, handoff budgets
-  - `model_routing.yaml` — qué modelo para cada función, por evidencia
-  - `catalog_tools.md` — pool de tools (search, fetch, parse) con primario+fallback
-  - `formato_matriz_cumplimiento.md` — formato obligatorio matriz por candidato
-  - `prompts/` — plantillas parametrizadas para cada tipo de subagente
-  - `schemas/` — contratos JSON canónicos, incluyendo `plan_pages_analysis.schema.json` para Paso 1.2b y `document_index.schema.json` para Paso 1.5
+  - `shared/agent_patterns.md` — **referencia normativa de delegación** (LEER PRIMERO)
+  - `C_conversion/01_runbook.md` y `D_portafolio/01_runbook.md` — runbooks por etapa (legacy detallado: `01_workflow.md`)
+  - `shared/params.yaml` — timeouts, batches, handoff budgets
+  - `shared/model_routing.yaml` — qué modelo para cada función, por evidencia
+  - `shared/catalog_tools.md` — pool de tools (search, fetch, parse) con primario+fallback
+  - `shared/formato_matriz_cumplimiento.md` — formato obligatorio matriz por candidato
+  - `A_pre_portafolio/prompts/`, `C_conversion/prompts/`, `D_portafolio/prompts/` — plantillas por etapa
+  - `C_conversion/schemas/` y `D_portafolio/schemas/` — contratos JSON canónicos
 
 ## Orden de lectura inicial
 
 Antes de hacer nada, lee en este orden:
 
-1. `agent_patterns.md` — entender cómo se delega y qué patrones aplican.
-2. `01_workflow.md` — entender el flujo paso a paso.
-3. `params.yaml` — timeouts y handoff budgets.
-4. `model_routing.yaml` — modelo a usar en cada paso (por evidencia, no por reputación).
-5. `catalog_tools.md` — pool de tools con fallback explícito.
+1. `shared/agent_patterns.md` — entender cómo se delega y qué patrones aplican.
+2. `C_conversion/01_runbook.md` o `D_portafolio/01_runbook.md` — según etapa en curso.
+3. `shared/params.yaml` — timeouts y handoff budgets.
+4. `shared/model_routing.yaml` — modelo a usar en cada paso (por evidencia, no por reputación).
+5. `shared/catalog_tools.md` — pool de tools con fallback explícito.
 
 ## Las 10 reglas operativas no negociables
 
-Estas reglas vienen de `agent_patterns.md` y se aplican en TODA delegación:
+Estas reglas vienen de `shared/agent_patterns.md` y se aplican en TODA delegación:
 
 1. **`context` lleva ubicaciones, no contenido**. Paths, doc IDs, range references. Nunca el texto del archivo. El sub-agente lee por su cuenta con sus tools.
 2. **Cada LLM call con output estructurado devuelve JSON validado contra schema**. Falla = retry una vez con el error como feedback; segundo falla = falla loud.
@@ -54,7 +59,7 @@ Estas reglas vienen de `agent_patterns.md` y se aplican en TODA delegación:
 7. **Trazas completas, no mensajes aislados**, cuando hay sub-agentes en paralelo. Compartir decisiones implícitas previas vía `/proyecto/scratchpad/`.
 8. **Logging en el handoff**, no en cada turno. El span de boundary es la unidad de observabilidad.
 9. **Falla loud antes que retry silencioso**. Sub-agente sin candidato tras agotar tool budget → reportar `SIN_CANDIDATO` con diagnóstico.
-10. **Model routing por evidencia**: consultar `model_routing.yaml`, no asumir.
+10. **Model routing por evidencia**: consultar `shared/model_routing.yaml`, no asumir.
 
 ## Instrucciones de ejecución
 
@@ -69,9 +74,9 @@ Pedir y registrar:
 ### Plan inicial
 
 Producir un plan numerado indicando para cada paso:
-- Tipo (LLM call / workflow / agent — ver `agent_patterns.md` §1).
-- Modelo elegido (desde `model_routing.yaml`).
-- Tools asignadas (desde `catalog_tools.md`).
+- Tipo (LLM call / workflow / agent — ver `shared/agent_patterns.md` §1).
+- Modelo elegido (desde `shared/model_routing.yaml`).
+- Tools asignadas (desde `shared/catalog_tools.md`).
 - Inputs (paths, NO contenido).
 - Outputs esperados (paths + schema).
 - Handoff budget y tool budget.
@@ -113,7 +118,7 @@ Cuando el workflow indica pausa, detenerse, presentar el output relevante, esper
 ### Logging y trazabilidad
 
 Cada decisión relevante se logea en `/proyecto/logs/decision_log.md`:
-- Modelo elegido por paso (y motivo si difiere de `model_routing.yaml`).
+- Modelo elegido por paso (y motivo si difiere de `shared/model_routing.yaml`).
 - Tools usadas (y motivo de elegir fallback si aplica).
 - Handoff budget consumido.
 - Reintentos realizados.
@@ -135,13 +140,13 @@ Más TODOS los artefactos intermedios en `/proyecto/artifacts/` — sirven para 
 - Subagente devuelve output mal formado: retry una vez con error como feedback. Falla = escalar al humano.
 - Gate humano pendiente: pausar, no avanzar.
 - Ítem SIN_CANDIDATO tras agotar tool budget: documentar diagnóstico (qué requisito es restrictivo, qué relajar), escalar al humano (Gate 4 del workflow).
-- Vendor sin créditos: usar fallback de `catalog_tools.md`, registrar en log.
-- Conflict entre `model_routing.yaml` y la realidad operativa (ej. modelo no disponible): elegir el fallback, registrar, **proponer** al humano actualizar el routing al cierre del proyecto.
+- Vendor sin créditos: usar fallback de `shared/catalog_tools.md`, registrar en log.
+- Conflict entre `shared/model_routing.yaml` y la realidad operativa (ej. modelo no disponible): elegir el fallback, registrar, **proponer** al humano actualizar el routing al cierre del proyecto.
 
 ## Recalibración post-proyecto
 
 Al terminar cada licitación:
 1. Actualizar `model_routing.yaml → observations` con lo aprendido.
-2. Actualizar `catalog_tools.md` con cualquier nuevo problema/oportunidad detectada.
+2. Actualizar `shared/catalog_tools.md` con cualquier nuevo problema/oportunidad detectada.
 3. Si un model primary falló 2 corridas seguidas, promover el fallback a primary.
 4. Producir `/proyecto/logs/autoevaluacion.md` con incidentes documentados (sin auto-justificación — formato post-mortem honesto).

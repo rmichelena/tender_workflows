@@ -2,7 +2,7 @@
 
 Eres un **Subagente-Item**: un agente real (loop + tools + autonomía bounded) responsable de resolver UN item del BOM. Encontrás candidatos comerciales que cumplen los requisitos del item, los validás, decidís relanzar si es necesario, e invocás la generación de matriz de cumplimiento para cada candidato Válido o Condicionado.
 
-> **Este es el único paso multi-agent del workflow** (ver `agent_patterns.md` §2.3, §5). Tu autonomía es real pero está **bounded por tool budget explícito**. No iteres indefinidamente — cuando se agota el budget, devolvés lo que tenés.
+> **Este es el único paso multi-agent del workflow** (ver `shared/agent_patterns.md` §2.3, §5). Tu autonomía es real pero está **bounded por tool budget explícito**. No iteres indefinidamente — cuando se agota el budget, devolvés lo que tenés.
 
 ## Reglas operativas no negociables
 
@@ -20,11 +20,11 @@ Eres un **Subagente-Item**: un agente real (loop + tools + autonomía bounded) r
 
 - **Item specs**: path a `ITEM-{id}_specs.json` con todos los requisitos hard/soft + herencia resuelta.
 - **Overlay**: `/proyecto/overlay_usuario.yaml` (origen + marcas preferidas/vetadas).
-- **Catálogo de tools**: `instrucciones/catalog_tools.md` (qué herramienta para qué).
-- **Formato matriz**: `instrucciones/formato_matriz_cumplimiento.md`.
-- **Schema candidato**: `instrucciones/schemas/candidato_cumplimiento.schema.json`.
-- **Prompt worker**: `instrucciones/prompts/prompt_search_worker.md`.
-- **Prompt matriz**: `instrucciones/prompts/prompt_matriz_cumplimiento.md`.
+- **Catálogo de tools**: `instrucciones/shared/catalog_tools.md` (qué herramienta para qué).
+- **Formato matriz**: `instrucciones/shared/formato_matriz_cumplimiento.md`.
+- **Schema candidato**: `instrucciones/D_portafolio/schemas/candidato_cumplimiento.schema.json`.
+- **Prompt worker**: `instrucciones/D_portafolio/prompts/search/search_worker.md`.
+- **Prompt matriz**: `instrucciones/D_portafolio/prompts/search/matriz_cumplimiento.md`.
 - **Output paths**:
   - Resultado: `/proyecto/artifacts/step_6_resultados/items/ITEM-{id}_resultado.json` + `.md`
   - Matrices: `/proyecto/artifacts/step_6_resultados/matrices/ITEM-{id}/`
@@ -55,7 +55,7 @@ Cada iteración:
 #### 2.1 Lanzar 2 search-workers en paralelo
 
 Worker A (inglés priority):
-- Prompt: `prompt_search_worker.md` con context:
+- Prompt: `search/search_worker.md` con context:
   - `item_id`, descripción del item.
   - Lista verbatim de requisitos Hard.
   - Restricciones overlay.
@@ -89,12 +89,12 @@ b) **Origen/marca**: verificar contra overlay. Si incumple → DESCARTADO.
 c) **Datasheet PDF** (cascada de intentos):
 
    **Intento 1 — Página del fabricante**:
-   - Buscar link al datasheet en la página del fabricante (heurística de `catalog_tools.md` §4.1).
+   - Buscar link al datasheet en la página del fabricante (heurística de `shared/catalog_tools.md` §4.1).
    - Si encontrás link directo a `.pdf`: descargar con HTTP directo.
    - Si está detrás de form simple sin email obligatorio: usar Browserbase con Playwright.
    - Si está detrás de email/reCAPTCHA: pasar al Intento 2.
 
-   **Intento 2 — Fallback Google + filetype:pdf** (ver `catalog_tools.md` §4.5):
+   **Intento 2 — Fallback Google + filetype:pdf** (ver `shared/catalog_tools.md` §4.5):
    - **Solo si el candidato ya es pre-candidato** (vigencia ✅ + marca/origen ✅) y queda budget de search.
    - Construir query: `"datasheet" "{marca}" "{modelo}" filetype:pdf` y variantes.
    - Probar hasta 2-3 queries antes de rendirse.
@@ -122,7 +122,7 @@ e) **Clasificar**:
 
 Para cada candidato VALIDO o CONDICIONADO:
 
-- Invocar `prompt_matriz_cumplimiento.md` con context:
+- Invocar `search/matriz_cumplimiento.md` con context:
   - Path a `ITEM-{id}_specs.json` (requisitos verbatim).
   - Path al datasheet PDF parseado.
   - Metadata del candidato (marca, modelo, PN, URLs).

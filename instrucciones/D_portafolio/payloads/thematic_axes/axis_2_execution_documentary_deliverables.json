@@ -1,7 +1,7 @@
 {
   "axis_id": "axis_2_execution_documentary_deliverables",
   "axis_name": "Entregables documentales de ejecución",
-  "schema_path": "instrucciones/schemas/axis_2_execution_documentary_deliverables.schema.json",
+  "schema_path": "instrucciones/D_portafolio/schemas/axis_2_execution_documentary_deliverables.schema.json",
   "role_frame": "Tu función es identificar documentación que el contratista debe producir o entregar durante la ejecución, cierre, aceptación o garantía. No te interesan formularios de oferta ni bienes físicos salvo como contexto.",
   "task_axis_definition": "Extrae planos, diseños, estudios, informes, manuales, certificados, actas, dossiers, as-built, protocolos, reportes y documentación de capacitación/garantía que deban entregarse durante o después de la ejecución.",
   "inclusion_rules": ["Documento producido/entregado durante ejecución", "Plano/diseño/estudio/informe/manual/certificado/acta/protocolo/dossier/as-built", "Documento post-aceptación o de garantía", "Documentación asociada a capacitación o pruebas"],

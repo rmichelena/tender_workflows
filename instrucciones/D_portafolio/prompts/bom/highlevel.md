@@ -17,7 +17,7 @@ En v0.1 había 3 variantes paralelas. En v0.2 sos **el único productor**; un au
 ## Inputs
 
 - **EETT/anexos aclarados**: paths a archivos markdown en `/proyecto/artifacts/step_1_aclaradas/`. Leelos con tu tool `read_file`.
-- **Schema de salida**: `instrucciones/schemas/bom_item.schema.json` — leelo y respetalo.
+- **Schema de salida**: `instrucciones/D_portafolio/schemas/bom_item.schema.json` — leelo y respetalo.
 - **Scratchpad compartido**: `/proyecto/scratchpad/decisiones_bom.md` — leelo (estará vacío al inicio del paso 2.1), escribí tus decisiones a medida que las tomes.
 - **Output path**: ruta donde escribir el JSON canónico, p.ej. `/proyecto/artifacts/step_2_bom/BOM_highlevel.json`.
 
@@ -66,7 +66,7 @@ Operás bajo un budget explícito (informado por el orquestador en el handoff):
 
 ## Output canónico (JSON)
 
-Escribí un único archivo JSON con esta estructura (conforme a `schemas/bom_item.schema.json`):
+Escribí un único archivo JSON con esta estructura (conforme a `instrucciones/D_portafolio/schemas/bom_item.schema.json`):
 
 ```json
 {

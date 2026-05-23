@@ -31,7 +31,7 @@ from .tender_bridge import parse_axis0_summary
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gemini-2.5-pro"
-PROMPT_REL = Path("instrucciones/prompts/prompt_seace_free_reader.md")
+PROMPT_REL = Path("instrucciones/A_pre_portafolio/prompts/seace_free_reader.md")
 
 
 def _repo_root(config: AppConfig) -> Path:

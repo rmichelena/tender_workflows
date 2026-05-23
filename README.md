@@ -1,424 +1,121 @@
-# tender_workflows — monorepo
+# tender_workflows
 
-> **Desarrollo activo en este repositorio.**  
-> Histórico pre-monorepo: rama `archival/pre-restructure`, tag `v0.2-pre-workflows`.  
-> Ver [TENDER_WORKFLOWS.md](TENDER_WORKFLOWS.md) para layout y portal SEACE.
+Monorepo del producto de licitaciones: **ingesta multi-canal**, decisión humana en portal, **conversión documental** e ** trabajo agentico en portafolio**.
 
-# tender_procurement (pipeline documental)
+> Histórico pre-monorepo: rama `archival/pre-restructure`, tag `v0.2-pre-workflows`. Repo anterior: [tender_procurement](https://github.com/rmichelena/tender_procurement) (archivado).
 
-Pipeline de extracción y análisis de documentos de licitación pública.
+---
 
-## Visión general
+## Qué hace el sistema
 
-El proyecto tiene dos planos:
-
-1. **Workflow conceptual** (`instrucciones/`) — define el pipeline completo de 7 pasos desde EETT/aclaraciones hasta un consolidado de shortlist con matrices de cumplimiento. Es la documentación canónica de qué hace el sistema, cómo se delega a sub-agentes LLM, qué modelo va a qué tarea, qué tools usar.
-
-   Archivos clave a leer en orden:
-   - `instrucciones/00_prompt_orquestador.md` — punto de entrada del orquestador.
-   - `instrucciones/agent_patterns.md` — patrones de delegación (10 reglas operativas).
-   - `instrucciones/01_workflow.md` — runbook de los 7 pasos.
-   - `instrucciones/params.yaml`, `model_routing.yaml`, `catalog_tools.md` — parámetros, routing, tools.
-   - `instrucciones/prompts/` — plantillas de cada sub-agente.
-   - `instrucciones/schemas/` — contratos JSON canónicos.
-
-2. **Implementación parcial** (`scripts/extractors/`) — pipeline real del **Paso 1 (normalización documental)**, ya funcional. El resto del workflow se ejecuta delegando a sub-agentes según `instrucciones/`. Esta sección del README documenta los extractores.
-
-Estado actual: **v0.2**. La v0.1 corrió end-to-end contra ICAO-00068 con resultado desigual (10.7% hit rate). v0.2 incorpora aprendizajes documentados en `REVIEW_FRESH_EYES.md`, `MEJORAS_PROPUESTAS.md` y los autoevaluaciones en `proyecto/logs/`.
-
-## Estructura
-
-```
-tender_procurement/
-├── README.md                          # Este archivo
-├── .gitignore                         # Ignora output/, ejemplos, config local
-├── scripts/
-│   └── extractors/
-│       ├── common.py                  # Módulo compartido (config, creds, post-procesadores)
-│       ├── extractors.conf.example    # Template de configuración
-│       ├── extractors.conf            # Config local (gitignored)
-│       ├── docling_extract.py         # Docling Serve local/bare-metal
-│       ├── modal_docling_extract.py   # Modal Docling (default workflow PDF→Markdown)
-│       ├── landingai_extract.py       # LandingAI ADE (fallback autorizado)
-│       ├── markitdown_extract.py      # MarkItDown (rápido, sin OCR, pruebas/fallback)
-│       ├── docai_online.py            # Google DocAI modo online/chunked
-│       ├── docai_batch_gcs.py         # Google DocAI modo batch con GCS
-│       ├── batch_runner.py            # Runner: ejecuta N extractores sobre N PDFs
-│       └── .env_landingai             # API key LandingAI (gitignored)
-├── docs/
-│   ├── extractor_benchmark.md         # Benchmark comparativo completo
-│   └── docai_setup.md                 # Setup de Google DocAI + GCS
-├── output/                            # GITIGNORED — resultados de extracción
-├── ejemplos/                          # GITIGNORED — datos de muestra
-│   ├── documentos_muestra/
-│   └── extractor_benchmark/
-└── instrucciones/                     # Workflow y prompts del pipeline
-    ├── prompts/prompt_planos_vision.md
-    ├── prompts/prompt_document_indexer.md
-    ├── schemas/plan_pages_analysis.schema.json
-    └── schemas/document_index.schema.json
+```mermaid
+flowchart LR
+  ING[Ingesta multi-canal] --> A[A Pre-portafolio]
+  A --> B[B Staging portafolio]
+  B --> C[C Conversión]
+  C --> D[D Trabajo portafolio]
 ```
 
-Convención de nombres: los PDFs optimizados del Paso 1 se guardan en `artifacts/step_1_pdfs_clean/` con sufijo explícito `_clean.pdf` (`documento_clean.pdf`). La carpeta ya indica que son limpios, pero el sufijo evita ambigüedad cuando se copian, adjuntan o procesan fuera de esa carpeta.
+| Etapa | Resumen | Estado |
+|-------|---------|--------|
+| **A** | Detectar o registrar oportunidad, descargar docs, análisis rápido (free reader) | ✅ SEACE operativo |
+| **B** | Elegir docs, uploads, aclaraciones → `portafolio/inputs/` | 📋 planificado |
+| **C** | Normalización PDF→MD, índice (scripts + orquestador ante fallos) | 🔄 existe, sin integrar |
+| **D** | BOM, specs, búsqueda, consolidado (agente) | 🔄 existe, sin integrar |
 
-## Quick Start
+Modelo canónico: **[docs/STAGES.md](docs/STAGES.md)**.
 
-1. Copia y edita la configuración:
-```bash
-cp scripts/extractors/extractors.conf.example scripts/extractors/extractors.conf
-# Edita extractors.conf con tus valores
+---
+
+## Estructura del repo
+
+```
+tender_workflows/
+  apps/portal/              # Portal FastAPI + worker (etapa A)
+  instrucciones/          # Runbooks A–D, prompts, schemas (etapas C–D + perfiles A)
+  scripts/                  # Pipeline determinístico etapa C (extractors, run_step1)
+  proyecto/                 # Plantilla de layout portafolio + scripts etapa D (legacy path)
+  docs/                     # Arquitectura, roadmap, etapas
+  deploy/                   # Docker Compose VPS
+  data/                     # Gitignored — tenants, procesos, BD
+  config.example.yaml
+  entities.csv.example
 ```
 
-2. Desde la raíz de este repo (`tender_procurement/`), instala dependencias en un entorno virtual local del tooling:
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install --upgrade pip
-pip install requests PyMuPDF google-auth-oauthlib markitdown landingai-ade
-```
+Detalle de componentes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-> Nota para agentes futuros: en hosts Debian/Ubuntu modernos, Python puede estar en modo PEP 668 (`externally-managed-environment`), por lo que `pip install` contra el Python global puede fallar o ser mala idea. Usar `.venv/` en la raíz de este repo evita tocar paquetes administrados por `apt` y evita crear miles de archivos por cada carpeta de licitación/Dropbox. `.venv/` está gitignored.
->
-> Versiones instaladas y verificadas el 2026-05-15 en la corrida AdP Cableado: `PyMuPDF==1.27.2.3`, `landingai-ade==1.12.0`, `markitdown==0.1.5`. Eran las versiones actuales instaladas por `pip` ese día; si un extractor o script deja de funcionar por cambios upstream, intentar primero pinear estas versiones o revisar compatibilidad de PyMuPDF/MuPDF.
+---
 
-3. Ejecuta un extractor:
-```bash
-# PDF mixto/escaneado (recomendado):
-.venv/bin/python scripts/extractors/landingai_extract.py documento.pdf
+## Ingesta y entrypoints
 
-# PDF vectorial puro o DOCX (rápido, sin OCR):
-.venv/bin/python scripts/extractors/markitdown_extract.py documento.pdf output/
+No solo SEACE:
 
-# Docling local/bare-metal (default parser OCR/Markdown):
-.venv/bin/python scripts/extractors/docling_extract.py documento.pdf output/ --async
+| Entrypoint | Ejemplo | Estado inicial |
+|------------|---------|----------------|
+| Scan automático | Worker + `entities.csv` | `publicada` |
+| Alta directa (entidad + N° proceso) | SEACE u otro portal soportado | `descargada` |
+| Creación manual | Invitación privada, RFP no público | `descargada` |
 
-# Docling en Modal (misma API, async por defecto):
-.venv/bin/python scripts/extractors/modal_docling_extract.py documento.pdf output/
+El usuario puede marcar **portafolio** sin **analizar**; el sistema ejecuta el free reader con el perfil del canal. Ver [docs/STAGES.md](docs/STAGES.md).
 
-# PDF grande escaneado con DocAI (máxima calidad, lento):
-.venv/bin/python scripts/extractors/docai_batch_gcs.py documento.pdf output/
-```
+---
 
-## Paso 1.2 / 1.2b default: contenido por página + planos/diagramas antes de OCR
-
-Después de limpiar PDFs y antes de Modal Docling, el workflow detecta páginas o regiones visuales —planos, diagramas, fotografías técnicas o páginas CAD/vectoriales— para evitar costo/ruido en conversores Markdown.
-
-Default del workflow:
-
-1. Ejecutar cleaning con `--strip --page-analysis`.
-2. Ejecutar `pdf_plan_pages.py audit` y `build` para sustituir planos/diagramas confirmados.
-3. Convertir a Markdown con `modal_docling_extract.py`.
-4. Ejecutar eje 0 libre pre-index y producir resumen go/no-go.
-5. Preguntar al usuario si la licitación interesa.
-6. Solo si el usuario aprueba continuar: indexar estructura del Markdown.
-
-Si falla cleaning, sustitución de planos/diagramas, Modal Docling, eje 0 libre o indexación, el workflow debe detenerse y preguntar al usuario. No hay fallback automático silencioso.
-
-El optimizador `pdf_image_audit.py` también puede producir un análisis de contenido por página. Ese reporte alimenta la detección de candidatos visuales: no se decide solo por tamaño.
-
-Ejemplo de limpieza + análisis:
+## Quick start — portal SEACE (etapa A)
 
 ```bash
-.venv/bin/python scripts/pdf_image_audit.py input.pdf \
-  --strip \
-  --output artifacts/step_1_pdfs_clean/input_clean.pdf \
-  --report artifacts/step_1_pdfs_clean/input_clean_report.json \
-  --page-analysis
+cp config.example.yaml config.yaml
+cp entities.csv.example entities.csv
+cd apps/portal && python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+export PYTHONPATH=.
+export TENDER_REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd ../..
+python -m seace_monitor scan --once -v
+python -m seace_monitor web
 ```
 
-Esto genera, además del PDF limpio:
+UI local: `http://127.0.0.1:8000/` · Producción VPS: `http://bots.infinitek.pe:8080/`
 
-- `artifacts/step_1_pdfs_clean/{stem}_clean_report.json`
-- `artifacts/step_1_pdfs_clean/{stem}_clean_page_analysis.json`
-
-El `page_analysis` incluye tamaño, densidad textual, conteo/cobertura de imágenes, conteo/cobertura de dibujos vectoriales/operadores, `content_dominant` y `plan_candidate_signals`.
-
-Herramienta:
+### Docker
 
 ```bash
-.venv/bin/python scripts/pdf_plan_pages.py audit input_clean.pdf --output-dir artifacts/step_1_planos
-# analizar imágenes candidatas con prompts/prompt_planos_vision.md
-.venv/bin/python scripts/pdf_plan_pages.py build input_clean.pdf \
-  --output-dir artifacts/step_1_planos \
-  --preocr-dir artifacts/step_1_pdfs_preocr \
-  --analysis-json artifacts/step_1_planos/planos_extraidos_DOC.json
+cp config.example.yaml config.yaml && cp entities.csv.example entities.csv
+cp deploy/.env.example deploy/.env
+docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-Outputs principales:
+---
 
-- `artifacts/step_1_planos/{stem}_page_size_audit.json`
-- `artifacts/step_1_planos/planos_extraidos_{stem}.pdf/.json/.md`
-- `artifacts/step_1_pdfs_preocr/{stem}_preocr.pdf`
+## Pipeline documental y extractores (etapa C)
 
-El análisis visual debe extraer `identifier_or_title` cuando exista: número de plano, título del cajetín, o ambos.
+Scripts determinísticos en `scripts/` (`run_step1_to_1_3.py`, extractors, `pdf_*`).  
+Documentación técnica: **[docs/EXTRACTORS.md](docs/EXTRACTORS.md)**.
 
-La candidatura visual combina señales geométricas y de contenido:
+---
 
-- tamaño/área/aspect ratio;
-- baja densidad textual;
-- alto conteo/área de dibujos vectoriales;
-- señales tipo AutoCAD;
-- páginas `image_heavy`, con filtros anti-scan.
+## Instrucciones para agentes
 
-El análisis visual decide entre:
+| Qué | Dónde leer |
+|-----|------------|
+| Visión A→D | [instrucciones/vision/flujo_completo.md](instrucciones/vision/flujo_completo.md) |
+| Free reader / pre-portafolio | [instrucciones/A_pre_portafolio/](instrucciones/A_pre_portafolio/) |
+| Staging portafolio (UI) | [instrucciones/B_staging_portafolio/](instrucciones/B_staging_portafolio/) |
+| Conversión documental | [instrucciones/C_conversion/](instrucciones/C_conversion/) |
+| Trabajo agentico portafolio | [instrucciones/D_portafolio/](instrucciones/D_portafolio/) |
+| Patrones delegación | [instrucciones/shared/agent_patterns.md](instrucciones/shared/agent_patterns.md) |
 
-- `replace_page`: reemplazar página completa por resumen textual;
-- `replace_images`: reemplazar solo regiones/imágenes dentro de una página textual;
-- `leave_for_ocr`: dejar al OCR normal.
+Runbook legacy (deprecado): `instrucciones/01_workflow.md` → migrando a C/D.
 
-Para `replace_images`, el build debe insertar una imagen PNG de reemplazo con texto OCR-friendly, no texto overlay PDF. El script resuelve el bbox aproximado al rect real de imagen renderizada cuando puede.
+---
 
-## Paso 1.3b default: eje 0 libre pre-index y Gate go/no-go
+## Documentación
 
-Tras convertir documentos a Markdown, el workflow ejecuta una lectura libre de datos generales antes de indexar. Esto permite decidir temprano si la licitación interesa antes de gastar tokens en índice, extracción temática, BOM y búsqueda.
-
-- input normal: carpeta `artifacts/step_1_normalizados/` completa;
-- prompt: `instrucciones/prompts/prompt_axis0_free_reader.md` pegado inline cuando quepa;
-- output: `artifacts/step_1_axis0_preindex/axis0_go_no_go_summary.md`;
-- contenido: objeto/alcance, familias principales de bienes/equipos, presupuesto, cronograma, garantías, pagos, penalidades, requisitos del postor, experiencia, riesgos/dudas;
-- gate: el usuario decide **Continuar**, **Detener** o **Pedir revisión puntual**.
-
-No ejecutar Paso 1.5 ni extracción temática/BOM hasta que el usuario apruebe continuar.
-
-## Paso 1.5 default post-gate: índice estructural de Markdown
-
-Si el usuario aprueba continuar en el gate de eje 0, el workflow ejecuta una pasada de indexación estructural antes de extraer BOM:
-
-- lee TODO el Markdown por ventanas de 200 líneas con overlap de 50;
-- reconstruye secciones reales sin confiar ciegamente en headings Markdown;
-- genera `artifacts/step_1_index/{stem_original}_index.json` y `.md`;
-- usa `instrucciones/schemas/document_index.schema.json`;
-- usa `instrucciones/prompts/prompt_document_indexer.md`;
-- registra `markdown_corrections_suggested` para reparaciones estructurales de bajo riesgo, pero no modifica el Markdown fuente.
-
-La reparación Markdown, si se aplica, debe ser opcional, reversible y sobre una copia (`step_1_repaired/`), no sobre el archivo normalizado original.
-
-## Extractores
-
-### 1. LandingAI ADE ⭐ Recomendado para PDFs con escaneados
-
-```bash
-python3 scripts/extractors/landingai_extract.py documento.pdf
-python3 scripts/extractors/landingai_extract.py documento.pdf --model dpt-2-latest
-python3 scripts/extractors/landingai_extract.py documento.pdf --no-clean
-```
-
-- **Velocidad**: ~100 pág/min (32s para 58 págs)
-- **OCR**: Sí — OCR completo con estructura preservada
-- **Modelos**: `dpt-2-mini` (rápido, barato), `dpt-2-latest` (mejor calidad)
-- **Formatos**: PDF, imágenes (PNG, JPG, etc.), XLSX, CSV. **No DOCX**.
-- **Post-procesamiento**: `clean_ade_output()` elimina firmas/logos/attestations, fix NUL→°
-- **Costo**: ~87 créditos (mini) / ~174 créditos (v2-latest) por 58 págs
-- **Instalación**: `pip install landingai-ade` + API key en `.env_landingai`
-
-### 2. MarkItDown — Para PDFs vectoriales y DOCX
-
-```bash
-python3 scripts/extractors/markitdown_extract.py documento.pdf output_dir/
-```
-
-- **Velocidad**: ~150 pág/min
-- **OCR**: No — solo texto embebido
-- **Formatos**: PDF vectorial, DOCX, PPTX, XLSX, imágenes
-- **Límites**: Sin límite de páginas
-- **Instalación**: `pip install markitdown`
-
-### 3. Docling Serve — Parser/OCR self-hosted
-
-```bash
-python3 scripts/extractors/docling_extract.py documento.pdf output/ --async
-python3 scripts/extractors/docling_extract.py documento.pdf output/ --page-range 1,50 --async
-python3 scripts/extractors/docling_extract.py --version
-```
-
-- **Endpoint default**: `https://docling.infinitek.pe`
-- **API guide**: `scripts/extractors/api guide references/docling-api-guide.md`
-- **OCR**: Sí, vía Docling/RapidOCR según configuración del servicio.
-- **Formatos**: PDF, DOCX, PPTX, XLSX y otros soportados por Docling Serve.
-- **Salida estándar**: `{nombre}_docling.md` + `{nombre}_docling.json`.
-- **Parámetros default**: `image_export_mode=placeholder`, `include_images=false`.
-- **Chunks**: `--page-range START,END` envía el rango como lista multipart (`page_range=START`, `page_range=END`), que es lo que valida la API actual.
-- **Uso recomendado**: async para PDFs grandes o escaneados; sync solo para documentos pequeños.
-
-### 4. Modal Docling — Parser/OCR default serverless
-
-```bash
-python3 scripts/extractors/modal_docling_extract.py documento.pdf output/
-python3 scripts/extractors/modal_docling_extract.py documento.pdf output/ --page-range 1,50
-python3 scripts/extractors/modal_docling_extract.py --version --timeout 180
-```
-
-- **Endpoint default**: `https://rmichelena--docling-converter-fastapi-app.modal.run`
-- **API guide**: `scripts/extractors/api guide references/docling-modal-api-guide.md`
-- **API**: idéntica al Docling local/bare-metal.
-- **Modo default**: async, porque Modal tiene timeout corto en web endpoints y puede tener cold start.
-- **Salida estándar**: `{nombre}_modal_docling.md` + `{nombre}_modal_docling.json`.
-- **Uso recomendado**: extractor default del workflow para convertir PDFs pre-OCR a Markdown. Si falla, detener y pedir decisión antes de probar otro extractor.
-
-### 5. Google DocAI — Batch/GCS (máxima calidad, lento)
-
-```bash
-python3 scripts/extractors/docai_batch_gcs.py documento.pdf output_dir/
-```
-
-- **Velocidad**: ~2 pág/min (43 min para 58 págs con v1.6)
-- **OCR**: Sí — OCR + estructura jerárquica + detección de headers/footers
-- **Versiones**: v1.0 (rápido, 42s), v1.6 (mejor estructura, 43min)
-- **Límites**: Hasta 500 páginas por documento
-- **Requisitos**: Bucket GCS + service agent de DocAI
-- **Setup**: Ver `docs/docai_setup.md`
-
-### 6. Google DocAI — Online/Chunked (alternativa sin GCS)
-
-```bash
-python3 scripts/extractors/docai_online.py documento.pdf output_dir/
-```
-
-- **Velocidad**: ~16 pág/min
-- **Límites**: Procesa en chunks de 15 páginas
-- **⚠️**: Prefiera `docai_batch_gcs.py` para docs >15 páginas
-
-### Batch Runner (ejecutar múltiples extractores)
-
-```bash
-python3 scripts/extractors/batch_runner.py \
-  --input-dir ./pdfs \
-  --output-dir ./results \
-  --extractors modal_docling,markitdown \
-  --recursive
-```
-
-## Guía de selección de extractor
-
-| Tipo de documento | Recomendado | Alternativa |
-|---|---|---|
-| **Flujo default Paso 1** | strip-cleaning + reemplazo planos/diagramas + Modal Docling | Docling local autorizado por humano |
-| **PDF con páginas/fragmentos escaneados** | Modal Docling sobre PDF pre-OCR | Docling local / LandingAI / DocAI con aprobación |
-| **PDF vectorial puro** (texto embebido) | Modal Docling en workflow completo | MarkItDown para pruebas rápidas |
-| **DOCX** (sin gráficos críticos) | MarkItDown | — |
-| **XLSX / CSV** | Rama XLSX nativa (`xlsx_split/analyze/convert`) | MarkItDown para pruebas rápidas |
-| **PDF escaneado puro, calidad máxima** | Modal Docling por defecto | DocAI v1.6 batch con aprobación |
-
-**Criterio clave del workflow**: Paso 1 ya no elige extractor caso por caso al inicio. Primero limpia (`--strip`), detecta/sustituye planos y diagramas, y luego convierte con Modal Docling. Si algo falla, se detiene y pide decisión humana antes de degradar a otro extractor.
-
-## Post-procesadores (common.py)
-
-Los extractores aplican automáticamente estos post-procesadores:
-
-- **`clean_ade_output()`** — Elimina bloques `<::...::>` de LandingAI (attestations/firmas, logos, decorations), convierte NUL → °
-- **`fix_ligatures()`** — Corrige ligatures Unicode (fi→fi) y artefactos LaTeX (`\times`→×, `^{circ}`→°)
-- **`fix_chunk_spacing()`** — Reinserta saltos de línea donde DocAI concatena headings con body text
-
-## Comparación de extractores
-
-Ver `docs/extractor_benchmark.md` para el benchmark completo con datos.
-
-**Resumen (58 págs, documento mixto digital+escaneado)**:
-
-| Métrica | LandingAI dpt-2-latest | LandingAI dpt-2-mini | DocAI v1.6 | DocAI v1.0 |
-|---|---|---|---|---|
-| **Tiempo** | 32s | 33s | 43 min | 42s |
-| **Chars (clean)** | 166K | 180K | 122K | 125K |
-| **OCR escaneado** | ✅ | ✅ | ✅ | ✅ |
-| **Créditos** | 174 | 87 | ~$1.5 | ~$0.5 |
-
-## Configuración
-
-Ver `scripts/extractors/extractors.conf.example`. Copiar a `extractors.conf` y editar.
-
-Variables configurables:
-- `project_id`, `location`, `processor_id` — Google Cloud / DocAI
-- `gcs_bucket` — bucket para batch mode
-- `token_path` — path al archivo OAuth token (relativo o absoluto)
-- `online_page_limit` — máx páginas por request online (default: 15)
-- `chunk_size` — DocAI chunking config (default: 500)
-- `poll_interval`, `max_wait` — polling batch operation
-- `[docling]` / `[modal_docling]` — endpoints, timeouts, OCR/table params de Docling Serve
-- `step_1_defaults` en `instrucciones/params.yaml` — defaults operativos del pipeline documental
-
-**LandingAI**: API key en `scripts/extractors/.env_landingai` como `VISION_AGENT_API_KEY=...`
-
-## Formato de salida
-
-Todos los extractores producen:
-
-- **`{nombre}_{extractor}.md`** — Markdown con texto extraído
-- **`{nombre}_{extractor}.json`** — JSON estructurado con metadata + chunks
-
-### Estructura de chunks (DocAI)
-
-El texto extraído por DocAI viene en `chunkedDocument.chunks`:
-- Cada chunk tiene `content` (texto en markdown), `pageSpan` (rango de páginas)
-- Los chunks se solapan intencionalmente (`includeAncestorHeadings: true`)
-- Deduplicación usa `(chunk_id, content)` para preservar texto legítimamente repetido
-
-### Estructura de chunks (LandingAI ADE)
-
-El texto viene como lista de chunks con tipo:
-- `text` — texto normal
-- `table` — tablas (HTML)
-- `attestation` — firmas (eliminadas por `clean_ade_output`)
-- `logo` — logos (eliminados por `clean_ade_output`)
-- `figure` — figuras/diagramas
-- `marginalia` — notas marginales
-
-## Paso 2A — Lectores temáticos
-
-El flujo experimental actual para extracción temprana usa lectores temáticos por documento/eje:
-
-0. Eje 0 ya se ejecutó antes del índice como Paso 1.3b para el gate go/no-go. En Paso 2A solo se canonicaliza/reverifica eje 0 si hace falta.
-1. Tras aprobación humana, `scripts/build_section_chunks.py` genera `artifacts/step_2_chunks/{stem}_chunks.json` desde el índice Paso 1.5.
-2. Cada subagente de ejes 1-4 lee un documento + índice + chunk plan y escribe solo JSON canónico (`thematic_extraction.schema.json`).
-3. El orquestador valida con `scripts/validate_thematic_extraction.py`.
-4. El orquestador renderiza Markdown humano con `scripts/render_thematic_md.py`.
-
-No pedir Markdown a los subagentes; es derivado determinístico.
-
-### Schemas por eje
-
-Paso 2A usa un shape común (`thematic_extraction.schema.json`), pero los subagentes deben recibir el schema específico del eje para restringir enums y evitar sobre-inclusión:
-
-- `instrucciones/schemas/axis_0_main_tender_data.schema.json`
-- `instrucciones/schemas/axis_1_proposal_signature_documents.schema.json`
-- `instrucciones/schemas/axis_2_execution_documentary_deliverables.schema.json`
-- `instrucciones/schemas/axis_3_execution_services_obligations.schema.json`
-- `instrucciones/schemas/axis_4_goods_licenses_equipment.schema.json`
-
-Ejemplo: en eje 4 no existe `phase=proposal`; una mención en formato/presupuesto de propuesta sigue siendo un bien de ejecución, con `source_context_type` adecuado.
-
-#### Eje 4: COTS vs custom-made
-
-El schema de bienes no enumera familias específicas de equipamiento. En su lugar:
-
-- `entry_type` = categoría genérica de procurement.
-- `item_name` / `item_family` = texto libre para dedupe/búsqueda.
-- `supply_model` distingue COTS, custom-made, configured COTS, mixed o unclear.
-- `custom_spec_relevance` indica si la validación debe esperar match de ficha técnica o requisitos de diseño del proyecto.
-
-### Prompt template + payload por eje
-
-No usar un único prompt genérico para todos los ejes. El contrato común vive en:
-
-- `instrucciones/prompts/prompt_thematic_reader.template.md`
-
-La misión/adherencia de cada eje vive en payloads JSON:
-
-- `instrucciones/payloads/thematic_axes/axis_0_main_tender_data.json`
-- `instrucciones/payloads/thematic_axes/axis_1_proposal_signature_documents.json`
-- `instrucciones/payloads/thematic_axes/axis_2_execution_documentary_deliverables.json`
-- `instrucciones/payloads/thematic_axes/axis_3_execution_services_obligations.json`
-- `instrucciones/payloads/thematic_axes/axis_4_goods_licenses_equipment.json`
-
-Renderizar prompts con:
-
-```bash
-python3 scripts/render_thematic_prompt.py \
-  --payload instrucciones/payloads/thematic_axes/axis_4_goods_licenses_equipment.json \
-  --output instrucciones/prompts/rendered_thematic/axis_4_goods_licenses_equipment.md
-```
-
-Para llamadas JSON-only estrictas, los subagentes deben recibir el prompt renderizado y el schema específico del eje.
-
-Para prompts cortos o de lectura libre (por ejemplo `prompt_axis0_free_reader.md` en Paso 1.3b), el orquestador debe pegar el prompt **inline** en el mensaje del subagente en vez de pasar solo la ruta. La ruta puede quedar como referencia/versionado, pero no debe ser una indirección obligatoria para el modelo.
-
-En lectura libre de eje 0, el input normal debe ser la **carpeta del expediente/documentos fuente normalizados**, no un único documento de bases. El subagente debe buscar en bases, documentos técnicos, anexos, formularios y aclaraciones según existan. Solo limitar a un archivo cuando el orquestador lo indique explícitamente para un experimento o comparación.
+| Doc | Contenido |
+|-----|-----------|
+| [docs/STAGES.md](docs/STAGES.md) | Etapas A–D, ingesta, layouts, renumeración |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Capas, componentes, despliegue |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Fases de producto |
+| [docs/INTEGRATION.md](docs/INTEGRATION.md) | Portal ↔ pipeline |
+| [docs/MULTI_TENANCY.md](docs/MULTI_TENANCY.md) | Tenants, paths, Hermes |
+| [docs/HERMES_VPS.md](docs/HERMES_VPS.md) | Integración VPS |
+| [docs/EXTRACTORS.md](docs/EXTRACTORS.md) | Extractores PDF/XLSX |

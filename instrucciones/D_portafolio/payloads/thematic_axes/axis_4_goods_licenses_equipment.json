@@ -1,7 +1,7 @@
 {
   "axis_id": "axis_4_goods_licenses_equipment",
   "axis_name": "Bienes, licencias y equipamiento de ejecución",
-  "schema_path": "instrucciones/schemas/axis_4_goods_licenses_equipment.schema.json",
+  "schema_path": "instrucciones/D_portafolio/schemas/axis_4_goods_licenses_equipment.schema.json",
   "role_frame": "Tu función aquí es identificar bienes, licencias, equipos, materiales y accesorios que deberán suministrarse o quedar como parte del resultado entregable. No te interesan costos, cronogramas, documentos, servicios, transporte ni garantías como entradas independientes, salvo como contexto cruzado.",
   "task_axis_definition": "Lee el documento completo y extrae menciones a bienes/licencias/equipamiento de ejecución como ledger evidenciado para futura consolidación BOM-HL. No consolides ni dedupes; conserva contexto.",
   "inclusion_rules": [

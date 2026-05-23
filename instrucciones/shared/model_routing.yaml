@@ -83,7 +83,7 @@ routing:
       solo propone candidatos; el modelo visual confirma plano/diagrama, extrae identificador/título
       visible y decide si se sustituye antes de OCR.
     function_required: "vision_plan_page_analysis"
-    schema: "schemas/plan_pages_analysis.schema.json"
+    schema: "instrucciones/C_conversion/schemas/plan_pages_analysis.schema.json"
     output_validation: "strict_json_schema"
     tool_budget:
       max_candidate_pages_per_call: 5
@@ -100,7 +100,7 @@ routing:
       En ensayo AdP Cableado, `zai/glm-5.1` funcionó para EETT pero falló en Bases sin producir outputs;
       `openai-codex/gpt-5.4` completó Bases correctamente. Mantener fallback explícito y validar archivos escritos.
     function_required: "document_structural_indexing"
-    schema: "schemas/document_index.schema.json"
+    schema: "instrucciones/C_conversion/schemas/document_index.schema.json"
     output_validation: "strict_json_schema"
     tool_budget:
       chunk_line_count: 200
@@ -118,7 +118,7 @@ routing:
       El único modelo que produjo JSON válido en ICAO-00068 sin rescue.
       Output structured grande (16-37 items con specs en contexto) requiere compactness.
     function_required: "bom_extraction"
-    schema: "schemas/bom_item.schema.json"
+    schema: "instrucciones/D_portafolio/schemas/bom_item.schema.json"
     output_validation: "strict_json_schema"
 
   paso_2_1_auditor:
@@ -137,7 +137,7 @@ routing:
       Output structured más grande aún (~150 items). glm-5p1 confiable.
       DeepSeek como fallback (mostró buen razonamiento técnico en ICAO).
     function_required: "bom_extraction"
-    schema: "schemas/bom_item.schema.json"
+    schema: "instrucciones/D_portafolio/schemas/bom_item.schema.json"
     output_validation: "strict_json_schema"
     context_strategy: "selective"  # solo secciones relevantes del EETT por chunk de items
 
@@ -157,7 +157,7 @@ routing:
       Output structured grande (specs por item, hasta 1000 reqs total).
       Procesar en batches de 5 items con context selectivo (solo secciones EETT relevantes).
     function_required: "specs_extraction"
-    schema: "schemas/item_specs.schema.json"
+    schema: "instrucciones/D_portafolio/schemas/item_specs.schema.json"
     batching: {batch_size: 5, max_batches: 50}
     context_strategy: "selective"
 
@@ -202,7 +202,7 @@ routing:
       Worker rápido, búsqueda en INGLÉS prioritariamente.
       Throughput alto (varios items en paralelo) → modelo eficiente.
     function_required: "search_worker"
-    search_tool: "brave"  # ver catalog_tools.md capa A
+    search_tool: "brave"  # ver shared/catalog_tools.md capa A
     language_priority: ["en", "es"]
     tool_budget:
       max_searches: 6
@@ -232,7 +232,7 @@ routing:
       producir matriz verbatim contra cada requirement.
       Schema fuerte. Output estructurado mediano. glm-5p1 confiable.
     function_required: "compliance_matrix"
-    schema: "schemas/candidato_cumplimiento.schema.json"
+    schema: "instrucciones/D_portafolio/schemas/candidato_cumplimiento.schema.json"
     handoff_budget: 1
     output_validation: "strict_json_schema"
 
@@ -244,7 +244,7 @@ routing:
       Sintetiza BOM + specs + matrices de Paso 6.
       Output structured grande. glm-5p1 confiable.
     function_required: "consolidator"
-    schema: "schemas/consolidado_row.schema.json"
+    schema: "instrucciones/D_portafolio/schemas/consolidado_row.schema.json"
 
   # Paso 7.2 — QA Final
   paso_7_2_qa:

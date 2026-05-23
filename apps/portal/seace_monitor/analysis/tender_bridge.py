@@ -166,7 +166,7 @@ def run_axis0_gemini(
     if not md_files:
         raise RuntimeError("Sin archivos .md en step_1_normalizados")
 
-    prompt_path = repo / "instrucciones" / "prompts" / "prompt_axis0_free_reader.md"
+    prompt_path = repo / "instrucciones" / "C_conversion" / "prompts" / "axis0_free_reader.md"
     system = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else (
         "Extrae alcance, requisitos, cronograma y datos comerciales de las bases."
     )

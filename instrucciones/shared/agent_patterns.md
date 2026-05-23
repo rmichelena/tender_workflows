@@ -1,8 +1,8 @@
 # Patrones de delegación y subagentes
 
-> Guía operativa para decidir **cómo** delegar trabajo a LLMs/subagentes dentro del workflow `tender_procurement`.
+> Guía operativa para decidir **cómo** delegar trabajo a LLMs/subagentes dentro del workflow de portafolio (etapa D) y conversión (etapa C).
 >
-> Este archivo **no define la secuencia del workflow**. La secuencia, artefactos y pasos viven en `01_workflow.md`. Si este archivo contradice `01_workflow.md` sobre orden operacional, artefactos o preparación documental, seguir `01_workflow.md` y corregir este archivo.
+> Este archivo **no define la secuencia del workflow**. La secuencia vive en `C_conversion/01_runbook.md` y `D_portafolio/01_runbook.md`. Si contradice esos runbooks, seguir los runbooks por etapa.
 
 ---
 
@@ -47,7 +47,7 @@ El subagente produce un entregable acotado. No decide la arquitectura global.
 
 ### 1.4 No duplicar el workflow
 
-`agent_patterns.md` no debe decir “primero limpiar PDF, luego X, luego Y”. Eso pertenece a `01_workflow.md`.
+`shared/agent_patterns.md` no debe decir “primero limpiar PDF, luego X, luego Y”. Eso pertenece a `01_workflow.md`.
 
 Aquí solo se documentan patrones reutilizables de delegación.
 
@@ -61,7 +61,7 @@ Antes de lanzar subagentes, el orquestador debe verificar **cómo están disponi
 
 Revisar:
 
-- `instrucciones/model_routing.yaml`
+- `instrucciones/shared/model_routing.yaml`
 - `ROADMAP_OBSERVATIONS.md` para evidencia reciente
 - resultados de experimentos locales de la licitación actual
 
@@ -417,7 +417,7 @@ Lección observada:
 
 Evitar:
 
-1. **Mini-workflow duplicado**: `agent_patterns.md` no debe repetir `01_workflow.md`.
+1. **Mini-workflow duplicado**: `shared/agent_patterns.md` no debe repetir `01_workflow.md`.
 2. **Meta-prompt innecesario**: pasar prompts cortos solo como ruta.
 3. **Schema-first para comprensión global**: puede reducir recall y empeorar razonamiento.
 4. **Free-text cuando hace falta canon**: si downstream requiere estructura, usar JSON/schema.

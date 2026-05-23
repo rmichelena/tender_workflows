@@ -1,6 +1,6 @@
 # Integración SEACE Monitor ↔ pipeline documental
 
-**Documentación ampliada:** [ARCHITECTURE.md](ARCHITECTURE.md) (diagramas y componentes) · [ROADMAP.md](ROADMAP.md) (fases y prioridades).
+**Documentación ampliada:** [STAGES.md](STAGES.md) (etapas A→D) · [ARCHITECTURE.md](ARCHITECTURE.md) · [ROADMAP.md](ROADMAP.md).
 
 ## Visión del sistema completo
 
@@ -107,5 +107,6 @@ Ver [ROADMAP.md](ROADMAP.md). Resumen:
 
 ## Referencias
 
-- [instrucciones/01_workflow.md](../instrucciones/01_workflow.md) — runbook agentico
+- [docs/STAGES.md](STAGES.md) — etapas A→D
+- [instrucciones/C_conversion/01_runbook.md](../instrucciones/C_conversion/01_runbook.md) — runbook conversión
 - [scripts/run_step1_to_1_3.py](../scripts/run_step1_to_1_3.py) — runner Paso 1

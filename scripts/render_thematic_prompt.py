@@ -52,7 +52,11 @@ def render(template: str, payload: dict[str, Any]) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--template", type=Path, default=Path("instrucciones/prompts/prompt_thematic_reader.template.md"))
+    ap.add_argument(
+        "--template",
+        type=Path,
+        default=Path("instrucciones/D_portafolio/prompts/thematic/template.md"),
+    )
     ap.add_argument("--payload", type=Path, required=True)
     ap.add_argument("--output", type=Path, required=True)
     args = ap.parse_args()

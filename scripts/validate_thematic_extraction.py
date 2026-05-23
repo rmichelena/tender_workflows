@@ -29,7 +29,11 @@ def count_lines(path: Path) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("json_path", type=Path)
-    ap.add_argument("--schema", type=Path, default=Path("instrucciones/schemas/thematic_extraction.schema.json"))
+    ap.add_argument(
+        "--schema",
+        type=Path,
+        default=Path("instrucciones/D_portafolio/schemas/thematic_extraction.schema.json"),
+    )
     ap.add_argument("--source-md", type=Path)
     ap.add_argument("--chunk-plan", type=Path)
     ap.add_argument("--max-evidence-chars", type=int, default=400)

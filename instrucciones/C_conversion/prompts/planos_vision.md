@@ -45,7 +45,7 @@ No marcar replace si:
 
 ## Output obligatorio
 
-JSON válido contra `schemas/plan_pages_analysis.schema.json` v0.2.
+JSON válido contra `instrucciones/C_conversion/schemas/plan_pages_analysis.schema.json` v0.2.
 
 Campo `action` obligatorio.
 

@@ -36,7 +36,7 @@ Debes leer el archivo Markdown por tu cuenta usando herramientas de archivo/term
 ## Output obligatorio
 
 Produce **solo** el JSON canónico válido contra:
-- `instrucciones/schemas/document_index.schema.json`
+- `instrucciones/C_conversion/schemas/document_index.schema.json`
 
 No escribas Markdown humano. El Markdown navegable se deriva después de forma determinística con `scripts/render_document_index_md.py` a partir del JSON validado.
 

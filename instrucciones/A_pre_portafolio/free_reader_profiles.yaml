@@ -1,0 +1,107 @@
+# Perfiles — Free reader (etapa A)
+#
+# El portal lee este archivo, elige profile_id, renderiza el prompt y registra
+# la versión en pre_portafolio/fast_analysis/profile.json
+
+version: 0.1
+
+sections:
+  alcance:
+    label: "Alcance y objeto"
+    default: true
+  clasificacion_contrato:
+    label: "Clasificación del contrato"
+    default: true
+  ubicacion:
+    label: "Ubicación / sitios de entrega"
+    default: true
+  presupuesto:
+    label: "Valor referencial / presupuesto"
+    default: true
+  plazos_entrega:
+    label: "Plazos de entrega/ejecución (contractuales)"
+    default: true
+  cronograma_proceso:
+    label: "Cronograma del proceso de selección"
+    default: false
+    note: "En SEACE viene de ficha portal, no del PDF"
+  requisitos_postor:
+    label: "Requisitos del postor"
+    default: true
+  consorcios:
+    label: "Consorcios"
+    default: false
+  garantias:
+    label: "Garantías / fianzas"
+    default: true
+  pagos:
+    label: "Forma de pago y adelantos"
+    default: true
+  penalidades:
+    label: "Penalidades"
+    default: true
+  evaluacion:
+    label: "Criterios de evaluación / buena pro"
+    default: true
+  entidades_supervisoras:
+    label: "Entidades supervisoras / conformidad"
+    default: false
+  condiciones_contractuales:
+    label: "Condiciones contractuales principales"
+    default: true
+  incluye_excluye:
+    label: "Qué incluye / qué no incluye"
+    default: true
+  dudas:
+    label: "Dudas / puntos a verificar"
+    default: true
+
+profiles:
+  seace:
+    source_types: [seace]
+    description: "Licitación pública SEACE — cronograma en ficha, no en PDF"
+    prompt_template: "prompts/seace_free_reader.md"
+    exclude_sections: [cronograma_proceso]
+    include_sections: all_except_excluded
+    merge_portal_metadata:
+      cronograma: seace_ficha
+
+  private_documents:
+    source_types: [adp_portal, private_portal, multilateral]
+    description: "Bases en documentos — cronograma suele estar en PDF"
+    prompt_template: "prompts/private_documents.template.md"
+    include_sections:
+      - alcance
+      - clasificacion_contrato
+      - ubicacion
+      - presupuesto
+      - plazos_entrega
+      - cronograma_proceso
+      - requisitos_postor
+      - garantias
+      - pagos
+      - penalidades
+      - evaluacion
+      - condiciones_contractuales
+      - incluye_excluye
+      - dudas
+    merge_portal_metadata:
+      cronograma: documents_first
+
+  manual:
+    source_types: [manual]
+    description: "Alta manual — secciones elegidas en UI"
+    prompt_builder: dynamic
+    prompt_template: "prompts/manual.template.md"
+    include_sections: user_selected
+    defaults_from: private_documents
+
+triggers:
+  analyze_action:
+    from_status: [descargada]
+    to_status: analizada
+  portafolio_without_analyze:
+    from_status: [descargada]
+    to_status: portafolio
+    run_free_reader_if_missing: true
+    profile_from: process.source

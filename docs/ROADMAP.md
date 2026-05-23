@@ -1,7 +1,7 @@
 # Roadmap — tender_workflows
 
 Roadmap del producto integrado (portal + ingesta + análisis + agentes).  
-**Arquitectura:** [ARCHITECTURE.md](ARCHITECTURE.md).
+**Modelo de etapas:** [STAGES.md](STAGES.md) · **Arquitectura:** [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Última actualización: mayo 2026.
 
@@ -26,7 +26,7 @@ Roadmap del producto integrado (portal + ingesta + análisis + agentes).
 | Portal publicaciones → descargados → analizados | Estados separados descarga/análisis |
 | Descarga Alfresco + ZIP/RAR | `documentos_json` solo al descargar |
 | Análisis multi-PDF fast-path | Gemini 2.5 Pro, selección en UI |
-| Portafolio manual | Sin botón «Continuar agente» aún |
+| Portafolio manual | Sin botón «Continuar agente» aún; ver etapa B en [STAGES.md](STAGES.md) |
 | VPS Docker | `bots.infinitek.pe:8080`, web + worker |
 | Descarte con limpieza disco/BD | Incluye `documentos_json`, `AnalysisResult` |
 | Proxy Ver en SEACE | Server-side ViewState |
@@ -36,18 +36,21 @@ Roadmap del producto integrado (portal + ingesta + análisis + agentes).
 
 ## Fase 1 — Cerrar el ciclo humano en el portal 📋
 
-**Objetivo:** de scan a portafolio sin salir del navegador; puente hacia agentes.
+**Objetivo:** de ingesta a portafolio preparado (etapas A–B) y puente hacia C/D.
 
 | Ítem | Descripción | Prioridad |
 |------|-------------|-----------|
-| 1.1 | Botón **Continuar extracción** en portafolio → sesión Hermes con expediente precargado | Alta |
-| 1.2 | Chat embebido (Hermes gateway u Open WebUI acoplado) | Alta |
-| 1.0 | **Volumen compartido VPS:** bind `/data` con layout `tenants/default/`; montar en Hermes (0–1 contenedor) | Alta — prereq |
+| 1.0 | **Etapa B:** UI staging (selección docs, upload, aclaraciones → `staging_manifest.json`) | Alta |
+| 1.0b | **Multi-entrypoint:** alta directa entidad+N° → `descargada`; creación manual | Alta |
+| 1.0c | **Portafolio sin analizar:** disparar free reader con perfil por `source` | Alta |
+| 1.0d | **Volumen compartido VPS:** bind `/data` con layout `tenants/default/`; montar en Hermes | Alta — prereq |
+| 1.1 | Botón **Continuar conversión** → etapa C (`run_step1` / Hermes) | Alta |
+| 1.2 | Chat embebido etapa D (Hermes gateway u Open WebUI acoplado) | Alta |
 | 1.3 | Errores visibles: descarga/análisis fallido con mensaje en UI | Media |
-| 1.4 | Modo **Análisis completo** opcional (Paso 1.0–1.3 + eje 0) además de fast-path | Media |
+| 1.4 | Modo **Conversión completa** opcional (C.1–C.4) además de fast-path A | Media |
 | 1.5 | Traefik + `licitaciones.infinitek.pe` | Baja |
 
-**Definition of done:** proceso en portafolio → chat en portal → agente arranca Paso 1.5 con contexto del expediente.
+**Definition of done:** `portafolio/inputs/` preparado (B) → conversión C arrancable desde portal → agente D con contexto del expediente.
 
 ---
 
@@ -66,7 +69,7 @@ Roadmap del producto integrado (portal + ingesta + análisis + agentes).
 **Notas de diseño:**
 
 - Routing inicial puede ser YAML en BD; UI edita la misma estructura.
-- Reutilizar ideas de `instrucciones/model_routing.yaml` pero scoped al portal.
+- Reutilizar ideas de `instrucciones/shared/model_routing.yaml` pero scoped al portal.
 - Dependencia con **multiusuario** (Fase 4): settings globales vs por tenant.
 
 ---

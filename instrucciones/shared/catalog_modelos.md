@@ -2,7 +2,7 @@
 
 > El orquestador selecciona modelos desde este catálogo según la función requerida por cada paso.
 > Reglas: diversidad en paralelo, rotación en reintentos, revisor ≠ productor.
-> Ver `params.yaml → model_pools` para los pools por función.
+> Ver `shared/params.yaml → model_pools` para los pools por función.
 
 ## Tabla de capacidades
 
