@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import uuid
 from pathlib import Path
 
 from ..db.models import AnalysisResult, utcnow
@@ -34,8 +35,8 @@ def archive_analysis_before_rerun(
     hist_root = proc_dir / "fast_analysis" / "history"
     hist_root.mkdir(parents=True, exist_ok=True)
     stamp = utcnow().strftime("%Y%m%dT%H%M%SZ")
-    dest_dir = hist_root / stamp
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_dir = hist_root / f"{stamp}_{uuid.uuid4().hex[:8]}"
+    dest_dir.mkdir(parents=True, exist_ok=False)
 
     payload = {field: getattr(analysis, field) for field in _HISTORY_FIELDS}
     payload["archived_at"] = utcnow().isoformat()

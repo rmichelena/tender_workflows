@@ -44,19 +44,31 @@
       </thead>
       <tbody>
         {% for row in cronograma %}
-        <tr{% if row.changed %} class="cronograma-changed"{% endif %}>
-          <td>{{ row.etapa or '—' }}</td>
+        <tr{% if row.is_removed %} class="cronograma-removed"{% elif row.is_new %} class="cronograma-new"{% elif row.changed %} class="cronograma-changed"{% endif %}>
           <td>
+            {{ row.etapa or '—' }}
+            {% if row.is_new %}<span class="cronograma-tag cronograma-tag-new">Nueva</span>{% endif %}
+            {% if row.is_removed %}<span class="cronograma-tag cronograma-tag-removed">Eliminada</span>{% endif %}
+          </td>
+          <td>
+            {% if row.is_removed %}
+            <span class="cronograma-prev">{{ row.fecha_inicio_prev or '—' }}</span>
+            {% else %}
             {% if row.fecha_inicio_prev and row.fecha_inicio_prev != row.fecha_inicio %}
             <span class="cronograma-prev">{{ row.fecha_inicio_prev }}</span><br/>
             {% endif %}
             {{ row.fecha_inicio or '—' }}
+            {% endif %}
           </td>
           <td>
+            {% if row.is_removed %}
+            <span class="cronograma-prev">{{ row.fecha_fin_prev or '—' }}</span>
+            {% else %}
             {% if row.fecha_fin_prev and row.fecha_fin_prev != row.fecha_fin %}
             <span class="cronograma-prev">{{ row.fecha_fin_prev }}</span><br/>
             {% endif %}
             {{ row.fecha_fin or '—' }}
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +98,10 @@ class AppConfig:
     @property
     def watchlist_refresh_seconds(self) -> int:
         return parse_duration(self.watchlist_refresh_interval)
+
+    @property
+    def watchlist_refresh_timedelta(self) -> timedelta:
+        return timedelta(seconds=self.watchlist_refresh_seconds)
 
     @property
     def stale_analysis_seconds(self) -> int:

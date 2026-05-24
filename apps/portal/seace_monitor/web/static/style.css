@@ -70,6 +70,29 @@ body {
 .cronograma-changed {
   background: #fffbeb;
 }
+.cronograma-new {
+  background: #ecfdf5;
+}
+.cronograma-removed {
+  background: #fef2f2;
+}
+.cronograma-tag {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.cronograma-tag-new {
+  background: #d1fae5;
+  color: #065f46;
+}
+.cronograma-tag-removed {
+  background: #fee2e2;
+  color: #991b1b;
+}
 .watch-update-banner {
   background: #eff6ff;
   border: 1px solid #93c5fd;

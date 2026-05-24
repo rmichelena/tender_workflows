@@ -6,9 +6,10 @@ import hashlib
 import json
 import logging
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from .client import ProcessRow, SeaceClient
@@ -105,38 +106,35 @@ def watchlist_nav_badges(session: Session) -> dict[str, int]:
 
 def refresh_watchlist_processes(config: AppConfig, session: Session) -> int:
     """Re-fetch ficha SEACE para procesos en watchlist cuyo TTL venció."""
-    threshold = utcnow() - timedelta(seconds=config.watchlist_refresh_seconds)
+    threshold = utcnow() - config.watchlist_refresh_timedelta
     processes = (
         session.query(Process)
         .options(joinedload(Process.entity))
         .filter(Process.status.in_(tuple(WATCHLIST_STATUSES)))
+        .filter(
+            or_(
+                Process.watch_checked_at.is_(None),
+                Process.watch_checked_at < threshold,
+            )
+        )
         .all()
     )
-    due = [
-        proc
-        for proc in processes
-        if proc.watch_checked_at is None
-        or _as_utc(proc.watch_checked_at) < threshold
-    ]
     updated = 0
-    for proc in due:
+    for proc in processes:
+        savepoint = session.begin_nested()
         try:
             if _refresh_watchlist_process(config, session, proc):
                 updated += 1
+            proc.watch_checked_at = utcnow()
+            savepoint.commit()
         except Exception:
+            savepoint.rollback()
             logger.exception(
                 "Watchlist: falló refresh proceso id=%s nid=%s",
                 proc.id,
                 proc.nid_proceso,
             )
-        proc.watch_checked_at = utcnow()
     return updated
-
-
-def _as_utc(dt: datetime) -> datetime:
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
 
 
 def _refresh_watchlist_process(
@@ -183,11 +181,18 @@ def _refresh_watchlist_process(
 
     cron_changed = (process.cronograma_json or "") != new_cron_json
     docs_changed = (process.documentos_json or "") != new_docs_json
+    new_docs = json.loads(new_docs_json)
+
+    # Descargar antes de mutar documentos_json para que un fallo no suprima reintentos.
+    if docs_changed and process.data_dir:
+        _download_new_documents(config, process, new_docs)
 
     if cron_changed and process.cronograma_json:
-        process.watch_cronograma_prev_json = process.cronograma_json
+        if not process.watch_unread or not process.watch_cronograma_prev_json:
+            process.watch_cronograma_prev_json = process.cronograma_json
     if docs_changed and process.documentos_json:
-        process.watch_documentos_prev_json = process.documentos_json
+        if not process.watch_unread or not process.watch_documentos_prev_json:
+            process.watch_documentos_prev_json = process.documentos_json
 
     fechas = extract_cronograma_fechas(ficha.cronograma)
     process.cronograma_json = new_cron_json
@@ -201,9 +206,6 @@ def _refresh_watchlist_process(
     process.documentos_json = new_docs_json
     process.updated_at = datetime.now(timezone.utc)
     process.watch_unread = True
-
-    if docs_changed and process.data_dir:
-        _download_new_documents(config, process, json.loads(new_docs_json))
 
     session.flush()
     logger.info(

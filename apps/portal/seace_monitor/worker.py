@@ -77,12 +77,15 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
     data_dir = Path(cfg.data_dir)
     _acquire_worker_lock(data_dir)
     init_db(cfg.database_url)
-    interval = cfg.poll_interval_seconds
+    poll_s = cfg.poll_interval_seconds
+    watch_s = cfg.watchlist_refresh_seconds
 
     logger.info(
-        "Worker iniciado — intervalo %s (%ss), tenant: %s",
+        "Worker iniciado — scan %s (%ss), watchlist %s (%ss), tenant: %s",
         cfg.poll_interval,
-        interval,
+        poll_s,
+        cfg.watchlist_refresh_interval,
+        watch_s,
         cfg.tenant_id,
     )
 
@@ -92,31 +95,49 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
     finally:
         session.close()
 
-    write_worker_heartbeat(data_dir, poll_interval_seconds=interval)
+    write_worker_heartbeat(data_dir, poll_interval_seconds=poll_s)
+
+    now = time.time()
+    next_scan_at = now
+    next_watch_at = now
 
     while True:
+        now = time.time()
         session = session_factory()
+        n = 0
+        w = 0
+        ran_scan = False
+        ran_watch = False
         try:
-            scanner = MultiEntityScanner(cfg, session)
-            n = scanner.run_once()
-            w = refresh_watchlist_processes(cfg, session)
-            session.commit()
-            logger.info(
-                "Ciclo completado: %s proceso(s) nuevo(s), %s watchlist actualizado(s)",
-                n,
-                w,
-            )
+            if now >= next_scan_at:
+                scanner = MultiEntityScanner(cfg, session)
+                n = scanner.run_once()
+                next_scan_at = now + poll_s
+                ran_scan = True
+            if now >= next_watch_at:
+                w = refresh_watchlist_processes(cfg, session)
+                next_watch_at = now + watch_s
+                ran_watch = True
+            if ran_scan or ran_watch:
+                session.commit()
+            if n or w:
+                logger.info(
+                    "Ciclo completado: %s proceso(s) nuevo(s), %s watchlist actualizado(s)",
+                    n,
+                    w,
+                )
         except Exception:
             session.rollback()
-            logger.exception("Error en ciclo de escaneo")
+            logger.exception("Error en ciclo de escaneo/watchlist")
         finally:
             session.close()
 
-        write_worker_heartbeat(data_dir, poll_interval_seconds=interval)
+        write_worker_heartbeat(data_dir, poll_interval_seconds=poll_s)
 
         if once:
             break
-        time.sleep(interval)
+        sleep_for = min(next_scan_at, next_watch_at) - time.time()
+        time.sleep(max(1.0, sleep_for))
 
 
 if __name__ == "__main__":

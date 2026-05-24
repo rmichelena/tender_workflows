@@ -84,6 +84,8 @@ class CronogramaFila:
     fecha_inicio_prev: str | None = None
     fecha_fin_prev: str | None = None
     changed: bool = False
+    is_new: bool = False
+    is_removed: bool = False
 
 
 def _document_uuids_from_json(documentos_json: str | None) -> set[str]:
@@ -433,6 +435,7 @@ def parse_cronograma(
         except json.JSONDecodeError:
             pass
     rows: list[CronogramaFila] = []
+    current_etapas: set[str] = set()
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -442,20 +445,39 @@ def parse_cronograma(
         prev = prev_by_etapa.get(etapa)
         fecha_inicio_prev = str(prev.get("fecha_inicio", "")) if prev else None
         fecha_fin_prev = str(prev.get("fecha_fin", "")) if prev else None
+        is_new = bool(prev_by_etapa) and prev is None
         changed = bool(
             prev
             and (
                 fecha_inicio_prev != fecha_inicio or fecha_fin_prev != fecha_fin
             )
         )
+        if is_new:
+            changed = True
+        current_etapas.add(etapa)
         rows.append(
             CronogramaFila(
                 etapa=etapa,
                 fecha_inicio=fecha_inicio,
                 fecha_fin=fecha_fin,
-                fecha_inicio_prev=fecha_inicio_prev if changed else None,
-                fecha_fin_prev=fecha_fin_prev if changed else None,
+                fecha_inicio_prev=fecha_inicio_prev if changed and prev else None,
+                fecha_fin_prev=fecha_fin_prev if changed and prev else None,
                 changed=changed,
+                is_new=is_new,
+            )
+        )
+    for etapa, prev_item in prev_by_etapa.items():
+        if etapa in current_etapas:
+            continue
+        rows.append(
+            CronogramaFila(
+                etapa=etapa,
+                fecha_inicio="",
+                fecha_fin="",
+                fecha_inicio_prev=str(prev_item.get("fecha_inicio", "")),
+                fecha_fin_prev=str(prev_item.get("fecha_fin", "")),
+                changed=True,
+                is_removed=True,
             )
         )
     return rows
