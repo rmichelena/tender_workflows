@@ -79,11 +79,10 @@ def init_db(database_url: str) -> None:
             path = database_url.replace("sqlite:///", "", 1)
             Path(path).parent.mkdir(parents=True, exist_ok=True)
 
-    _engine = create_engine(
-        database_url,
-        pool_pre_ping=True,
-        connect_args=connect_args or None,
-    )
+    engine_kwargs: dict[str, object] = {"pool_pre_ping": True}
+    if connect_args:
+        engine_kwargs["connect_args"] = connect_args
+    _engine = create_engine(database_url, **engine_kwargs)
     if database_url.startswith("sqlite"):
         event.listen(_engine, "connect", _configure_sqlite_connection)
 

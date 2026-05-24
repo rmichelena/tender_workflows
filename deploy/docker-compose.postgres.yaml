@@ -1,9 +1,41 @@
-# Uso: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.postgres.yaml up -d
-# Define DATABASE_URL en deploy/.env o aquí vía defaults.
+# Postgres opt-in: añade servicio db y DATABASE_URL a web/worker.
+# Uso (desde la raíz del repo):
+#   docker compose --env-file deploy/.env \
+#     -f deploy/docker-compose.yml -f deploy/docker-compose.postgres.yaml up -d --build
+#
+# Ajusta config.yaml: database_url puede omitirse si DATABASE_URL en .env basta.
+
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-seace}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-seace}
+      POSTGRES_DB: ${POSTGRES_DB:-seace}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-seace}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   web:
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-seace}:${POSTGRES_PASSWORD:-seace}@db:5432/${POSTGRES_DB:-seace}}
+
   worker:
+    depends_on:
+      web:
+        condition: service_healthy
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-seace}:${POSTGRES_PASSWORD:-seace}@db:5432/${POSTGRES_DB:-seace}}
+
+volumes:
+  pgdata:

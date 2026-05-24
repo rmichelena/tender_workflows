@@ -76,10 +76,12 @@ UI local: `http://127.0.0.1:8000/` · Producción VPS: `http://bots.infinitek.pe
 
 ### Docker
 
+Stack **SQLite por defecto** (Postgres opt-in con `deploy/docker-compose.postgres.yaml`). Ver [deploy/README.md](deploy/README.md).
+
 ```bash
 cp config.example.yaml config.yaml
 cp deploy/.env.example deploy/.env
-docker compose -f deploy/docker-compose.yml up -d --build
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 ```
 
 ---

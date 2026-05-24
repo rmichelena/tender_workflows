@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 import uvicorn
 
@@ -42,6 +43,12 @@ def main(argv: list[str] | None = None) -> int:
     web.add_argument("--host", default="0.0.0.0")
     web.add_argument("--port", type=int, default=8080)
     web.add_argument("-v", "--verbose", action="store_true")
+
+    wh = sub.add_parser(
+        "worker-healthcheck",
+        help="Exit 0 si el heartbeat del worker es reciente (Docker healthcheck)",
+    )
+    wh.add_argument("-c", "--config", default="config.yaml")
 
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -126,6 +133,12 @@ def main(argv: list[str] | None = None) -> int:
         app = create_app(cfg)
         uvicorn.run(app, host=args.host, port=args.port)
         return 0
+
+    if args.command == "worker-healthcheck":
+        from .worker_heartbeat import worker_heartbeat_ok
+
+        cfg = AppConfig.load(args.config)
+        return 0 if worker_heartbeat_ok(Path(cfg.data_dir)) else 1
 
     return 0
 

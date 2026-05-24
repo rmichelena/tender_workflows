@@ -2,7 +2,7 @@
 # Uso (desde deploy/):
 #   cp config.example.vps.yaml config.yaml
 #   cp .env.example .env          # GEMINI_API_KEY, SEACE_HTTP_PROXY, etc.
-#   docker compose -f docker-compose.vps.yml up -d --build
+#   docker compose --env-file .env -f docker-compose.vps.yml up -d --build
 
 name: ${COMPOSE_PROJECT_NAME:-tender-workflows}
 
@@ -43,9 +43,18 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       - tender_data:/app/data
     environment: *app-environment
+    depends_on:
+      web:
+        condition: service_healthy
     command: >
       python -m seace_monitor scan -c /app/config.yaml
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "seace_monitor", "worker-healthcheck", "-c", "/app/config.yaml"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 volumes:
   tender_data:

@@ -2,21 +2,41 @@
 
 from __future__ import annotations
 
+import fcntl
 import logging
+import os
 import sys
 import time
+from pathlib import Path
 
 from .config import AppConfig
 from .db.models import Entity
 from .db.session import init_db, session_factory
 from .entity_catalog import sync_entity_catalog_if_changed
 from .scanner import MultiEntityScanner
-from .tenant_paths import migrate_legacy_layout, migrate_process_data_dir_refs
+from .worker_heartbeat import write_worker_heartbeat
 
 logger = logging.getLogger(__name__)
 
 _CATALOG_SYNC_RETRIES = 3
 _CATALOG_SYNC_BACKOFF_SECONDS = 5
+_worker_lock_fd = None
+
+
+def _acquire_worker_lock(data_dir: Path) -> None:
+    """Un solo worker por volumen SQLite/datos (evita --scale worker=2)."""
+    global _worker_lock_fd
+    lock_path = data_dir / ".worker.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    _worker_lock_fd = open(lock_path, "w", encoding="utf-8")
+    try:
+        fcntl.flock(_worker_lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        raise SystemExit(
+            "Otro worker SEACE Monitor ya está en ejecución en este volumen de datos."
+        ) from exc
+    _worker_lock_fd.write(str(os.getpid()))
+    _worker_lock_fd.flush()
 
 
 def _bootstrap_catalog(session, cfg: AppConfig) -> None:
@@ -53,6 +73,8 @@ def _bootstrap_catalog(session, cfg: AppConfig) -> None:
 
 def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
     cfg = config or AppConfig.load()
+    data_dir = Path(cfg.data_dir)
+    _acquire_worker_lock(data_dir)
     init_db(cfg.database_url)
     interval = cfg.poll_interval_seconds
 
@@ -62,21 +84,14 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
         interval,
         cfg.tenant_id,
     )
-    if migrate_legacy_layout(cfg):
-        logger.info("Layout de datos migrado a tenants/%s/", cfg.tenant_id)
 
     session = session_factory()
     try:
-        path_updates = migrate_process_data_dir_refs(session, cfg)
-        if path_updates:
-            session.commit()
-            logger.info(
-                "Actualizadas %s rutas data_dir tras migración de layout",
-                path_updates,
-            )
         _bootstrap_catalog(session, cfg)
     finally:
         session.close()
+
+    write_worker_heartbeat(data_dir, poll_interval_seconds=interval)
 
     while True:
         session = session_factory()
@@ -90,6 +105,8 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
             logger.exception("Error en ciclo de escaneo")
         finally:
             session.close()
+
+        write_worker_heartbeat(data_dir, poll_interval_seconds=interval)
 
         if once:
             break
