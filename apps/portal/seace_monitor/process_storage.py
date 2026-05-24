@@ -19,8 +19,10 @@ _STATUSES_WITH_DATA = frozenset(
     {
         ProcessStatus.descargando,
         ProcessStatus.descargada,
+        ProcessStatus.descartando,
         ProcessStatus.analizada,
         ProcessStatus.portafolio,
+        ProcessStatus.archivando,
         ProcessStatus.archivada,
     }
 )
@@ -210,6 +212,61 @@ def restore_archived_process(config: AppConfig, process: Process) -> None:
         process.status = ProcessStatus.descargada
 
 
+def recover_stale_workflow_transitions(
+    config: AppConfig, session: Session, stale_seconds: int
+) -> int:
+    """Completa o revierte archivando/descartando colgados."""
+    if stale_seconds <= 0:
+        return 0
+    from datetime import timedelta, timezone
+
+    cutoff = utcnow() - timedelta(seconds=stale_seconds)
+    recovered = 0
+    transitional = (ProcessStatus.archivando, ProcessStatus.descartando)
+    for proc in session.query(Process).filter(Process.status.in_(transitional)):
+        updated = proc.updated_at
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        if updated >= cutoff:
+            continue
+        if proc.status == ProcessStatus.archivando:
+            src = resolve_process_data_dir(config, proc.data_dir)
+            trash = trash_root(config)
+            if src is not None and src.is_dir():
+                try:
+                    archive_analyzed_process(config, proc)
+                except Exception:
+                    logger.exception(
+                        "Archivo obsoleto falló id=%s; revierte a analizada",
+                        proc.id,
+                    )
+                    proc.status = ProcessStatus.analizada
+            elif src is not None and trash in src.parents:
+                proc.status = ProcessStatus.archivada
+            else:
+                proc.status = ProcessStatus.analizada
+        else:
+            path = resolve_process_data_dir(config, proc.data_dir)
+            try:
+                if path is not None and path.is_dir():
+                    discard_process_downloads(config, proc, session)
+                proc.status = ProcessStatus.descartada
+            except Exception:
+                logger.exception(
+                    "Descarte obsoleto falló id=%s; revierte a descargada",
+                    proc.id,
+                )
+                proc.status = ProcessStatus.descargada
+        recovered += 1
+        logger.warning(
+            "Transición obsoleta recuperada: proceso id=%s nid=%s status=%s",
+            proc.id,
+            proc.nid_proceso,
+            proc.status.value,
+        )
+    return recovered
+
+
 def recover_stale_downloads(
     config: AppConfig, session: Session, stale_seconds: int
 ) -> int:
@@ -243,8 +300,10 @@ def repair_processes_missing_data(config: AppConfig, session: Session) -> int:
     needs_data = {
         ProcessStatus.descargando,
         ProcessStatus.descargada,
+        ProcessStatus.descartando,
         ProcessStatus.analizada,
         ProcessStatus.portafolio,
+        ProcessStatus.archivando,
     }
     repaired = 0
     for proc in session.query(Process).filter(Process.status.in_(needs_data)):

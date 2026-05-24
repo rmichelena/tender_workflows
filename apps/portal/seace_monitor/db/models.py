@@ -30,8 +30,10 @@ class ProcessStatus(str, enum.Enum):
     publicada = "publicada"
     descargando = "descargando"
     descargada = "descargada"
+    descartando = "descartando"
     analizada = "analizada"
     portafolio = "portafolio"
+    archivando = "archivando"
     descartada = "descartada"
     archivada = "archivada"
 

@@ -21,7 +21,7 @@
   <tbody>
     {% for item in processes %}
     {% set p = item.process %}
-    <tr{% if item.watch_unread %} class="row-unread"{% endif %}>
+    <tr data-process-id="{{ p.id }}" class="{% if item.watch_unread %}row-unread{% endif %}"{% if p.status.value == 'archivando' %} data-archiving="1"{% endif %}>
       <td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
       <td>{{ p.nomenclatura }}</td>
       <td class="status-cell">{{ status_cell(p) }}</td>
@@ -30,22 +30,29 @@
       <td>{{ item.fin_consultas }}</td>
       <td>{{ item.fin_presentacion }}</td>
       <td class="actions-cell">
-        <div class="actions-stack">
+        <div class="actions-stack js-action-row">
+        {% if p.status.value == 'archivando' %}
+        <button type="button" class="btn btn-secondary btn-sm" disabled>Archivando…</button>
+        {% else %}
         <a href="/analizados/{{ p.id }}" class="btn btn-secondary btn-sm">Ver</a>
         {% if p.status.value == 'analizada' %}
-        <form method="post" action="/analizados/{{ p.id }}/estado">
+        <form method="post" action="/analizados/{{ p.id }}/estado" class="js-keep-scroll">
           <input type="hidden" name="estado" value="portafolio"/>
+          <input type="hidden" name="scroll" value=""/>
           <button type="submit" class="btn btn-primary btn-sm">→ Portafolio</button>
         </form>
         {% elif p.status.value == 'portafolio' %}
-        <form method="post" action="/analizados/{{ p.id }}/estado">
+        <form method="post" action="/analizados/{{ p.id }}/estado" class="js-keep-scroll">
           <input type="hidden" name="estado" value="analizada"/>
+          <input type="hidden" name="scroll" value=""/>
           <button type="submit" class="btn btn-secondary btn-sm">Quitar portafolio</button>
         </form>
         {% endif %}
-        <form method="post" action="/analizados/{{ p.id }}/archivar">
-          <button type="submit" class="btn btn-danger btn-sm">Archivar</button>
+        <form method="post" action="/analizados/{{ p.id }}/archivar" class="js-keep-scroll js-archivar-form">
+          <input type="hidden" name="scroll" value=""/>
+          <button type="submit" class="btn btn-danger btn-sm js-archivar-btn">Archivar</button>
         </form>
+        {% endif %}
         </div>
       </td>
     </tr>
@@ -54,4 +61,78 @@
     {% endfor %}
   </tbody>
 </table>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  function lockArchiveRow(row) {
+    if (!row) return;
+    row.dataset.archiving = "1";
+    row.querySelectorAll(".js-action-row button").forEach(function (btn) {
+      btn.disabled = true;
+    });
+    var archive = row.querySelector(".js-archivar-btn");
+    if (archive) archive.textContent = "Archivando…";
+  }
+
+  document.querySelectorAll("form.js-archivar-form").forEach(function (form) {
+    form.addEventListener("submit", function () {
+      var field = form.querySelector('input[name="scroll"]');
+      if (field) field.value = String(Math.round(window.scrollY));
+      lockArchiveRow(form.closest("tr"));
+    });
+  });
+
+  document.querySelectorAll("form.js-keep-scroll").forEach(function (form) {
+    if (form.classList.contains("js-archivar-form")) return;
+    form.addEventListener("submit", function () {
+      var field = form.querySelector('input[name="scroll"]');
+      if (field) field.value = String(Math.round(window.scrollY));
+    });
+  });
+
+  var params = new URLSearchParams(window.location.search);
+  var scroll = params.get("scroll");
+  if (scroll) {
+    var y = parseInt(scroll, 10);
+    if (Number.isFinite(y) && y >= 0) {
+      function restore() { window.scrollTo(0, y); }
+      restore();
+      requestAnimationFrame(restore);
+      window.addEventListener("load", restore);
+    }
+    params.delete("scroll");
+    var query = params.toString();
+    var next = window.location.pathname + (query ? "?" + query : "") + window.location.hash;
+    history.replaceState(null, "", next);
+  }
+
+  var archivingRows = document.querySelectorAll('tr[data-archiving="1"]');
+  if (!archivingRows.length) return;
+
+  var ids = Array.from(archivingRows).map(function (row) {
+    return row.getAttribute("data-process-id");
+  }).filter(Boolean);
+
+  function stillInAnalizados(status) {
+    return status === "analizada" || status === "portafolio" || status === "archivando";
+  }
+
+  function pollArchiving() {
+    Promise.all(ids.map(function (id) {
+      return fetch("/api/processes/" + id + "/workflow")
+        .then(function (r) { return r.json(); });
+    })).then(function (rows) {
+      var pending = rows.some(function (row) {
+        return stillInAnalizados(row.status);
+      });
+      if (!pending) {
+        window.location.reload();
+      }
+    }).catch(function () {});
+  }
+
+  window.setInterval(pollArchiving, 3000);
+})();
+</script>
 {% endblock %}

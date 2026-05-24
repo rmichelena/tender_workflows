@@ -37,7 +37,11 @@ class EntityCleanupResult:
 
 
 def _process_is_busy(proc: Process, stale_seconds: int) -> bool:
-    if proc.status == ProcessStatus.descargando:
+    if proc.status in (
+        ProcessStatus.descargando,
+        ProcessStatus.descartando,
+        ProcessStatus.archivando,
+    ):
         return True
     if proc.analysis and proc.analysis.status == "running":
         return not is_stale_running_analysis(proc.analysis, stale_seconds)
@@ -58,9 +62,15 @@ def count_processes_for_entities(
     for status, _pid in rows:
         if status in _PUBLIC_STATUSES:
             publicados += 1
-        elif status in _DOWNLOADED_STATUSES or status == ProcessStatus.descargando:
+        elif (
+            status in _DOWNLOADED_STATUSES
+            or status in (ProcessStatus.descargando, ProcessStatus.descartando)
+        ):
             descargados += 1
-        elif status in _ANALYZED_STATUSES or status == ProcessStatus.archivada:
+        elif (
+            status in _ANALYZED_STATUSES
+            or status in (ProcessStatus.archivada, ProcessStatus.archivando)
+        ):
             analizados += 1
     return EntityProcessCounts(publicados, descargados, analizados)
 
