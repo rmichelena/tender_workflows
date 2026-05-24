@@ -107,6 +107,7 @@ class AnalysisRunner:
         process.documentos_json = json.dumps(docs, ensure_ascii=False)
         process.status = ProcessStatus.descargada
         process.data_dir = str(proc_dir)
+        process.watch_checked_at = utcnow()
         self.session.commit()
         logger.info("Descarga completada para proceso %s → %s", process_id, proc_dir)
         return process

@@ -42,6 +42,7 @@ from ..process_storage import (
     restore_archived_process,
     resolve_restore_status,
 )
+from ..watchlist import mark_watchlist_read, watchlist_nav_badges
 from ..tenant_paths import migrate_legacy_layout, migrate_process_data_dir_refs
 from .detail_data import (
     download_filename_for_path,
@@ -174,6 +175,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     def render(request: Request, name: str, **ctx):
         ctx["request"] = request
         ctx["active_page"] = ctx.get("active_page", "")
+        db = session_factory()
+        try:
+            ctx.setdefault("nav_badges", watchlist_nav_badges(db))
+        finally:
+            db.close()
         return templates.TemplateResponse(request, name, ctx)
 
     @app.get("/", response_class=HTMLResponse)
@@ -502,12 +508,23 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             if proc.status == ProcessStatus.publicada:
                 return RedirectResponse(f"/publicaciones", status_code=303)
             raise HTTPException(404)
+        prev_cron = proc.watch_cronograma_prev_json if proc.watch_unread else None
+        prev_docs = proc.watch_documentos_prev_json if proc.watch_unread else None
+        if proc.watch_unread:
+            mark_watchlist_read(proc)
         checked_paths = None
         if proc.data_dir and proc.analysis and proc.analysis.status in ("running", "error"):
             checked_paths = load_analysis_selection(Path(proc.data_dir))
-        archivos = list_analyzable_files(proc, checked_paths=checked_paths)
-        cronograma = parse_cronograma(proc.cronograma_json)
+        archivos = list_analyzable_files(
+            proc,
+            checked_paths=checked_paths,
+            prev_documentos_json=prev_docs,
+        )
+        cronograma = parse_cronograma(
+            proc.cronograma_json, prev_cronograma_json=prev_cron
+        )
         archivos_analizando = [a.nombre for a in archivos if a.default_checked]
+        had_watch_updates = bool(prev_cron or prev_docs)
         return render(
             request,
             "descargado_detalle.html",
@@ -516,6 +533,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             archivos=archivos,
             archivos_analizando=archivos_analizando,
             cronograma=cronograma,
+            had_watch_updates=had_watch_updates,
             ProcessStatus=ProcessStatus,
         )
 
@@ -559,6 +577,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         if proc.data_dir:
             save_analysis_selection(Path(proc.data_dir), selected)
+
+        if proc.data_dir and proc.analysis and proc.analysis.status == "done":
+            from ..analysis.analysis_history import archive_analysis_before_rerun
+
+            archive_analysis_before_rerun(Path(proc.data_dir), proc.analysis)
 
         analysis = proc.analysis
         run_id = uuid.uuid4().hex
@@ -767,8 +790,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if proc is None:
             raise HTTPException(404)
-        documentos = list_downloaded_documents(proc)
-        cronograma = parse_cronograma(proc.cronograma_json)
+        prev_cron = proc.watch_cronograma_prev_json if proc.watch_unread else None
+        prev_docs = proc.watch_documentos_prev_json if proc.watch_unread else None
+        if proc.watch_unread:
+            mark_watchlist_read(proc)
+        documentos = list_downloaded_documents(
+            proc, prev_documentos_json=prev_docs
+        )
+        cronograma = parse_cronograma(
+            proc.cronograma_json, prev_cronograma_json=prev_cron
+        )
+        archivos = (
+            list_analyzable_files(proc, prev_documentos_json=prev_docs)
+            if prev_docs
+            else []
+        )
+        had_watch_updates = bool(prev_cron or prev_docs)
         free_reader_html = None
         chat_payload = {"available": False, "turns": [], "message": None}
         if proc.data_dir:
@@ -788,7 +825,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             active_page="analizados",
             process=proc,
             documentos=documentos,
+            archivos=archivos,
             cronograma=cronograma,
+            had_watch_updates=had_watch_updates,
             free_reader_html=free_reader_html,
             chat=chat_payload,
             ProcessStatus=ProcessStatus,

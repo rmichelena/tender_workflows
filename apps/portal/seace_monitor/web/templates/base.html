@@ -12,8 +12,12 @@
     <nav>
       <a href="/" class="{% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
       <a href="/publicaciones" class="{% if active_page == 'publicaciones' %}active{% endif %}">Publicaciones</a>
-      <a href="/descargados" class="{% if active_page == 'descargados' %}active{% endif %}">Descargados</a>
-      <a href="/analizados" class="{% if active_page == 'analizados' %}active{% endif %}">Analizados</a>
+      <a href="/descargados" class="{% if active_page == 'descargados' %}active{% endif %}">
+        Descargados{% if nav_badges and nav_badges.descargados %}<span class="nav-badge">{{ nav_badges.descargados }}</span>{% endif %}
+      </a>
+      <a href="/analizados" class="{% if active_page == 'analizados' %}active{% endif %}">
+        Analizados{% if nav_badges and nav_badges.analizados %}<span class="nav-badge">{{ nav_badges.analizados }}</span>{% endif %}
+      </a>
       <a href="/archivados" class="{% if active_page == 'archivados' %}active{% endif %}">Archivados</a>
       <a href="/descartados" class="{% if active_page == 'descartados' %}active{% endif %}">Descartados</a>
       <a href="/settings/entidades" class="nav-settings {% if active_page == 'settings_entidades' %}active{% endif %}">

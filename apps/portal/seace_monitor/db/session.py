@@ -35,6 +35,10 @@ _PROCESS_COLUMN_ADDITIONS = (
     ("list_hash", "VARCHAR(64)"),
     ("content_hash", "VARCHAR(64)"),
     ("data_dir", "VARCHAR(512)"),
+    ("watch_unread", "BOOLEAN DEFAULT 0"),
+    ("watch_checked_at", "DATETIME"),
+    ("watch_cronograma_prev_json", "TEXT"),
+    ("watch_documentos_prev_json", "TEXT"),
 )
 
 _ANALYSIS_COLUMN_ADDITIONS = (("run_id", "VARCHAR(36)"),)
@@ -102,6 +106,7 @@ def _ensure_sqlite_indexes(engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_processes_objeto ON processes (objeto)",
         "CREATE INDEX IF NOT EXISTS ix_processes_status_entity ON processes (status, entity_id)",
         "CREATE INDEX IF NOT EXISTS ix_processes_status_objeto ON processes (status, objeto)",
+        "CREATE INDEX IF NOT EXISTS ix_processes_watch_unread ON processes (watch_unread)",
     )
     with engine.begin() as conn:
         for stmt in statements:

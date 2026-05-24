@@ -60,6 +60,7 @@ class DocumentoDescargado:
     fecha_publicacion: str
     downloaded: bool
     filename: str | None
+    is_new: bool = False
 
 
 @dataclass
@@ -72,6 +73,7 @@ class ArchivoAnalizable:
     origen: str
     tipo_documento: str
     default_checked: bool
+    is_new: bool = False
 
 
 @dataclass
@@ -79,6 +81,54 @@ class CronogramaFila:
     etapa: str
     fecha_inicio: str
     fecha_fin: str
+    fecha_inicio_prev: str | None = None
+    fecha_fin_prev: str | None = None
+    changed: bool = False
+
+
+def _document_uuids_from_json(documentos_json: str | None) -> set[str]:
+    if not documentos_json:
+        return set()
+    try:
+        raw = json.loads(documentos_json)
+    except json.JSONDecodeError:
+        return set()
+    return {
+        str(item.get("uuid", "")).strip()
+        for item in raw
+        if isinstance(item, dict) and str(item.get("uuid", "")).strip()
+    }
+
+
+def _mark_new_documents(
+    rows: list[DocumentoDescargado], prev_documentos_json: str | None
+) -> None:
+    prev_uuids = _document_uuids_from_json(prev_documentos_json)
+    if not prev_uuids:
+        return
+    for row in rows:
+        if row.uuid and row.uuid not in prev_uuids:
+            row.is_new = True
+
+
+def _mark_new_analyzable_files(
+    rows: list[ArchivoAnalizable], prev_documentos_json: str | None
+) -> None:
+    if not prev_documentos_json:
+        return
+    try:
+        prev_docs = json.loads(prev_documentos_json)
+    except json.JSONDecodeError:
+        return
+    prev_names = {
+        str(d.get("nombre", "")).strip().lower()
+        for d in prev_docs
+        if isinstance(d, dict) and d.get("nombre")
+    }
+    for row in rows:
+        name_key = row.nombre.strip().lower()
+        if name_key and name_key not in prev_names:
+            row.is_new = True
 
 
 def format_bytes(size: int) -> str:
@@ -179,6 +229,7 @@ def list_analyzable_files(
     process: Process,
     *,
     checked_paths: set[str] | None = None,
+    prev_documentos_json: str | None = None,
 ) -> list[ArchivoAnalizable]:
     docs_dir = _documents_dir(process)
     if not docs_dir:
@@ -240,10 +291,19 @@ def list_analyzable_files(
         pass
     else:
         rows = _assign_default_selection(rows)
+
+    if prev_documentos_json:
+        _mark_new_analyzable_files(rows, prev_documentos_json)
+        if process.watch_unread:
+            for row in rows:
+                if row.is_new:
+                    row.default_checked = True
     return rows
 
 
-def list_downloaded_documents(process: Process) -> list[DocumentoDescargado]:
+def list_downloaded_documents(
+    process: Process, *, prev_documentos_json: str | None = None
+) -> list[DocumentoDescargado]:
     meta_list = json.loads(process.documentos_json or "[]")
     docs_dir = _documents_dir(process)
     on_disk = _index_downloaded_files(docs_dir) if docs_dir else {}
@@ -337,6 +397,8 @@ def list_downloaded_documents(process: Process) -> list[DocumentoDescargado]:
                 )
             )
 
+    if prev_documentos_json:
+        _mark_new_documents(rows, prev_documentos_json)
     return rows
 
 
@@ -350,22 +412,50 @@ def fechas_listado(process: Process) -> tuple[str, str]:
     return fechas.fecha_consultas, fechas.fecha_presentacion
 
 
-def parse_cronograma(cronograma_json: str | None) -> list[CronogramaFila]:
+def parse_cronograma(
+    cronograma_json: str | None,
+    *,
+    prev_cronograma_json: str | None = None,
+) -> list[CronogramaFila]:
     if not cronograma_json:
         return []
     try:
         raw = json.loads(cronograma_json)
     except json.JSONDecodeError:
         return []
+    prev_by_etapa: dict[str, dict] = {}
+    if prev_cronograma_json:
+        try:
+            for item in json.loads(prev_cronograma_json):
+                if isinstance(item, dict):
+                    key = clean_cronograma_etapa(str(item.get("etapa", "")))
+                    prev_by_etapa[key] = item
+        except json.JSONDecodeError:
+            pass
     rows: list[CronogramaFila] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
+        etapa = clean_cronograma_etapa(str(item.get("etapa", "")))
+        fecha_inicio = str(item.get("fecha_inicio", ""))
+        fecha_fin = str(item.get("fecha_fin", ""))
+        prev = prev_by_etapa.get(etapa)
+        fecha_inicio_prev = str(prev.get("fecha_inicio", "")) if prev else None
+        fecha_fin_prev = str(prev.get("fecha_fin", "")) if prev else None
+        changed = bool(
+            prev
+            and (
+                fecha_inicio_prev != fecha_inicio or fecha_fin_prev != fecha_fin
+            )
+        )
         rows.append(
             CronogramaFila(
-                etapa=clean_cronograma_etapa(str(item.get("etapa", ""))),
-                fecha_inicio=str(item.get("fecha_inicio", "")),
-                fecha_fin=str(item.get("fecha_fin", "")),
+                etapa=etapa,
+                fecha_inicio=fecha_inicio,
+                fecha_fin=fecha_fin,
+                fecha_inicio_prev=fecha_inicio_prev if changed else None,
+                fecha_fin_prev=fecha_fin_prev if changed else None,
+                changed=changed,
             )
         )
     return rows

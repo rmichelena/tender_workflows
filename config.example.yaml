@@ -5,6 +5,7 @@
 # http_proxy: http://server.maczona.com:18081
 
 poll_interval: 6h
+watchlist_refresh_interval: 3h
 anio: 2026
 database_url: sqlite:///./data/seace.db
 max_pages: 1

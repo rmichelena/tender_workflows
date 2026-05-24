@@ -21,7 +21,7 @@
   <tbody>
     {% for item in processes %}
     {% set p = item.process %}
-    <tr>
+    <tr{% if item.watch_unread %} class="row-unread"{% endif %}>
       <td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
       <td>{{ p.nomenclatura }}</td>
       <td class="status-cell">{{ status_cell(p) }}</td>

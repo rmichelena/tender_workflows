@@ -14,6 +14,7 @@ from .db.models import Entity
 from .db.session import init_db, session_factory
 from .entity_catalog import sync_entity_catalog_if_changed
 from .scanner import MultiEntityScanner
+from .watchlist import refresh_watchlist_processes
 from .worker_heartbeat import write_worker_heartbeat
 
 logger = logging.getLogger(__name__)
@@ -98,8 +99,13 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
         try:
             scanner = MultiEntityScanner(cfg, session)
             n = scanner.run_once()
+            w = refresh_watchlist_processes(cfg, session)
             session.commit()
-            logger.info("Ciclo completado: %s proceso(s) nuevo(s)", n)
+            logger.info(
+                "Ciclo completado: %s proceso(s) nuevo(s), %s watchlist actualizado(s)",
+                n,
+                w,
+            )
         except Exception:
             session.rollback()
             logger.exception("Error en ciclo de escaneo")
