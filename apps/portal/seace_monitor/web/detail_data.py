@@ -236,6 +236,8 @@ def list_analyzable_files(
     if checked_paths is not None:
         for row in rows:
             row.default_checked = row.rel_path in checked_paths
+    elif process.analysis and process.analysis.status == "running":
+        pass
     else:
         rows = _assign_default_selection(rows)
     return rows

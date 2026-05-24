@@ -9,6 +9,7 @@ from .analysis.gemini_session import (
     GeminiSession,
     GeminiTurn,
     _resolve_stored_paths,
+    clean_run_scoped_artifacts,
     load_session,
     public_chat_payload,
     save_session,
@@ -95,3 +96,20 @@ def test_contents_for_question_includes_bootstrap_and_history():
     assert contents[0].parts[0].text == "Prompt inicial"
     assert contents[-1].role == "user"
     assert contents[-1].parts[0].text == "P2"
+
+
+def test_clean_run_scoped_artifacts_keeps_selected_files(tmp_path: Path):
+    proc_dir = tmp_path / "proc"
+    workspace = proc_dir / "fast_analysis"
+    workspace.mkdir(parents=True)
+    selection = workspace / "selected_files.json"
+    selection.write_text('["a.pdf", "b.pdf"]', encoding="utf-8")
+    stale = workspace / "old_run.txt"
+    stale.write_text("x", encoding="utf-8")
+
+    clean_run_scoped_artifacts(proc_dir)
+
+    assert selection.is_file()
+    assert json.loads(selection.read_text(encoding="utf-8")) == ["a.pdf", "b.pdf"]
+    assert not stale.exists()
+

@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from .db.models import Base, Entity
-from .entity_catalog import parse_official_entities, sync_official_entities
+from .entity_catalog import _decode_catalog_bytes, parse_official_entities, sync_official_entities
 from .scan_options import (
     ScanDateMode,
     default_since_date,
@@ -22,6 +22,16 @@ SAMPLE = """RUC|NOMBRE_DE_ENTIDAD|DEPARTAMENTO|PROVINCIA|DISTRITO|CODIGO_SIAF|CO
 99999999999|ENTIDAD INACTIVA|LIMA|LIMA|LIMA|0001|0001|Inactivo|01/01/20
 11111111111|ENTIDAD NUEVA ACTIVA|LIMA|LIMA|LIMA|0002|0002|Activo|01/01/24
 """
+
+
+def test_decode_catalog_bytes_cp1252_peru():
+    raw = (
+        b"20122476309|BANCO CENTRAL DE RESERVA DEL PER\xda|LIMA|LIMA|LIMA||1926|Activo|17/07/13\r\n"
+    )
+    text = _decode_catalog_bytes(raw)
+    assert "PERÚ" in text or "PER\u00da" in text
+    rows = parse_official_entities("RUC|NOMBRE_DE_ENTIDAD|DEPARTAMENTO|PROVINCIA|DISTRITO|CODIGO_SIAF|CODCONSUCODE|ESTADO|ULTIMAACTUALIZACION\n" + text)
+    assert rows[0].nombre.endswith("PERÚ")
 
 
 def test_parse_official_entities_pipe():

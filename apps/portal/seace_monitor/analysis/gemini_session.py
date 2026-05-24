@@ -165,7 +165,7 @@ def clean_run_scoped_artifacts(proc_dir: Path) -> None:
     workspace = proc_dir / "fast_analysis"
     if not workspace.is_dir():
         return
-    keep = {SESSION_FILENAME, "gemini_orphans.jsonl"}
+    keep = {SESSION_FILENAME, "gemini_orphans.jsonl", "selected_files.json"}
     for item in workspace.iterdir():
         if item.name in keep:
             continue

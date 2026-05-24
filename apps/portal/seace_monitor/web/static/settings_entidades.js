@@ -50,7 +50,7 @@
   }
 
   function updateSummary() {
-    var text = selected.size + " seleccionada(s) de " + entities.length;
+    var text = selected.size + " seleccionadas de " + entities.length + " entidades";
     if (summaryEl) summaryEl.textContent = text;
     if (summaryFooterEl) summaryFooterEl.textContent = text;
   }

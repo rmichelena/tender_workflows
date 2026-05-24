@@ -97,13 +97,24 @@ def _field(parts: list[str], idx: dict[str, int], key: str) -> str:
     return parts[i].strip()
 
 
+def _decode_catalog_bytes(raw: bytes) -> str:
+    """Decodifica CSV OSCE (Windows-1252/Latin-1). chardet suele adivinar cp775 y corrompe Ú→┌."""
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    return raw.decode("cp1252")
+
+
 def fetch_official_entities(config: AppConfig) -> tuple[str, list[OfficialEntityRow]]:
     proxies = requests_proxies(config.http_proxy)
     r = requests.get(OFFICIAL_ENTITIES_URL, timeout=120, proxies=proxies)
     r.raise_for_status()
-    r.encoding = r.apparent_encoding or "utf-8"
-    text = r.text
-    return hashlib.sha256(text.encode("utf-8")).hexdigest(), parse_official_entities(text)
+    text = _decode_catalog_bytes(r.content)
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return digest, parse_official_entities(text)
 
 
 def sync_official_entities(

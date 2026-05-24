@@ -182,7 +182,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             s.value: db.query(Process).filter(Process.status == s).count()
             for s in ProcessStatus
         }
-        entities = db.query(Entity).count()
+        entities = db.query(Entity).filter(Entity.activa.is_(True)).count()
         recent = (
             db.query(Process)
             .options(joinedload(Process.entity))
