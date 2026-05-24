@@ -352,7 +352,8 @@ def insert_unicode_text(
     font_ref: str | None = None,
 ) -> str:
     if font_ref is None:
-        font_ref = page.insert_font(fontfile=str(unicode_font_path()))
+        font_ref = "noto-uni"
+        page.insert_font(fontname=font_ref, fontfile=str(unicode_font_path()))
     page.insert_text(point, text, fontsize=fontsize, fontname=font_ref, color=color)
     return font_ref
 
