@@ -408,111 +408,104 @@ def analyze_page_contents(pdf_path):
 
     Returns dict: {"pages": [...], "summary": {...}}
     """
-    doc = pymupdf.open(pdf_path)
-    pages = []
-    for i in range(len(doc)):
-        page = doc[i]
-        r = page.rect
-        w, h = float(r.width), float(r.height)
-        area = w * h
-
-        # Text metrics
-        text = page.get_text("text")
-        text_chars = len(text)
-        blocks = page.get_text("dict")["blocks"]
-        text_blocks = sum(1 for b in blocks if b["type"] == 0)
-        image_blocks = sum(1 for b in blocks if b["type"] == 1)
-
-        # Image metrics
-        images = page.get_images(full=True)
-        image_count = len(images)
-
-        # Vector drawing metrics
-        drawings = page.get_drawings()
-        drawing_count = len(drawings)
-        drawing_area = sum(
-            (d["rect"].width * d["rect"].height)
-            for d in drawings if d.get("rect")
-        )
-        drawing_area_ratio = round(drawing_area / area, 4) if area > 0 else 0.0
-
-        # Text density
-        text_density = round(text_chars / area, 6) if area > 0 else 0.0
-
-        # Image area coverage (approximate)
-        image_area = 0.0
-        for b in blocks:
-            if b["type"] == 1:  # image block
-                bbox = b.get("bbox", (0, 0, 0, 0))
-                image_area += (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-        image_area_ratio = round(image_area / area, 4) if area > 0 else 0.0
-
-        # Determine content_dominant
-        content_dominant = "text"
-        if drawing_count > 1000 or drawing_area_ratio > 0.3:
-            content_dominant = "vector_drawing"
-        elif image_area_ratio > 0.4 or (image_count > 3 and image_area_ratio > 0.25):
-            content_dominant = "image_heavy"
-        elif drawing_count > 100 and image_count > 2 and text_density < 0.005:
-            content_dominant = "mixed"
-
-        # Plan candidate signals
-        signals = []
-        if drawing_count > 1000:
-            signals.append("high_drawing_count")
-        if drawing_area_ratio > 0.3:
-            signals.append("high_drawing_ratio")
-        if image_area_ratio > 0.4:
-            signals.append("image_heavy")
-        if text_density < 0.002 and area > 100000:
-            signals.append("very_low_text_density")
-        if drawing_count > 5000 and image_count <= 2 and text_density < 0.005:
-            signals.append("autocad_like")
-        if image_count > 5 and text_density < 0.002:
-            signals.append("many_images_low_text")
-
-        pages.append({
-            "page": i + 1,
-            "width_pt": round(w, 2),
-            "height_pt": round(h, 2),
-            "area_pt2": round(area, 2),
-            "orientation": "landscape" if w > h else "portrait",
-            "text_char_count": text_chars,
-            "text_block_count": text_blocks,
-            "image_count": image_count,
-            "image_block_count": image_blocks,
-            "image_area_ratio": image_area_ratio,
-            "drawing_count": drawing_count,
-            "drawing_area_ratio": drawing_area_ratio,
-            "text_density_chars_per_pt2": text_density,
-            "content_dominant": content_dominant,
-            "plan_candidate_signals": signals,
-        })
-
-    # Post-process: add size-based signals against median
     import statistics
-    if pages:
-        areas = [p["area_pt2"] for p in pages]
-        median_area = statistics.median(areas)
-        for p in pages:
-            ratio = p["area_pt2"] / median_area if median_area > 0 else 1.0
-            if ratio >= 1.4:
-                p["area_ratio_vs_median"] = round(ratio, 3)
-                p["plan_candidate_signals"].append("large_page")
-            # Refresh content_dominant with size context
-            if "large_page" in p["plan_candidate_signals"]:
-                if p["content_dominant"] == "text" and p["text_density_chars_per_pt2"] < 0.01:
-                    p["content_dominant"] = "low_density_large_page"
 
-    summary = {
-        "source_pdf": pdf_path,
-        "page_count": len(pages),
-        "median_area_pt2": round(statistics.median([p["area_pt2"] for p in pages]), 2) if pages else 0,
-        "pages_with_signals": sum(1 for p in pages if p["plan_candidate_signals"]),
-        "signal_types": sorted(set(s for p in pages for s in p["plan_candidate_signals"])),
-    }
+    doc = pymupdf.open(pdf_path)
+    try:
+        pages = []
+        for i in range(len(doc)):
+            page = doc[i]
+            r = page.rect
+            w, h = float(r.width), float(r.height)
+            area = w * h
 
-    return {"pages": pages, "summary": summary}
+            text = page.get_text("text")
+            text_chars = len(text)
+            blocks = page.get_text("dict")["blocks"]
+            text_blocks = sum(1 for b in blocks if b["type"] == 0)
+            image_blocks = sum(1 for b in blocks if b["type"] == 1)
+
+            images = page.get_images(full=True)
+            image_count = len(images)
+
+            drawings = page.get_drawings()
+            drawing_count = len(drawings)
+            drawing_area = sum(
+                (d["rect"].width * d["rect"].height)
+                for d in drawings if d.get("rect")
+            )
+            drawing_area_ratio = round(drawing_area / area, 4) if area > 0 else 0.0
+            text_density = round(text_chars / area, 6) if area > 0 else 0.0
+
+            image_area = 0.0
+            for b in blocks:
+                if b["type"] == 1:
+                    bbox = b.get("bbox", (0, 0, 0, 0))
+                    image_area += (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+            image_area_ratio = round(image_area / area, 4) if area > 0 else 0.0
+
+            content_dominant = "text"
+            if drawing_count > 1000 or drawing_area_ratio > 0.3:
+                content_dominant = "vector_drawing"
+            elif image_area_ratio > 0.4 or (image_count > 3 and image_area_ratio > 0.25):
+                content_dominant = "image_heavy"
+            elif drawing_count > 100 and image_count > 2 and text_density < 0.005:
+                content_dominant = "mixed"
+
+            signals = []
+            if drawing_count > 1000:
+                signals.append("high_drawing_count")
+            if drawing_area_ratio > 0.3:
+                signals.append("high_drawing_ratio")
+            if image_area_ratio > 0.4:
+                signals.append("image_heavy")
+            if text_density < 0.002 and area > 100000:
+                signals.append("very_low_text_density")
+            if drawing_count > 5000 and image_count <= 2 and text_density < 0.005:
+                signals.append("autocad_like")
+            if image_count > 5 and text_density < 0.002:
+                signals.append("many_images_low_text")
+
+            pages.append({
+                "page": i + 1,
+                "width_pt": round(w, 2),
+                "height_pt": round(h, 2),
+                "area_pt2": round(area, 2),
+                "orientation": "landscape" if w > h else "portrait",
+                "text_char_count": text_chars,
+                "text_block_count": text_blocks,
+                "image_count": image_count,
+                "image_block_count": image_blocks,
+                "image_area_ratio": image_area_ratio,
+                "drawing_count": drawing_count,
+                "drawing_area_ratio": drawing_area_ratio,
+                "text_density_chars_per_pt2": text_density,
+                "content_dominant": content_dominant,
+                "plan_candidate_signals": signals,
+            })
+
+        if pages:
+            areas = [p["area_pt2"] for p in pages]
+            median_area = statistics.median(areas)
+            for p in pages:
+                ratio = p["area_pt2"] / median_area if median_area > 0 else 1.0
+                if ratio >= 1.4:
+                    p["area_ratio_vs_median"] = round(ratio, 3)
+                    p["plan_candidate_signals"].append("large_page")
+                if "large_page" in p["plan_candidate_signals"]:
+                    if p["content_dominant"] == "text" and p["text_density_chars_per_pt2"] < 0.01:
+                        p["content_dominant"] = "low_density_large_page"
+
+        summary = {
+            "source_pdf": pdf_path,
+            "page_count": len(pages),
+            "median_area_pt2": round(statistics.median([p["area_pt2"] for p in pages]), 2) if pages else 0,
+            "pages_with_signals": sum(1 for p in pages if p["plan_candidate_signals"]),
+            "signal_types": sorted(set(s for p in pages for s in p["plan_candidate_signals"])),
+        }
+        return {"pages": pages, "summary": summary}
+    finally:
+        doc.close()
 
 
 def analyze_pdf_images(pdf_path, min_freq=5, tiny_max_px=20,

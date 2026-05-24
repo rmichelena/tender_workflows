@@ -31,6 +31,16 @@ from typing import Any
 import fitz  # PyMuPDF
 
 POINTS_PER_INCH = 72
+SCRIPTS_DIR = Path(__file__).resolve().parent
+BUNDLED_UNICODE_FONT = SCRIPTS_DIR / "fonts" / "NotoSans-Regular.ttf"
+# Parsed bbox area and resolved redaction area must stay below these page fractions.
+MAX_BBOX_AREA_RATIO = 0.70
+MAX_RESOLVED_AREA_RATIO = 0.75
+# If no rendered image block matches the locator, allow only smaller regions.
+MAX_UNMATCHED_AREA_RATIO = 0.40
+MIN_BBOX_DIMENSION = 0.01
+VALID_ACTIONS = frozenset({"replace_page", "replace_images", "leave_for_ocr"})
+_UNICODE_FONT_PATH: Path | None = None
 
 
 def slugify_stem(path: Path) -> str:
@@ -98,162 +108,258 @@ def audit_pdf(input_pdf: Path, output_dir: Path, stem: str, area_ratio: float, m
             existing_pa = json.loads(auto.read_text())
 
     doc = fitz.open(input_pdf)
-    rows = page_records(doc)
-    dom = dominant_size(rows)
-    median_area = statistics.median(r["area_pt2"] for r in rows)
+    try:
+        rows = page_records(doc)
+        dom = dominant_size(rows)
+        median_area = statistics.median(r["area_pt2"] for r in rows)
 
-    candidates = []
-    pa_pages = {}
-    if existing_pa:
-        pa_pages = {p["page"]: p for p in existing_pa.get("pages", [])}
+        candidates = []
+        pa_pages = {}
+        if existing_pa:
+            pa_pages = {p["page"]: p for p in existing_pa.get("pages", [])}
 
-    # Anti-scan filter: if too many consecutive pages are image_heavy, it's a scanned doc.
-    # Also: if >70% of all pages are image_heavy, disable image_heavy detection entirely.
-    image_heavy_pages = set()
-    for r in rows:
-        pa = pa_pages.get(r["page"])
-        # Treat as image-heavy for scan filtering if it crosses the configured area threshold,
-        # not only if pdf_image_audit emitted the image_heavy signal.
-        if pa and pa.get("image_area_ratio", 0) >= image_area_ratio_threshold:
-            image_heavy_pages.add(r["page"])
+        # Anti-scan filter: if too many consecutive pages are image_heavy, it's a scanned doc.
+        # Also: if >70% of all pages are image_heavy, disable image_heavy detection entirely.
+        image_heavy_pages = set()
+        for r in rows:
+            pa = pa_pages.get(r["page"])
+            # Treat as image-heavy for scan filtering if it crosses the configured area threshold,
+            # not only if pdf_image_audit emitted the image_heavy signal.
+            if pa and pa.get("image_area_ratio", 0) >= image_area_ratio_threshold:
+                image_heavy_pages.add(r["page"])
 
-    # Check if document is predominantly scanned
-    total_pages = len(rows)
-    image_heavy_doc_pct = len(image_heavy_pages) / total_pages if total_pages else 0
-    disable_image_heavy = image_heavy_doc_pct > image_heavy_doc_pct_disable
+        # Check if document is predominantly scanned
+        total_pages = len(rows)
+        image_heavy_doc_pct = len(image_heavy_pages) / total_pages if total_pages else 0
+        disable_image_heavy = image_heavy_doc_pct > image_heavy_doc_pct_disable
 
-    # Find runs of consecutive image_heavy pages > threshold
-    max_consecutive = max_consecutive_image_heavy
-    consecutive_image_heavy_runs = set()
-    if image_heavy_pages and not disable_image_heavy:
-        sorted_ih = sorted(image_heavy_pages)
-        run_start = sorted_ih[0]
-        run_prev = sorted_ih[0]
-        for p in sorted_ih[1:]:
-            if p == run_prev + 1:
-                run_prev = p
-            else:
-                if (run_prev - run_start + 1) > max_consecutive:
-                    for pp in range(run_start, run_prev + 1):
-                        consecutive_image_heavy_runs.add(pp)
-                run_start = run_prev = p
-        if (run_prev - run_start + 1) > max_consecutive:
-            for pp in range(run_start, run_prev + 1):
-                consecutive_image_heavy_runs.add(pp)
-
-    for r in rows:
-        ratio = r["area_pt2"] / median_area if median_area else 1
-        reasons = []
-
-        # Size-based detection (original)
-        if ratio >= area_ratio:
-            reasons.append(f"area_ratio>={area_ratio:g}")
-        if r["width_pt"] >= min_width_pt:
-            reasons.append(f"width_pt>={min_width_pt:g}")
-        if r["height_pt"] >= min_height_pt:
-            reasons.append(f"height_pt>={min_height_pt:g}")
-
-        # Content-based detection from page analysis
-        pa = pa_pages.get(r["page"])
-        if pa:
-            signals = pa.get("plan_candidate_signals", [])
-            # Strong signals that indicate plan/diagram regardless of page size
-            if "high_drawing_count" in signals and pa.get("drawing_count", 0) > 5000:
-                if "high_drawing_count" not in str(reasons):
-                    reasons.append(f"drawing_count={pa['drawing_count']}")
-            if "high_drawing_ratio" in signals and pa.get("drawing_area_ratio", 0) > 0.3:
-                if "high_drawing_ratio" not in str(reasons):
-                    reasons.append(f"drawing_area_ratio={pa['drawing_area_ratio']}")
-            if "autocad_like" in signals:
-                if "autocad_like" not in str(reasons):
-                    reasons.append("autocad_like")
-            # Image_heavy detection with anti-scan and width filters
-            if pa.get("image_area_ratio", 0) >= image_area_ratio_threshold:
-                # Skip if document is predominantly scanned
-                if disable_image_heavy:
-                    pass  # skip image_heavy entirely for scanned docs
-                # Skip if in a long consecutive run
-                elif r["page"] in consecutive_image_heavy_runs:
-                    pass  # skip, likely scanned pages
-                # Skip if too many images (probably scanned page with segments)
-                elif pa.get("image_count", 0) > max_images_per_candidate_page:
-                    pass  # skip, too many images
+        # Find runs of consecutive image_heavy pages > threshold
+        max_consecutive = max_consecutive_image_heavy
+        consecutive_image_heavy_runs = set()
+        if image_heavy_pages and not disable_image_heavy:
+            sorted_ih = sorted(image_heavy_pages)
+            run_start = sorted_ih[0]
+            run_prev = sorted_ih[0]
+            for p in sorted_ih[1:]:
+                if p == run_prev + 1:
+                    run_prev = p
                 else:
-                    # Width filter: each image should be reasonably wide (not marginal)
-                    # We check if the largest image block covers >15% of page width
-                    img_blocks = []
-                    try:
-                        p_doc = doc[r["page"] - 1]
-                        blocks_data = p_doc.get_text("dict")["blocks"]
-                        for b in blocks_data:
-                            if b["type"] == 1:
-                                bbox = b.get("bbox", (0, 0, 0, 0))
-                                img_w = bbox[2] - bbox[0]
-                                page_w = r["width_pt"]
-                                if page_w > 0 and img_w / page_w >= image_min_width_pct:
-                                    img_blocks.append(bbox)
-                    except Exception:
-                        img_blocks = []
-                    if img_blocks:
-                        if "image_heavy" not in str(reasons):
-                            reasons.append(f"image_area_ratio={pa['image_area_ratio']}")
-                    # If no image passes width filter, skip
-                    # (marginal decoration not caught by cleaner)
+                    if (run_prev - run_start + 1) > max_consecutive:
+                        for pp in range(run_start, run_prev + 1):
+                            consecutive_image_heavy_runs.add(pp)
+                    run_start = run_prev = p
+            if (run_prev - run_start + 1) > max_consecutive:
+                for pp in range(run_start, run_prev + 1):
+                    consecutive_image_heavy_runs.add(pp)
 
-        if reasons:
-            item = dict(r)
-            item["area_ratio_vs_median"] = round(ratio, 3)
-            item["candidate_reasons"] = reasons
-            item["rendered_image"] = str(render_dir / f"page_{r['page']:04d}.png")
-            # Include content metrics from page analysis if available
+        for r in rows:
+            ratio = r["area_pt2"] / median_area if median_area else 1
+            reasons = []
+
+            # Size-based detection (original)
+            if ratio >= area_ratio:
+                reasons.append(f"area_ratio>={area_ratio:g}")
+            if r["width_pt"] >= min_width_pt:
+                reasons.append(f"width_pt>={min_width_pt:g}")
+            if r["height_pt"] >= min_height_pt:
+                reasons.append(f"height_pt>={min_height_pt:g}")
+
+            # Content-based detection from page analysis
+            pa = pa_pages.get(r["page"])
             if pa:
-                for key in ["text_char_count", "text_block_count", "image_count", "image_block_count",
-                            "image_area_ratio", "drawing_count", "drawing_area_ratio",
-                            "text_density_chars_per_pt2", "content_dominant", "plan_candidate_signals"]:
-                    if key in pa:
-                        item[f"pa_{key}"] = pa[key]
-            candidates.append(item)
+                signals = pa.get("plan_candidate_signals", [])
+                # Strong signals that indicate plan/diagram regardless of page size
+                if "high_drawing_count" in signals and pa.get("drawing_count", 0) > 5000:
+                    if "high_drawing_count" not in str(reasons):
+                        reasons.append(f"drawing_count={pa['drawing_count']}")
+                if "high_drawing_ratio" in signals and pa.get("drawing_area_ratio", 0) > 0.3:
+                    if "high_drawing_ratio" not in str(reasons):
+                        reasons.append(f"drawing_area_ratio={pa['drawing_area_ratio']}")
+                if "autocad_like" in signals:
+                    if "autocad_like" not in str(reasons):
+                        reasons.append("autocad_like")
+                # Image_heavy detection with anti-scan and width filters
+                if pa.get("image_area_ratio", 0) >= image_area_ratio_threshold:
+                    # Skip if document is predominantly scanned
+                    if disable_image_heavy:
+                        pass  # skip image_heavy entirely for scanned docs
+                    # Skip if in a long consecutive run
+                    elif r["page"] in consecutive_image_heavy_runs:
+                        pass  # skip, likely scanned pages
+                    # Skip if too many images (probably scanned page with segments)
+                    elif pa.get("image_count", 0) > max_images_per_candidate_page:
+                        pass  # skip, too many images
+                    else:
+                        # Width filter: each image should be reasonably wide (not marginal)
+                        # We check if the largest image block covers >15% of page width
+                        img_blocks = []
+                        try:
+                            p_doc = doc[r["page"] - 1]
+                            blocks_data = p_doc.get_text("dict")["blocks"]
+                            for b in blocks_data:
+                                if b["type"] == 1:
+                                    bbox = b.get("bbox", (0, 0, 0, 0))
+                                    img_w = bbox[2] - bbox[0]
+                                    page_w = r["width_pt"]
+                                    if page_w > 0 and img_w / page_w >= image_min_width_pct:
+                                        img_blocks.append(bbox)
+                        except Exception:
+                            img_blocks = []
+                        if img_blocks:
+                            if "image_heavy" not in str(reasons):
+                                reasons.append(f"image_area_ratio={pa['image_area_ratio']}")
+                        # If no image passes width filter, skip
+                        # (marginal decoration not caught by cleaner)
 
-    matrix = fitz.Matrix(render_dpi / POINTS_PER_INCH, render_dpi / POINTS_PER_INCH)
-    if candidates:
-        render_dir.mkdir(parents=True, exist_ok=True)
-    for c in candidates:
-        page = doc[c["page"] - 1]
-        pix = page.get_pixmap(matrix=matrix, alpha=False)
-        pix.save(c["rendered_image"])
+            if reasons:
+                item = dict(r)
+                item["area_ratio_vs_median"] = round(ratio, 3)
+                item["candidate_reasons"] = reasons
+                item["rendered_image"] = str(render_dir / f"page_{r['page']:04d}.png")
+                # Include content metrics from page analysis if available
+                if pa:
+                    for key in ["text_char_count", "text_block_count", "image_count", "image_block_count",
+                                "image_area_ratio", "drawing_count", "drawing_area_ratio",
+                                "text_density_chars_per_pt2", "content_dominant", "plan_candidate_signals"]:
+                        if key in pa:
+                            item[f"pa_{key}"] = pa[key]
+                candidates.append(item)
 
-    audit = {
-        "input_pdf": str(input_pdf),
-        "page_count": len(rows),
-        "dominant_page_size": dom,
-        "median_area_pt2": round(median_area, 2),
-        "candidate_detection": {
-            "area_ratio_threshold": area_ratio,
-            "min_width_pt": min_width_pt,
-            "min_height_pt": min_height_pt,
-            "render_dpi": render_dpi,
-            "image_area_ratio_threshold": image_area_ratio_threshold,
-            "image_min_width_pct": image_min_width_pct,
-            "max_images_per_candidate_page": max_images_per_candidate_page,
-            "max_consecutive_image_heavy": max_consecutive_image_heavy,
-            "image_heavy_doc_pct_disable": image_heavy_doc_pct_disable,
-            "image_heavy_doc_pct": round(image_heavy_doc_pct, 3),
-            "disable_image_heavy": disable_image_heavy,
-        },
-        "candidate_ranges": contiguous_ranges([c["page"] for c in candidates]),
-        "pages": rows,
-        "candidates": candidates,
-    }
-    out = output_dir / f"{stem}_page_size_audit.json"
-    out.write_text(json.dumps(audit, indent=2, ensure_ascii=False) + "\n")
-    return audit
+        matrix = fitz.Matrix(render_dpi / POINTS_PER_INCH, render_dpi / POINTS_PER_INCH)
+        if candidates:
+            render_dir.mkdir(parents=True, exist_ok=True)
+        for c in candidates:
+            page = doc[c["page"] - 1]
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            pix.save(c["rendered_image"])
+
+        audit = {
+            "input_pdf": str(input_pdf),
+            "page_count": len(rows),
+            "dominant_page_size": dom,
+            "median_area_pt2": round(median_area, 2),
+            "candidate_detection": {
+                "area_ratio_threshold": area_ratio,
+                "min_width_pt": min_width_pt,
+                "min_height_pt": min_height_pt,
+                "render_dpi": render_dpi,
+                "image_area_ratio_threshold": image_area_ratio_threshold,
+                "image_min_width_pct": image_min_width_pct,
+                "max_images_per_candidate_page": max_images_per_candidate_page,
+                "max_consecutive_image_heavy": max_consecutive_image_heavy,
+                "image_heavy_doc_pct_disable": image_heavy_doc_pct_disable,
+                "image_heavy_doc_pct": round(image_heavy_doc_pct, 3),
+                "disable_image_heavy": disable_image_heavy,
+            },
+            "candidate_ranges": contiguous_ranges([c["page"] for c in candidates]),
+            "pages": rows,
+            "candidates": candidates,
+        }
+        out = output_dir / f"{stem}_page_size_audit.json"
+        out.write_text(json.dumps(audit, indent=2, ensure_ascii=False) + "\n")
+        return audit
+    finally:
+        doc.close()
 
 
 def load_analysis(path: Path) -> dict[str, Any]:
-    data = json.loads(path.read_text())
-    if "pages" not in data or not isinstance(data["pages"], list):
-        raise SystemExit("analysis JSON must contain pages[]")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise SystemExit("analysis JSON must be an object")
+    pages = data.get("pages")
+    if not isinstance(pages, list) or not pages:
+        raise SystemExit("analysis JSON must contain non-empty pages[]")
+
+    seen_pages: set[int] = set()
+    for i, page in enumerate(pages):
+        if not isinstance(page, dict):
+            raise SystemExit(f"pages[{i}] must be an object")
+        page_num = page.get("page")
+        if not isinstance(page_num, int) or page_num < 1:
+            raise SystemExit(f"pages[{i}].page must be a positive integer")
+        if page_num in seen_pages:
+            raise SystemExit(f"duplicate page number in analysis JSON: {page_num}")
+        seen_pages.add(page_num)
+        action = page.get("action")
+        if action not in VALID_ACTIONS:
+            raise SystemExit(f"pages[{i}].action invalid: {action!r}")
+        if action == "replace_images":
+            replacements = page.get("image_replacements")
+            if not isinstance(replacements, list) or not replacements:
+                raise SystemExit(
+                    f"pages[{i}] action=replace_images requires non-empty image_replacements[]"
+                )
+            for j, repl in enumerate(replacements):
+                if not isinstance(repl, dict):
+                    raise SystemExit(f"pages[{i}].image_replacements[{j}] must be an object")
+                if "bbox_pct" not in repl:
+                    raise SystemExit(f"pages[{i}].image_replacements[{j}] missing bbox_pct")
     return data
+
+
+def parse_bbox_pct(raw: Any) -> list[float] | None:
+    """Return normalized [x0, y0, x1, y1] or None if unusable for replacement."""
+    if not isinstance(raw, (list, tuple)) or len(raw) != 4:
+        return None
+    try:
+        x0, y0, x1, y1 = (float(v) for v in raw)
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) and 0.0 <= v <= 1.0 for v in (x0, y0, x1, y1)):
+        return None
+    if x1 <= x0 or y1 <= y0:
+        return None
+    if (x1 - x0) < MIN_BBOX_DIMENSION or (y1 - y0) < MIN_BBOX_DIMENSION:
+        return None
+    if (x1 - x0) * (y1 - y0) > MAX_BBOX_AREA_RATIO:
+        return None
+    return [x0, y0, x1, y1]
+
+
+def rect_area_ratio(rect: fitz.Rect, page_rect: fitz.Rect) -> float:
+    return rect.get_area() / max(1.0, page_rect.get_area())
+
+
+def unicode_font_path() -> Path:
+    global _UNICODE_FONT_PATH
+    if _UNICODE_FONT_PATH is not None:
+        return _UNICODE_FONT_PATH
+    candidates = [
+        BUNDLED_UNICODE_FONT,
+        Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+        Path("/Library/Fonts/Arial Unicode.ttf"),
+        Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            _UNICODE_FONT_PATH = candidate
+            return candidate
+    raise FileNotFoundError(
+        "No Unicode TTF found for plan-page replacement text. "
+        f"Expected bundled font at {BUNDLED_UNICODE_FONT}"
+    )
+
+
+def insert_unicode_text(
+    page: fitz.Page,
+    point: fitz.Point | tuple[float, float],
+    text: str,
+    *,
+    fontsize: float,
+    color: tuple[float, float, float] = (0, 0, 0),
+    font_ref: str | None = None,
+) -> str:
+    if font_ref is None:
+        font_ref = page.insert_font(fontfile=str(unicode_font_path()))
+    page.insert_text(point, text, fontsize=fontsize, fontname=font_ref, color=color)
+    return font_ref
+
+
+def normalize_zeros_for_ocr(text: str) -> str:
+    # Noto Sans: 0+U+FE00 → cero con punto central, más distinguible de O en OCR. Quitar si confunde downstream.
+    return text.replace("0", "0\uFE00")
 
 
 def page_summary_text(page_analysis: dict[str, Any], source_page: int, extracted_pdf_name: str) -> str:
@@ -294,13 +400,14 @@ def page_summary_text(page_analysis: dict[str, Any], source_page: int, extracted
 
 
 def insert_wrapped_text(page: fitz.Page, text: str, margin: float = 54) -> None:
+    text = normalize_zeros_for_ocr(text)  # ver normalize_zeros_for_ocr; solo render OCR
     rect = page.rect
     y = margin
-    # Title first line larger
     chunks = text.split("\n")
     font_size = 10.5
     line_h = font_size * 1.35
     max_chars = max(60, int((rect.width - 2 * margin) / (font_size * 0.48)))
+    font_ref: str | None = None
     for idx, raw in enumerate(chunks):
         if raw == "":
             y += line_h * 0.6
@@ -308,12 +415,18 @@ def insert_wrapped_text(page: fitz.Page, text: str, margin: float = 54) -> None:
         wrapped = textwrap.wrap(raw, width=max_chars, replace_whitespace=False) or [raw]
         for line in wrapped:
             if y > rect.height - margin:
-                page.insert_text((margin, y), "[continúa en metadata JSON]", fontsize=font_size, fontname="helv")
+                font_ref = insert_unicode_text(
+                    page, (margin, y), "[continúa en metadata JSON]", fontsize=font_size, font_ref=font_ref
+                )
                 return
             if idx == 0:
-                page.insert_text((margin, y), line, fontsize=14, fontname="helv", color=(0, 0, 0))
+                font_ref = insert_unicode_text(
+                    page, (margin, y), line, fontsize=14, font_ref=font_ref
+                )
             else:
-                page.insert_text((margin, y), line, fontsize=font_size, fontname="helv", color=(0, 0, 0))
+                font_ref = insert_unicode_text(
+                    page, (margin, y), line, fontsize=font_size, font_ref=font_ref
+                )
             y += line_h if idx else 18
 
 
@@ -342,15 +455,10 @@ def image_block_rects(page: fitz.Page) -> list[fitz.Rect]:
     return rects
 
 
-def resolve_rendered_image_rect(page: fitz.Page, candidate: fitz.Rect) -> fitz.Rect:
-    """Resolve an approximate visual bbox to the actual rendered image rect.
+def resolve_rendered_image_rect(page: fitz.Page, candidate: fitz.Rect) -> tuple[fitz.Rect, bool]:
+    """Resolve locator bbox to rendered image rect.
 
-    The analysis bbox is only a locator. For redaction we must use the final
-    rendered image position from the PDF page, otherwise we can erase surrounding
-    text. PyMuPDF image blocks already include page transforms / masks in page
-    coordinates, so we select the intersecting rendered image blocks and return
-    their union. If no image block matches, fall back to the candidate without
-    adding any margin.
+    Returns (rect, matched_image_blocks).
     """
     selected: list[fitz.Rect] = []
     for img_rect in image_block_rects(page):
@@ -359,25 +467,45 @@ def resolve_rendered_image_rect(page: fitz.Page, candidate: fitz.Rect) -> fitz.R
             continue
         img_area = max(1.0, img_rect.width * img_rect.height)
         cand_area = max(1.0, candidate.width * candidate.height)
-        # Strong overlap with the rendered image, or image center inside the
-        # candidate. The center rule catches small tiles/fragments wholly inside
-        # a larger region; the overlap rule handles near-exact bboxes.
         center = fitz.Point((img_rect.x0 + img_rect.x1) / 2, (img_rect.y0 + img_rect.y1) / 2)
         if (inter.get_area() / img_area) >= 0.35 or (inter.get_area() / cand_area) >= 0.35 or candidate.contains(center):
             selected.append(img_rect)
 
     if not selected:
         resolved = fitz.Rect(candidate)
+        matched = False
     else:
         resolved = fitz.Rect(selected[0])
         for img_rect in selected[1:]:
             resolved |= img_rect
+        matched = True
 
     resolved.x0 = max(0, resolved.x0)
     resolved.y0 = max(0, resolved.y0)
     resolved.x1 = min(page.rect.width, resolved.x1)
     resolved.y1 = min(page.rect.height, resolved.y1)
-    return resolved
+    return resolved, matched
+
+
+def plan_replacement_rect(page: fitz.Page, bbox_pct: Any) -> tuple[fitz.Rect | None, str | None]:
+    """Validate bbox_pct and resolve a safe replacement rect, or skip with reason."""
+    parsed = parse_bbox_pct(bbox_pct)
+    if parsed is None:
+        return None, "invalid_bbox_pct"
+    page_rect = page.rect
+    candidate = fitz.Rect(
+        parsed[0] * page_rect.width,
+        parsed[1] * page_rect.height,
+        parsed[2] * page_rect.width,
+        parsed[3] * page_rect.height,
+    )
+    resolved, matched_image = resolve_rendered_image_rect(page, candidate)
+    area_ratio = rect_area_ratio(resolved, page_rect)
+    if area_ratio > MAX_RESOLVED_AREA_RATIO:
+        return None, f"resolved_area_ratio={area_ratio:.3f}"
+    if not matched_image and area_ratio > MAX_UNMATCHED_AREA_RATIO:
+        return None, f"unmatched_image_area_ratio={area_ratio:.3f}"
+    return resolved, None
 
 
 
@@ -391,182 +519,198 @@ def make_replacement_image_stream(width_pt: float, height_pt: float, text: str, 
     """
     width_pt = max(72.0, float(width_pt))
     height_pt = max(36.0, float(height_pt))
+    text = normalize_zeros_for_ocr(text)  # ver normalize_zeros_for_ocr; solo render OCR
     tmp = fitz.open()
-    page = tmp.new_page(width=width_pt, height=height_pt)
-    page.draw_rect(page.rect, color=(0.55, 0.55, 0.55), fill=(0.85, 0.85, 0.85), width=1)
+    try:
+        page = tmp.new_page(width=width_pt, height=height_pt)
+        page.draw_rect(page.rect, color=(0.55, 0.55, 0.55), fill=(0.85, 0.85, 0.85), width=1)
 
-    margin = max(6.0, min(width_pt, height_pt) * 0.035)
-    fontsize = max(5.5, min(10.0, height_pt / 18.0))
-    line_h = fontsize * 1.28
-    max_chars = max(24, int((width_pt - 2 * margin) / (fontsize * 0.48)))
-    lines: list[str] = []
-    for raw in text.split("\n"):
-        wrapped = textwrap.wrap(raw, width=max_chars, replace_whitespace=False) or [raw]
-        lines.extend(wrapped)
-        lines.append("")
-    if lines and lines[-1] == "":
-        lines.pop()
+        margin = max(6.0, min(width_pt, height_pt) * 0.035)
+        fontsize = max(5.5, min(10.0, height_pt / 18.0))
+        line_h = fontsize * 1.28
+        max_chars = max(24, int((width_pt - 2 * margin) / (fontsize * 0.48)))
+        lines: list[str] = []
+        for raw in text.split("\n"):
+            wrapped = textwrap.wrap(raw, width=max_chars, replace_whitespace=False) or [raw]
+            lines.extend(wrapped)
+            lines.append("")
+        if lines and lines[-1] == "":
+            lines.pop()
 
-    max_lines = max(1, int((height_pt - 2 * margin) / line_h))
-    if len(lines) > max_lines:
-        lines = lines[:max_lines]
-        lines[-1] = "[continúa en JSON de análisis]"
+        max_lines = max(1, int((height_pt - 2 * margin) / line_h))
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+            lines[-1] = "[continúa en JSON de análisis]"
 
-    text_height = max(0.0, (len(lines) - 1) * line_h + fontsize)
-    y = max(margin + fontsize, (height_pt - text_height) / 2 + fontsize)
-    for line in lines:
-        page.insert_text(fitz.Point(margin, y), line, fontsize=fontsize, fontname="helv", color=(0, 0, 0))
-        y += line_h
-    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-    data = pix.tobytes("png")
-    tmp.close()
-    return data
+        text_height = max(0.0, (len(lines) - 1) * line_h + fontsize)
+        y = max(margin + fontsize, (height_pt - text_height) / 2 + fontsize)
+        font_ref: str | None = None
+        for line in lines:
+            font_ref = insert_unicode_text(
+                page,
+                fitz.Point(margin, y),
+                line,
+                fontsize=fontsize,
+                font_ref=font_ref,
+            )
+            y += line_h
+        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+        return pix.tobytes("png")
+    finally:
+        tmp.close()
 
-def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str, analysis_json: Path) -> dict[str, str]:
+def build_outputs(input_pdf: Path, output_dir: Path, preocr_dir: Path, stem: str, analysis_json: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     preocr_dir.mkdir(parents=True, exist_ok=True)
     analysis = load_analysis(analysis_json)
     doc = fitz.open(input_pdf)
+    extracted: fitz.Document | None = None
+    pre: fitz.Document | None = None
+    try:
+        pages_by_num = {int(p["page"]): p for p in analysis["pages"]}
+        replace_page_set = {n for n, p in pages_by_num.items() if p.get("action") == "replace_page"}
+        replace_images_set = {n for n, p in pages_by_num.items() if p.get("action") == "replace_images"}
 
-    # Build lookup by page number
-    pages_by_num = {int(p["page"]): p for p in analysis["pages"]}
-    # replace_page: entire page replaced (old exclude_from_ocr)
-    replace_page_set = {n for n, p in pages_by_num.items() if p.get("action") == "replace_page"}
-    # replace_images: only regions replaced
-    replace_images_set = {n for n, p in pages_by_num.items() if p.get("action") == "replace_images"}
+        extracted_pdf = output_dir / f"planos_extraidos_{stem}.pdf"
+        preocr_pdf = preocr_dir / f"{stem}_preocr.pdf"
+        md_path = output_dir / f"planos_extraidos_{stem}.md"
 
-    extracted_pdf = output_dir / f"planos_extraidos_{stem}.pdf"
-    preocr_pdf = preocr_dir / f"{stem}_preocr.pdf"
-    md_path = output_dir / f"planos_extraidos_{stem}.md"
+        affected_pages = sorted(replace_page_set | replace_images_set)
+        if not affected_pages:
+            return {
+                "extracted_pdf": None,
+                "preocr_pdf": None,
+                "md": None,
+                "extracted_pages": [],
+                "message": "No confirmed plan/diagram/image replacements; no extraction outputs generated.",
+            }
 
-    affected_pages = sorted(replace_page_set | replace_images_set)
-    if not affected_pages:
-        # Nothing was actually extracted/replaced. Do not create placeholder
-        # planos_extraidos PDFs/MDs or identical pre-OCR PDFs; downstream OCR
-        # should consume the clean PDF directly when no confirmed visual
-        # replacement exists.
-        return {
-            "extracted_pdf": None,
-            "preocr_pdf": None,
-            "md": None,
-            "extracted_pages": [],
-            "message": "No confirmed plan/diagram/image replacements; no extraction outputs generated.",
-        }
+        extracted = fitz.open()
+        for page_num in affected_pages:
+            src_page = doc[page_num - 1]
+            new_page = extracted.new_page(width=src_page.rect.width, height=src_page.rect.height)
+            new_page.show_pdf_page(new_page.rect, doc, page_num - 1)
+            add_red_page_label(new_page, page_num)
+        extracted.save(extracted_pdf, garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True)
 
-    # Extract affected pages in original document order, with source-page stamp.
-    extracted = fitz.open()
-    for page_num in affected_pages:
-        # Render the original page into a fresh page. This normalizes rotated CAD pages
-        # so the corner label is reliably visible/extractable.
-        src_page = doc[page_num - 1]
-        new_page = extracted.new_page(width=src_page.rect.width, height=src_page.rect.height)
-        new_page.show_pdf_page(new_page.rect, doc, page_num - 1)
-        add_red_page_label(new_page, page_num)
-    extracted.save(extracted_pdf, garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True)
+        dom = dominant_size(page_records(doc))
+        repl_w, repl_h = float(dom["width_pt"]), float(dom["height_pt"])
+        pre = fitz.open()
+        extracted_pdf_name = extracted_pdf.name
+        skipped_replacements: list[dict[str, Any]] = []
 
-    # Build pre-OCR PDF
-    dom = dominant_size(page_records(doc))
-    repl_w, repl_h = float(dom["width_pt"]), float(dom["height_pt"])
-    pre = fitz.open()
-    extracted_pdf_name = extracted_pdf.name
+        for idx in range(1, doc.page_count + 1):
+            if idx in replace_page_set:
+                page = pre.new_page(width=repl_w, height=repl_h)
+                insert_wrapped_text(page, page_summary_text(pages_by_num[idx], idx, extracted_pdf_name))
+            elif idx in replace_images_set:
+                pre.insert_pdf(doc, from_page=idx - 1, to_page=idx - 1)
+                pre_page = pre[pre.page_count - 1]
+                pa = pages_by_num[idx]
+                replacement_jobs = []
+                for repl in pa.get("image_replacements", []):
+                    rect, skip_reason = plan_replacement_rect(pre_page, repl.get("bbox_pct"))
+                    if rect is None:
+                        skipped_replacements.append({
+                            "page": idx,
+                            "region_id": repl.get("region_id"),
+                            "bbox_pct": repl.get("bbox_pct"),
+                            "reason": skip_reason,
+                        })
+                        continue
 
-    for idx in range(1, doc.page_count + 1):
-        if idx in replace_page_set:
-            # Entire page replaced with text summary
-            page = pre.new_page(width=repl_w, height=repl_h)
-            insert_wrapped_text(page, page_summary_text(pages_by_num[idx], idx, extracted_pdf_name))
-        elif idx in replace_images_set:
-            # Copy original page, then white-out replaced regions and insert text
-            pre.insert_pdf(doc, from_page=idx - 1, to_page=idx - 1)
-            pre_page = pre[pre.page_count - 1]
-            pa = pages_by_num[idx]
-            replacement_jobs = []
-            for repl in pa.get("image_replacements", []):
-                bbox_pct = repl.get("bbox_pct", [0, 0, 1, 1])
-                # Convert pct locator to page coordinates without margin. Then resolve
-                # to the actual rendered image rect before redaction/replacement.
-                x0 = max(0, bbox_pct[0]) * pre_page.rect.width
-                y0 = max(0, bbox_pct[1]) * pre_page.rect.height
-                x1 = min(1, bbox_pct[2]) * pre_page.rect.width
-                y1 = min(1, bbox_pct[3]) * pre_page.rect.height
-                candidate_rect = fitz.Rect(x0, y0, x1, y1)
-                rect = resolve_rendered_image_rect(pre_page, candidate_rect)
+                    desc_lines = ["[imagen reemplazada] ver planos_extraidos"]
+                    if repl.get("description"):
+                        desc_lines.append("[resumen] " + repl["description"])
+                    codes = repl.get("visible_text_or_codes", [])
+                    if codes:
+                        desc_lines.append("[texto visible] " + ", ".join(str(c) for c in codes[:10]))
+                    infos = repl.get("technical_observations", [])
+                    if infos:
+                        desc_lines.append("[notas] " + "; ".join(str(i) for i in infos[:5]))
+                    text_to_render = "\n".join(desc_lines)
+                    png_stream = make_replacement_image_stream(rect.width, rect.height, text_to_render)
+                    replacement_jobs.append((rect, png_stream))
 
-                desc_lines = ["[imagen reemplazada] ver planos_extraidos"]
-                if repl.get("description"):
-                    desc_lines.append("[resumen] " + repl["description"])
-                codes = repl.get("visible_text_or_codes", [])
-                if codes:
-                    desc_lines.append("[texto visible] " + ", ".join(str(c) for c in codes[:10]))
-                infos = repl.get("technical_observations", [])
-                if infos:
-                    desc_lines.append("[notas] " + "; ".join(str(i) for i in infos[:5]))
-                text_to_render = "\n".join(desc_lines)
-                png_stream = make_replacement_image_stream(rect.width, rect.height, text_to_render)
-                replacement_jobs.append((rect, png_stream))
+                for rect, _png_stream in replacement_jobs:
+                    pre_page.add_redact_annot(rect, fill=(1, 1, 1))
+                if replacement_jobs:
+                    pre_page.apply_redactions(
+                        images=fitz.PDF_REDACT_IMAGE_REMOVE,
+                        graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED,
+                        text=fitz.PDF_REDACT_TEXT_NONE,
+                    )
+                for rect, png_stream in replacement_jobs:
+                    pre_page.insert_image(rect, stream=png_stream, keep_proportion=False)
+            else:
+                pre.insert_pdf(doc, from_page=idx - 1, to_page=idx - 1)
+        pre.save(preocr_pdf, garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True)
 
-            # Redact all target rects first, then insert replacement images.
-            # This removes original image tiles/strips cleanly while avoiding PDF text overlays.
-            for rect, _png_stream in replacement_jobs:
-                pre_page.add_redact_annot(rect, fill=(1, 1, 1))
-            if replacement_jobs:
-                pre_page.apply_redactions(
-                    images=fitz.PDF_REDACT_IMAGE_REMOVE,
-                    graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED,
-                    text=fitz.PDF_REDACT_TEXT_NONE,
-                )
-            for rect, png_stream in replacement_jobs:
-                pre_page.insert_image(rect, stream=png_stream, keep_proportion=False)
-        else:
-            # leave_for_ocr or not in analysis: copy as-is
-            pre.insert_pdf(doc, from_page=idx - 1, to_page=idx - 1)
-    pre.save(preocr_pdf, garbage=4, deflate=True, deflate_images=True, deflate_fonts=True, clean=True)
-
-    # Build MD report
-    md_lines = [f"# Planos/diagramas extraídos — {stem}", ""]
-    md_lines.append(f"PDF fuente: `{input_pdf}`")
-    md_lines.append(f"PDF extraído: `{extracted_pdf}`")
-    md_lines.append(f"PDF pre-OCR: `{preocr_pdf}`")
-    md_lines.append("")
-    for page_num in sorted(pages_by_num.keys()):
-        p = pages_by_num[page_num]
-        action = p.get("action", "leave_for_ocr")
-        if action == "leave_for_ocr":
-            continue
-        title = p.get('identifier_or_title') or 'Sin identificador/título visible'
-        md_lines.append(f"## Página {page_num} — {title}")
+        md_lines = [f"# Planos/diagramas extraídos — {stem}", ""]
+        md_lines.append(f"PDF fuente: `{input_pdf}`")
+        md_lines.append(f"PDF extraído: `{extracted_pdf}`")
+        md_lines.append(f"PDF pre-OCR: `{preocr_pdf}`")
         md_lines.append("")
-        md_lines.append(f"- Acción: {action}")
-        md_lines.append(f"- Tipo: {p.get('visual_type', '')}")
-        md_lines.append(f"- Confianza: {p.get('confidence', '')}")
-        md_lines.append("")
-        md_lines.append(p.get("summary", ""))
-        md_lines.append("")
-        if action == "replace_images" and p.get("image_replacements"):
-            md_lines.append("### Regiones reemplazadas")
-            for repl in p["image_replacements"]:
-                md_lines.append(f"\n**Región {repl.get('region_id', '?')}** (bbox: {repl.get('bbox_pct')})")
-                md_lines.append(f"> {repl.get('description', '')}")
-                codes = repl.get("visible_text_or_codes", [])
-                if codes:
-                    md_lines.append(f"Códigos: {', '.join(str(c) for c in codes)}")
-                infos = repl.get("technical_observations", [])
-                if infos:
-                    md_lines.append(f"Info técnica visible: {'; '.join(str(i) for i in infos)}")
+        for page_num in sorted(pages_by_num.keys()):
+            p = pages_by_num[page_num]
+            action = p.get("action", "leave_for_ocr")
+            if action == "leave_for_ocr":
+                continue
+            title = p.get("identifier_or_title") or "Sin identificador/título visible"
+            md_lines.append(f"## Página {page_num} — {title}")
+            md_lines.append("")
+            md_lines.append(f"- Acción: {action}")
+            md_lines.append(f"- Tipo: {p.get('visual_type', '')}")
+            md_lines.append(f"- Confianza: {p.get('confidence', '')}")
+            md_lines.append("")
+            md_lines.append(p.get("summary", ""))
+            md_lines.append("")
+            if action == "replace_images" and p.get("image_replacements"):
+                md_lines.append("### Regiones reemplazadas")
+                for repl in p["image_replacements"]:
+                    md_lines.append(f"\n**Región {repl.get('region_id', '?')}** (bbox: {repl.get('bbox_pct')})")
+                    md_lines.append(f"> {repl.get('description', '')}")
+                    codes = repl.get("visible_text_or_codes", [])
+                    if codes:
+                        md_lines.append(f"Códigos: {', '.join(str(c) for c in codes)}")
+                    infos = repl.get("technical_observations", [])
+                    if infos:
+                        md_lines.append(f"Info técnica visible: {'; '.join(str(i) for i in infos)}")
+                    md_lines.append("")
+            infos = p.get("technical_observations") or []
+            if infos:
+                md_lines.append("Información útil:")
+                md_lines.extend(f"- {x}" for x in infos)
                 md_lines.append("")
-        infos = p.get("technical_observations") or []
-        if infos:
-            md_lines.append("Información útil:")
-            md_lines.extend(f"- {x}" for x in infos)
+            codes = p.get("visible_text_or_codes") or []
+            if codes:
+                md_lines.append("Texto/códigos visibles:")
+                md_lines.extend(f"- {x}" for x in codes)
+                md_lines.append("")
+        if skipped_replacements:
+            md_lines.append("## Regiones omitidas (bbox inválido o demasiado grande)")
             md_lines.append("")
-        codes = p.get("visible_text_or_codes") or []
-        if codes:
-            md_lines.append("Texto/códigos visibles:")
-            md_lines.extend(f"- {x}" for x in codes)
+            for skip in skipped_replacements:
+                md_lines.append(
+                    f"- Página {skip['page']} región {skip.get('region_id', '?')}: "
+                    f"{skip['reason']} (bbox={skip.get('bbox_pct')})"
+                )
             md_lines.append("")
-    md_path.write_text("\n".join(md_lines).rstrip() + "\n")
+        md_path.write_text("\n".join(md_lines).rstrip() + "\n")
 
-    return {"extracted_pdf": str(extracted_pdf), "preocr_pdf": str(preocr_pdf), "md": str(md_path), "extracted_pages": affected_pages}
+        return {
+            "extracted_pdf": str(extracted_pdf),
+            "preocr_pdf": str(preocr_pdf),
+            "md": str(md_path),
+            "extracted_pages": affected_pages,
+            "skipped_replacements": skipped_replacements,
+        }
+    finally:
+        if pre is not None:
+            pre.close()
+        if extracted is not None:
+            extracted.close()
+        doc.close()
 
 
 def main() -> None:

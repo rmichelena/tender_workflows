@@ -10,11 +10,15 @@ Por qué este paso:
     tener una representación óptima distinta (markdown table, HTML table, o texto).
     Separar a single-tab permite decidir y convertir cada hoja independientemente.
 
+Antes del split, todas las celdas se materializan a valores (sin fórmulas) usando
+los valores cacheados del workbook original. Esto evita referencias cross-sheet
+rotas al eliminar hojas hermanas.
+
 Uso:
     python3 xlsx_split.py INPUT.xlsx --output-dir DIR
 
 Outputs (en DIR):
-    {stem}_sheet{NN}_{slug}.xlsx           — un XLSX por hoja
+    {stem}_sheet{NN}_{slug}.xlsx           — un XLSX por hoja (solo valores)
     {stem}_split_manifest.json             — metadata: hojas, índices, paths, conteos
 
 Convención de naming:
@@ -31,6 +35,7 @@ import argparse
 import json
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -53,81 +58,128 @@ def slugify(name: str, max_len: int = 40) -> str:
     return s[:max_len]
 
 
+def _cell_has_formula(cell) -> bool:
+    value = cell.value
+    return isinstance(value, str) and value.startswith("=")
+
+
+def _formula_references_other_sheet(formula: str, sheet_name: str) -> bool:
+    if not formula.startswith("="):
+        return False
+    for match in re.finditer(r"'([^']+)'!", formula):
+        if match.group(1) != sheet_name:
+            return True
+    for match in re.finditer(r"(?<![A-Za-z0-9_'])([A-Za-z_][A-Za-z0-9_. ]*)!", formula):
+        if match.group(1) != sheet_name:
+            return True
+    return False
+
+
+def materialize_workbook_values(input_path: Path) -> tuple[Path, dict[str, list[str]]]:
+    """Replace formulas with cached/evaluated values before splitting."""
+    wb_values = load_workbook(filename=str(input_path), data_only=True)
+    wb = load_workbook(filename=str(input_path), data_only=False)
+    sheet_warnings: dict[str, list[str]] = {}
+
+    try:
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            ws_values = wb_values[sheet_name]
+            warnings: list[str] = []
+            had_cross_sheet = False
+            missing_cached = False
+
+            for row in ws.iter_rows():
+                for cell in row:
+                    cached = ws_values.cell(cell.row, cell.column).value
+                    if _cell_has_formula(cell):
+                        formula = str(cell.value)
+                        if _formula_references_other_sheet(formula, sheet_name):
+                            had_cross_sheet = True
+                        if cached is None or cached == "":
+                            missing_cached = True
+                        cell.value = cached
+                    elif cached is not None:
+                        cell.value = cached
+
+            if had_cross_sheet:
+                warnings.append("cross_sheet_formulas_materialized_to_values")
+            if missing_cached:
+                warnings.append("formula_cells_missing_cached_values")
+            if warnings:
+                sheet_warnings[sheet_name] = warnings
+
+        tmp = tempfile.NamedTemporaryFile(
+            prefix=f"{input_path.stem}_values_",
+            suffix=input_path.suffix.lower(),
+            delete=False,
+        )
+        tmp_path = Path(tmp.name)
+        tmp.close()
+        wb.save(str(tmp_path))
+        return tmp_path, sheet_warnings
+    finally:
+        del wb_values
+        del wb
+
+
 def split_xlsx(input_path: Path, output_dir: Path) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # data_only=False preserva fórmulas. data_only=True devuelve valores cacheados.
-    # Para el workflow downstream queremos VALORES (no fórmulas), así que data_only=True.
-    # PERO: si el XLSX no fue abierto por Excel desde la última edición, los valores
-    # cacheados pueden estar vacíos. Estrategia: cargar primero con data_only=True;
-    # si una hoja tiene celdas todas None pero la versión con data_only=False sí tiene
-    # fórmulas, advertir.
-    wb_values = load_workbook(filename=str(input_path), data_only=True)
-    wb_formulas = load_workbook(filename=str(input_path), data_only=False)
-
+    values_path, sheet_warnings = materialize_workbook_values(input_path)
     stem = input_path.stem
     sheets_meta = []
 
-    for idx, sheet_name in enumerate(wb_values.sheetnames, start=1):
-        ws_values = wb_values[sheet_name]
-        ws_formulas = wb_formulas[sheet_name]
+    try:
+        wb_values = load_workbook(filename=str(values_path), data_only=True)
+        try:
+            for idx, sheet_name in enumerate(wb_values.sheetnames, start=1):
+                ws_values = wb_values[sheet_name]
 
-        # Detectar si la hoja parece vacía
-        non_empty_cells = 0
-        for row in ws_values.iter_rows(values_only=True):
-            for cell in row:
-                if cell is not None and cell != "":
-                    non_empty_cells += 1
+                non_empty_cells = 0
+                for row in ws_values.iter_rows(values_only=True):
+                    for cell in row:
+                        if cell is not None and cell != "":
+                            non_empty_cells += 1
 
-        # Detectar si las fórmulas tienen valores cacheados perdidos
-        has_formulas = False
-        has_cached_values_for_formulas = False
-        for row in ws_formulas.iter_rows():
-            for cell in row:
-                if isinstance(cell.value, str) and cell.value.startswith("="):
-                    has_formulas = True
-                    # Mirar valor cacheado en la versión data_only
-                    v = ws_values.cell(cell.row, cell.column).value
-                    if v is not None and v != "":
-                        has_cached_values_for_formulas = True
+                warnings = list(sheet_warnings.get(sheet_name, []))
+                if non_empty_cells == 0:
+                    warnings.append("sheet_appears_empty_after_value_materialization")
 
-        warnings = []
-        if has_formulas and not has_cached_values_for_formulas and non_empty_cells == 0:
-            warnings.append(
-                "sheet_appears_empty_but_has_formulas_without_cached_values"
-            )
+                slug = slugify(sheet_name)
+                out_name = f"{stem}_sheet{idx:02d}_{slug}.xlsx"
+                out_path = output_dir / out_name
 
-        slug = slugify(sheet_name)
-        out_name = f"{stem}_sheet{idx:02d}_{slug}.xlsx"
-        out_path = output_dir / out_name
+                wb_single = load_workbook(filename=str(values_path), data_only=False)
+                try:
+                    for other_name in list(wb_single.sheetnames):
+                        if other_name != sheet_name:
+                            del wb_single[other_name]
+                    wb_single.save(str(out_path))
+                finally:
+                    del wb_single
 
-        # Crear un workbook con solo esta hoja. Forma robusta: cargar el original,
-        # eliminar todas las demás, guardar como output.
-        # Hacemos copia desde wb_formulas (preserva fórmulas Y formato y merged cells).
-        from openpyxl import load_workbook as _lw  # reimport para nueva instancia
-
-        wb_single = _lw(filename=str(input_path), data_only=False)
-        for other_name in list(wb_single.sheetnames):
-            if other_name != sheet_name:
-                del wb_single[other_name]
-        wb_single.save(str(out_path))
-
-        sheets_meta.append({
-            "index": idx,
-            "original_name": sheet_name,
-            "slug": slug,
-            "output_path": str(out_path),
-            "non_empty_cells": non_empty_cells,
-            "has_formulas": has_formulas,
-            "has_cached_values_for_formulas": has_cached_values_for_formulas,
-            "warnings": warnings,
-        })
+                sheets_meta.append({
+                    "index": idx,
+                    "original_name": sheet_name,
+                    "slug": slug,
+                    "output_path": str(out_path),
+                    "non_empty_cells": non_empty_cells,
+                    "has_formulas": False,
+                    "values_materialized": True,
+                    "warnings": warnings,
+                })
+        finally:
+            del wb_values
+    finally:
+        values_path.unlink(missing_ok=True)
 
     manifest = {
         "source": str(input_path),
         "stem": stem,
         "total_sheets": len(sheets_meta),
         "output_dir": str(output_dir),
+        "values_materialized": True,
         "sheets": sheets_meta,
     }
 

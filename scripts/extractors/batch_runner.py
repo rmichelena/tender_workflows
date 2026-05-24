@@ -15,7 +15,7 @@ Extractores disponibles:
   - markitdown    — Rápido, sin OCR, texto embebido solo
   - docling       — Docling Serve local/bare-metal
   - modal_docling — Docling Serve en Modal (async por defecto)
-  - docai_online  — Google DocAI modo online/chunked (sin GCS)
+  - docai_online  — Google DocAI modo online (≤15 págs; batch para más)
   - docai_batch   — Google DocAI modo batch con GCS (RECOMENDADO)
 
 Ejemplo:

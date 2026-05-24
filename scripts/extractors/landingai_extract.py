@@ -51,7 +51,16 @@ def load_api_key():
     sys.exit(1)
 
 
-def extract_document(filepath, model="dpt-2-mini", output_dir=None, clean=True):
+def extract_document(
+    filepath,
+    model="dpt-2-mini",
+    output_dir=None,
+    clean=True,
+    *,
+    max_wait=3600,
+    poll_interval=2,
+    download_timeout=120,
+):
     """Extract document using LandingAI ADE.
 
     Args:
@@ -86,8 +95,17 @@ def extract_document(filepath, model="dpt-2-mini", output_dir=None, clean=True):
 
     # Poll until complete (get() returns ParseJobGetResponse with status/data)
     job = client.parse_jobs.get(job_id=job_id)
+    waited = 0.0
     while job.status not in ("completed", "complete", "failed"):
-        time.sleep(2)
+        if waited >= max_wait:
+            print(
+                f"ERROR: LandingAI job {job_id} did not complete within {max_wait}s "
+                f"(last status: {job.status})",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        time.sleep(poll_interval)
+        waited += poll_interval
         job = client.parse_jobs.get(job_id=job_id)
 
     elapsed = time.time() - start
@@ -106,7 +124,7 @@ def extract_document(filepath, model="dpt-2-mini", output_dir=None, clean=True):
     elif job.output_url:
         import urllib.request
         print("  Downloading result from output_url...")
-        raw_bytes = urllib.request.urlopen(job.output_url).read()
+        raw_bytes = urllib.request.urlopen(job.output_url, timeout=download_timeout).read()
         import json as _json
         result_data = _json.loads(raw_bytes)
         raw_markdown = result_data.get("markdown", "")
@@ -223,6 +241,12 @@ def main():
                         help="Output directory (default: same as input file)")
     parser.add_argument("--no-clean", action="store_true",
                         help="Skip clean_ade_output post-processing")
+    parser.add_argument("--max-wait", type=int, default=3600,
+                        help="Max seconds to wait for parse job completion (default: 3600)")
+    parser.add_argument("--poll-interval", type=int, default=2,
+                        help="Seconds between status polls (default: 2)")
+    parser.add_argument("--download-timeout", type=int, default=120,
+                        help="Timeout seconds for output_url download (default: 120)")
     args = parser.parse_args()
 
     if not os.path.exists(args.document):
@@ -234,6 +258,9 @@ def main():
         model=args.model,
         output_dir=args.output_dir,
         clean=not args.no_clean,
+        max_wait=args.max_wait,
+        poll_interval=args.poll_interval,
+        download_timeout=args.download_timeout,
     )
 
 
