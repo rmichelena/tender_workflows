@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..parser import clean_cronograma_etapa, fechas_listado_from_cronograma_json
@@ -159,9 +159,9 @@ def load_analysis_selection(proc_dir: Path) -> set[str] | None:
     return cleaned or None
 
 
-def _assign_default_selection(rows: list[ArchivoAnalizable]) -> None:
+def _assign_default_selection(rows: list[ArchivoAnalizable]) -> list[ArchivoAnalizable]:
     if not rows:
-        return
+        return rows
     best_score = -1
     best_idx = 0
     for index, row in enumerate(rows):
@@ -169,8 +169,10 @@ def _assign_default_selection(rows: list[ArchivoAnalizable]) -> None:
         if score > best_score:
             best_score = score
             best_idx = index
-    for index, row in enumerate(rows):
-        row.default_checked = index == best_idx
+    return [
+        replace(row, default_checked=(index == best_idx))
+        for index, row in enumerate(rows)
+    ]
 
 
 def list_analyzable_files(
@@ -235,7 +237,7 @@ def list_analyzable_files(
         for row in rows:
             row.default_checked = row.rel_path in checked_paths
     else:
-        _assign_default_selection(rows)
+        rows = _assign_default_selection(rows)
     return rows
 
 

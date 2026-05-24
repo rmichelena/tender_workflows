@@ -76,12 +76,12 @@ def parse_seace_datetime(value: str | None) -> float | None:
         return None
 
 
-def _date_sort_key(value: str | None) -> tuple[int, float, str]:
+def _date_sort_key(value: str | None, *, descending: bool = False) -> tuple[int, float, str]:
     """Fechas inválidas o vacías van al final en asc y desc."""
     ts = parse_seace_datetime(value)
     if ts is None:
         return (1, 0.0, _text(value))
-    return (0, ts, _text(value))
+    return (0, -ts if descending else ts, _text(value))
 
 
 def _int_or_zero(value: str | None) -> int:
@@ -111,7 +111,7 @@ def sort_key(column: str) -> Callable[[Process], tuple[Any, ...]]:
     if column == "entidad":
         return lambda p: (_text(p.entity.nombre if p.entity else ""),)
     if column in DATE_COLUMNS:
-        return lambda p, c=column: _date_sort_key(getattr(p, c))
+        return lambda p, c=column: _date_sort_key(getattr(p, c), descending=False)
     if column == "cuantia":
         return lambda p: (_float_or_zero(p.cuantia), _text(p.cuantia))
     if column == "estado":
@@ -124,23 +124,32 @@ def sort_processes(
 ) -> list[Process]:
     col = normalize_sort(sort)
     desc = normalize_dir(direction, col) == "desc"
+    if col in DATE_COLUMNS:
+        return sorted(
+            processes,
+            key=lambda p, c=col: _date_sort_key(getattr(p, c), descending=desc),
+        )
     key_fn = sort_key(col)
     return sorted(processes, key=key_fn, reverse=desc)
 
 
-def list_view_sort_key(column: str) -> Callable[[ProcessListView], tuple[Any, ...]]:
+def list_view_sort_key(
+    column: str, *, descending: bool = False
+) -> Callable[[ProcessListView], tuple[Any, ...]]:
     if column == "numero":
         return lambda v: (_int_or_zero(v.process.numero), _text(v.process.numero))
     if column == "entidad":
         return lambda v: (_text(v.process.entity.nombre if v.process.entity else ""),)
     if column == "fecha_consultas":
-        return lambda v: _date_sort_key(v.fin_consultas if v.fin_consultas != "—" else "")
+        return lambda v: _date_sort_key(
+            v.fin_consultas if v.fin_consultas != "—" else "", descending=descending
+        )
     if column == "fecha_presentacion":
         return lambda v: _date_sort_key(
-            v.fin_presentacion if v.fin_presentacion != "—" else ""
+            v.fin_presentacion if v.fin_presentacion != "—" else "", descending=descending
         )
     if column == "fecha_publicacion":
-        return lambda v: _date_sort_key(v.process.fecha_publicacion)
+        return lambda v: _date_sort_key(v.process.fecha_publicacion, descending=descending)
     if column == "cuantia":
         return lambda v: (_float_or_zero(v.process.cuantia), _text(v.process.cuantia))
     if column == "estado":
@@ -155,6 +164,9 @@ def sort_process_list_views(
 ) -> list[ProcessListView]:
     col = normalize_sort(sort)
     desc = normalize_dir(direction, col) == "desc"
+    if col in DATE_COLUMNS:
+        key_fn = list_view_sort_key(col, descending=desc)
+        return sorted(views, key=key_fn)
     key_fn = list_view_sort_key(col)
     return sorted(views, key=key_fn, reverse=desc)
 

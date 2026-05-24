@@ -88,5 +88,22 @@ def test_parse_ddmmyy_and_default_since():
 
 
 def test_parse_seace_date_formats():
-    assert parse_seace_date("17/07/13") is not None
+    assert parse_seace_date("17/07/2013") is not None
     assert parse_seace_date("27/05/2026 15:00") is not None
+    assert parse_seace_date("26/01/50") is None
+
+
+def test_passes_date_filter_since_date_falls_back_to_publicacion():
+    since = date(2026, 1, 1)
+    assert passes_date_filter(
+        None,
+        fecha_publicacion="15/03/2026",
+        mode=ScanDateMode.since_date,
+        since_date=since,
+    )
+    assert not passes_date_filter(
+        None,
+        fecha_publicacion="15/12/2025",
+        mode=ScanDateMode.since_date,
+        since_date=since,
+    )

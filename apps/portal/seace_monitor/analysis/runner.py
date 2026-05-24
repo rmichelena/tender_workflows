@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import hashlib
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from ..client import ProcessRow, SeaceClient
 from ..config import AppConfig
 from ..db.models import AnalysisResult, Process, ProcessStatus, utcnow
+from ..process_storage import delete_process_data_dir, clear_process_download_metadata
 from ..tenant_paths import procesos_root
 from ..downloader import download_file
 from ..document_storage import (
@@ -21,18 +23,40 @@ from ..document_storage import (
     write_manifest,
 )
 from ..parser import parse_ficha
+from .analysis_lock import AnalysisBusyError, analysis_lock
 from .document_prep import extract_archives, resolve_selected_documents
 from .fast_reader import run_fast_analysis
 from .tender_bridge import run_tender_stage1
 
 logger = logging.getLogger(__name__)
 
+_ANALYSIS_SNAPSHOT_FIELDS = (
+    "status",
+    "error_message",
+    "alcance",
+    "incluye",
+    "requisitos",
+    "entregables",
+    "equipos",
+    "raw_json",
+    "finished_at",
+    "run_id",
+)
+
 
 def process_data_dir(config: AppConfig, process: Process) -> Path:
+    nid = (process.nid_proceso or str(process.id)).strip()
     safe = "".join(
         c if c.isalnum() or c in "-_" else "_" for c in process.nomenclatura
-    )
-    return procesos_root(config) / f"{process.nid_proceso}_{safe}"[:120]
+    ).strip("_")
+    if safe:
+        name = f"{nid}_{safe[:80]}"
+    else:
+        name = nid
+    if len(name) > 120:
+        digest = hashlib.sha256(name.encode()).hexdigest()[:8]
+        name = f"{nid}_{safe[:60]}_{digest}"[:120]
+    return procesos_root(config) / name
 
 
 class AnalysisRunner:
@@ -59,7 +83,7 @@ class AnalysisRunner:
         docs_dir = proc_dir / "documentos"
         docs_dir.mkdir(parents=True, exist_ok=True)
 
-        docs = self._resolve_document_list(process, entity.ruc)
+        docs = self._fetch_documentos_from_seace(process, entity.ruc)
         # Commit antes de la descarga larga (SEACE) para no bloquear SQLite.
         self.session.commit()
 
@@ -68,11 +92,19 @@ class AnalysisRunner:
             extract_archives(docs_dir)
         except Exception:
             cleanup_partial_downloads(docs_dir)
+            process = self.session.get(Process, process_id)
+            if process is not None:
+                delete_process_data_dir(self.config, process)
+                clear_process_download_metadata(process)
+                if process.status == ProcessStatus.descargando:
+                    process.status = ProcessStatus.publicada
+                self.session.commit()
             raise
 
         process = self.session.get(Process, process_id)
         if process is None:
             raise ValueError(f"Proceso {process_id} no encontrado")
+        process.documentos_json = json.dumps(docs, ensure_ascii=False)
         process.status = ProcessStatus.descargada
         process.data_dir = str(proc_dir)
         self.session.commit()
@@ -80,7 +112,7 @@ class AnalysisRunner:
         return process
 
     def analyze(
-        self, process_id: int, selected_rel_paths: list[str]
+        self, process_id: int, selected_rel_paths: list[str], *, run_id: str | None = None
     ) -> AnalysisResult:
         process = self.session.get(Process, process_id)
         if process is None:
@@ -95,58 +127,122 @@ class AnalysisRunner:
         if not selected_rel_paths:
             raise RuntimeError("Selecciona al menos un archivo para analizar.")
 
+        proc_dir = Path(process.data_dir)
+        docs_dir = proc_dir / "documentos"
+
         analysis = process.analysis
+        prior = (
+            self._analysis_snapshot(analysis)
+            if analysis is not None and analysis.status == "done"
+            else None
+        )
         if analysis is None:
             analysis = AnalysisResult(process_id=process.id, status="running")
             self.session.add(analysis)
         else:
-            self._reset_analysis_for_rerun(analysis)
+            self._mark_analysis_running(analysis, run_id)
 
-        analysis.started_at = utcnow()
         if process.status == ProcessStatus.analizada:
             process.status = ProcessStatus.descargada
-        # Commit antes del pipeline largo (Gemini) para no bloquear SQLite.
         self.session.commit()
 
-        proc_dir = Path(process.data_dir)
-        docs_dir = proc_dir / "documentos"
-
         try:
-            result_data = self._run_pipeline(
-                proc_dir, docs_dir, process, selected_rel_paths
-            )
-            process = self.session.get(Process, process_id)
-            if process is None:
-                raise RuntimeError(f"Proceso {process_id} desapareció durante el análisis")
-            analysis = process.analysis
-            if analysis is None:
-                raise RuntimeError(f"Sin registro de análisis para proceso {process_id}")
-            self._apply_result(analysis, result_data)
-            process.status = ProcessStatus.analizada
-            analysis.status = "done"
-            analysis.finished_at = utcnow()
-        except Exception as exc:
-            process = self.session.get(Process, process_id)
-            if process is not None:
+            with analysis_lock(proc_dir):
+                result_data = self._run_pipeline(
+                    proc_dir, docs_dir, process, selected_rel_paths
+                )
+                if not self._is_current_run(process_id, run_id):
+                    logger.warning(
+                        "Análisis obsoleto descartado para proceso %s (run_id=%s)",
+                        process_id,
+                        run_id,
+                    )
+                    return analysis
+                process = self.session.get(Process, process_id)
+                if process is None:
+                    raise RuntimeError(
+                        f"Proceso {process_id} desapareció durante el análisis"
+                    )
                 analysis = process.analysis
-                if analysis is not None:
-                    analysis.status = "error"
-                    analysis.error_message = str(exc)
-                    analysis.finished_at = utcnow()
-                process.status = ProcessStatus.descargada
-            logger.exception("Análisis fallido para proceso %s", process_id)
-            self.session.commit()
+                if analysis is None:
+                    raise RuntimeError(
+                        f"Sin registro de análisis para proceso {process_id}"
+                    )
+                self._apply_result(analysis, result_data)
+                process.status = ProcessStatus.analizada
+                analysis.status = "done"
+                analysis.finished_at = utcnow()
+        except AnalysisBusyError:
+            raise
+        except Exception as exc:
+            if self._is_current_run(process_id, run_id):
+                process = self.session.get(Process, process_id)
+                if process is not None:
+                    analysis = process.analysis
+                    if analysis is not None:
+                        if prior is not None:
+                            self._restore_analysis_snapshot(analysis, prior)
+                            process.status = ProcessStatus.analizada
+                            err_path = proc_dir / "fast_analysis" / "last_rerun_error.txt"
+                            err_path.parent.mkdir(parents=True, exist_ok=True)
+                            err_path.write_text(str(exc), encoding="utf-8")
+                        else:
+                            analysis.status = "error"
+                            analysis.error_message = str(exc)
+                            analysis.finished_at = utcnow()
+                            process.status = ProcessStatus.descargada
+                logger.exception("Análisis fallido para proceso %s", process_id)
+                self.session.commit()
+            else:
+                logger.warning(
+                    "Error de análisis obsoleto ignorado para proceso %s",
+                    process_id,
+                )
             raise
 
         self.session.commit()
         return analysis
+
+    @staticmethod
+    def _analysis_snapshot(analysis: AnalysisResult) -> dict:
+        return {field: getattr(analysis, field) for field in _ANALYSIS_SNAPSHOT_FIELDS}
+
+    @staticmethod
+    def _restore_analysis_snapshot(analysis: AnalysisResult, snap: dict) -> None:
+        for field, value in snap.items():
+            setattr(analysis, field, value)
+
+    @staticmethod
+    def _mark_analysis_running(
+        analysis: AnalysisResult, run_id: str | None
+    ) -> None:
+        analysis.status = "running"
+        analysis.error_message = None
+        analysis.started_at = utcnow()
+        analysis.finished_at = None
+        if run_id:
+            analysis.run_id = run_id
+
+    def _is_current_run(self, process_id: int, run_id: str | None) -> bool:
+        if not run_id:
+            return True
+        analysis = (
+            self.session.query(AnalysisResult)
+            .filter(AnalysisResult.process_id == process_id)
+            .one_or_none()
+        )
+        return (
+            analysis is not None
+            and analysis.run_id == run_id
+            and analysis.status == "running"
+        )
 
     def _resolve_document_list(self, process: Process, ruc: str) -> list[dict]:
         if not process.nid_convocatoria or not process.link_id:
             raise RuntimeError(
                 "Sin metadatos SEACE para abrir la ficha. Vuelve a escanear el proceso."
             )
-        return self._refresh_documentos(process, ruc)
+        return self._fetch_documentos_from_seace(process, ruc)
 
     def _fetch_documents(self, docs: list[dict], docs_dir: Path) -> None:
         for doc in docs:
@@ -162,7 +258,7 @@ class AnalysisRunner:
         normalize_legacy_filenames(docs_dir, docs)
         write_manifest(docs_dir, docs)
 
-    def _refresh_documentos(self, process: Process, ruc: str) -> list[dict]:
+    def _fetch_documentos_from_seace(self, process: Process, ruc: str) -> list[dict]:
         from dataclasses import asdict
 
         client = SeaceClient(
@@ -190,7 +286,10 @@ class AnalysisRunner:
         )
         ficha = client.open_ficha(row)
         parsed = parse_ficha(ficha.html, ficha.ficha_id, process.nid_proceso)
-        docs = [asdict(d) for d in parsed.documentos]
+        return [asdict(d) for d in parsed.documentos]
+
+    def _refresh_documentos(self, process: Process, ruc: str) -> list[dict]:
+        docs = self._fetch_documentos_from_seace(process, ruc)
         process.documentos_json = json.dumps(docs, ensure_ascii=False)
         self.session.flush()
         return docs
@@ -272,6 +371,7 @@ class AnalysisRunner:
     @staticmethod
     def _reset_analysis_for_rerun(analysis: AnalysisResult) -> None:
         analysis.status = "running"
+        analysis.run_id = None
         analysis.error_message = None
         analysis.alcance = None
         analysis.incluye = None
@@ -285,19 +385,28 @@ class AnalysisRunner:
         stage1 = data.get("stage1", data)
         if isinstance(stage1, dict):
             if stage1.get("mode") == "fast_gemini":
-                analysis.alcance = stage1.get("alcance") or analysis.alcance
-                analysis.incluye = stage1.get("incluye") or analysis.incluye
-                analysis.requisitos = stage1.get("requisitos") or analysis.requisitos
+                if "alcance" in stage1:
+                    analysis.alcance = stage1.get("alcance")
+                if "incluye" in stage1:
+                    analysis.incluye = stage1.get("incluye")
+                if "requisitos" in stage1:
+                    analysis.requisitos = stage1.get("requisitos")
             else:
                 axis0 = stage1.get("axis0")
                 if isinstance(axis0, dict):
-                    analysis.alcance = axis0.get("alcance") or analysis.alcance
-                    analysis.incluye = axis0.get("incluye") or analysis.incluye
-                    analysis.requisitos = axis0.get("requisitos") or analysis.requisitos
+                    if "alcance" in axis0:
+                        analysis.alcance = axis0.get("alcance")
+                    if "incluye" in axis0:
+                        analysis.incluye = axis0.get("incluye")
+                    if "requisitos" in axis0:
+                        analysis.requisitos = axis0.get("requisitos")
                 else:
-                    analysis.alcance = stage1.get("alcance") or analysis.alcance
-                    analysis.incluye = stage1.get("incluye") or analysis.incluye
-                    analysis.requisitos = stage1.get("requisitos") or analysis.requisitos
+                    if "alcance" in stage1:
+                        analysis.alcance = stage1.get("alcance")
+                    if "incluye" in stage1:
+                        analysis.incluye = stage1.get("incluye")
+                    if "requisitos" in stage1:
+                        analysis.requisitos = stage1.get("requisitos")
 
         stage2 = data.get("stage2")
         if isinstance(stage2, dict):

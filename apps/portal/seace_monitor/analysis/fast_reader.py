@@ -16,6 +16,7 @@ from .document_prep import (
     merge_pdfs,
     prepare_documents_for_llm,
     resolve_selected_documents,
+    validate_gemini_upload_batch,
     validate_gemini_upload_size,
 )
 from .gemini_client import (
@@ -25,7 +26,7 @@ from .gemini_client import (
     today_anchor_peru,
     upload_file_with_retry,
 )
-from .gemini_session import initialize_session_after_analysis
+from .gemini_session import clean_run_scoped_artifacts, initialize_session_after_analysis
 from .tender_bridge import parse_axis0_summary
 
 logger = logging.getLogger(__name__)
@@ -194,6 +195,8 @@ def _finalize_gemini_session(
     sources: list[Path],
     bootstrap_user: str,
     bootstrap_model: str,
+    merge_fallback: bool = False,
+    merged_upload_path: Path | None = None,
 ) -> None:
     api_key = os.environ.get(config.analysis.fast_path.gemini_api_key_env, "")
     client = get_genai_client(api_key)
@@ -207,9 +210,11 @@ def _finalize_gemini_session(
             source_paths=sources,
             bootstrap_user=bootstrap_user,
             bootstrap_model=bootstrap_model,
+            merge_fallback=merge_fallback,
+            merged_upload_path=merged_upload_path,
         )
     finally:
-        delete_remote_files(client, uploaded_files)
+        delete_remote_files(client, uploaded_files, proc_dir=proc_dir)
 
 
 def run_fast_analysis(
@@ -220,10 +225,12 @@ def run_fast_analysis(
     selected_rel_paths: list[str],
 ) -> dict[str, Any]:
     workspace = proc_dir / "fast_analysis"
+    clean_run_scoped_artifacts(proc_dir)
     workspace.mkdir(parents=True, exist_ok=True)
 
     sources = resolve_selected_documents(documents_dir, selected_rel_paths)
     pdfs = prepare_documents_for_llm(sources, workspace)
+    validate_gemini_upload_batch(pdfs)
     for source, pdf in zip(sources, pdfs, strict=True):
         if source.suffix.lower() == ".pdf":
             logger.info("PDF listo para Gemini: %s", source.name)
@@ -237,6 +244,8 @@ def run_fast_analysis(
 
     uploaded_files: list = []
     bootstrap_user = ""
+    merge_fallback = False
+    merged_path: Path | None = None
     try:
         summary_core, uploaded_files, bootstrap_user = run_gemini_free_reader(
             config, pdfs, sources, process
@@ -248,11 +257,19 @@ def run_fast_analysis(
         logger.warning("Gemini multi-archivo falló; combinando PDFs: %s", first_exc)
         merged = workspace / "merged_for_gemini.pdf"
         merge_pdfs(pdfs, merged)
-        validate_gemini_upload_size(merged)
+        validate_gemini_upload_size(merged, merged=True)
         summary_core, uploaded_files, bootstrap_user = run_gemini_free_reader(
             config, [merged], sources, process
         )
         upload_paths = [merged]
+        merge_fallback = True
+        merged_path = merged
+        bootstrap_user = (
+            bootstrap_user.rstrip()
+            + "\n\n"
+            + f"Nota: los {len(sources)} PDF(s) originales se combinaron en un solo "
+            "documento para el análisis y el chat."
+        )
 
     _finalize_gemini_session(
         config,
@@ -262,6 +279,8 @@ def run_fast_analysis(
         sources=sources,
         bootstrap_user=bootstrap_user,
         bootstrap_model=summary_core,
+        merge_fallback=merge_fallback,
+        merged_upload_path=merged_path,
     )
 
     summary_md = append_seace_cronograma(summary_core, process)
@@ -276,7 +295,10 @@ def run_fast_analysis(
         "summary_path": str(summary_path),
         "gemini_model": config.analysis.fast_path.gemini_model,
         "chat_enabled": True,
+        "merge_fallback": merge_fallback,
     }
+    if merged_path is not None:
+        meta["merged_upload_path"] = str(merged_path)
     (workspace / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )

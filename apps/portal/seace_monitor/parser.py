@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from dataclasses import asdict, dataclass, field
 
 from bs4 import BeautifulSoup
 
-from .client import ProcessRow
+from .client import ProcessRow, validate_ficha_id
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -55,10 +58,19 @@ class FichaData:
 
 def row_snapshot_hash(row: ProcessRow) -> str:
     payload = {
+        "numero": row.numero,
         "fecha_publicacion": row.fecha_publicacion,
         "nomenclatura": row.nomenclatura,
+        "reiniciado_desde": row.reiniciado_desde,
+        "objeto": row.objeto,
         "descripcion": row.descripcion,
         "cuantia": row.cuantia,
+        "moneda": row.moneda,
+        "version_seace": row.version_seace,
+        "nid_convocatoria": row.nid_convocatoria,
+        "nid_sistema": row.nid_sistema,
+        "link_id": row.link_id,
+        "ntipo": row.ntipo,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
@@ -66,6 +78,7 @@ def row_snapshot_hash(row: ProcessRow) -> str:
 
 
 def parse_ficha(html: str, ficha_id: str, nid_proceso: str) -> FichaData:
+    ficha_id = validate_ficha_id(ficha_id)
     soup = BeautifulSoup(html, "lxml")
     data = FichaData(
         ficha_id=ficha_id,
@@ -208,6 +221,7 @@ def fechas_listado_from_cronograma_json(
     try:
         raw = json.loads(cronograma_json)
     except json.JSONDecodeError:
+        logger.warning("cronograma_json corrupto: %s", cronograma_json[:120])
         raw = []
     if not isinstance(raw, list):
         raw = []

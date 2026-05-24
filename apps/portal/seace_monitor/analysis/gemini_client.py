@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -63,32 +64,47 @@ def gemini_retry_delay(attempt: int) -> float:
     return min(2**attempt, 30)
 
 
+def _file_state_name(file) -> str | None:
+    state = getattr(file, "state", None)
+    return getattr(state, "name", None) if state else None
+
+
 def wait_file_active(client, uploaded) -> Any:
     file = uploaded
-    state = getattr(file, "state", None)
-    state_name = getattr(state, "name", None) if state else None
-    if state_name != "PROCESSING":
+    state_name = _file_state_name(file)
+    if state_name == "ACTIVE":
         return file
+    if state_name == "FAILED":
+        raise RuntimeError(f"Gemini rechazó el procesamiento del archivo: {file.name}")
+    if state_name not in (None, "PROCESSING"):
+        raise RuntimeError(f"Estado inesperado del archivo Gemini: {state_name}")
 
     deadline = time.time() + 300
-    while state_name == "PROCESSING":
+    while True:
         if time.time() > deadline:
             raise RuntimeError("Timeout esperando procesamiento del archivo en Gemini")
         time.sleep(2)
         file = client.files.get(name=file.name)
-        state = getattr(file, "state", None)
-        state_name = getattr(state, "name", None) if state else None
-    return file
+        state_name = _file_state_name(file)
+        if state_name == "ACTIVE":
+            return file
+        if state_name == "FAILED":
+            raise RuntimeError(f"Gemini rechazó el procesamiento del archivo: {file.name}")
+        if state_name not in (None, "PROCESSING"):
+            raise RuntimeError(f"Estado inesperado del archivo Gemini: {state_name}")
 
 
-def upload_file_with_retry(api_key: str, path):
+def upload_file_with_retry(api_key: str, path: Path):
     last_exc: Exception | None = None
     for attempt in range(1, _GEMINI_RETRY_ATTEMPTS + 1):
         client = get_genai_client(api_key)
+        uploaded = None
         try:
             uploaded = client.files.upload(file=str(path))
             return wait_file_active(client, uploaded)
         except Exception as exc:
+            if uploaded is not None:
+                delete_remote_files(client, [uploaded])
             last_exc = exc
             if attempt >= _GEMINI_RETRY_ATTEMPTS or not is_retryable_gemini_error(exc):
                 raise
@@ -130,9 +146,22 @@ def generate_content_with_retry(client, **kwargs):
     raise RuntimeError("Gemini generateContent falló tras reintentos")
 
 
-def delete_remote_files(client, uploaded_files) -> None:
+def delete_remote_files(
+    client, uploaded_files, *, proc_dir: Path | None = None
+) -> list[str]:
+    """Borra uploads remotos; retorna nombres que no se pudieron eliminar."""
+    failed: list[str] = []
     for uploaded in uploaded_files:
+        name = getattr(uploaded, "name", str(uploaded))
         try:
-            client.files.delete(name=uploaded.name)
-        except Exception:
-            logger.warning("No se pudo borrar archivo temporal en Gemini: %s", uploaded.name)
+            client.files.delete(name=name)
+        except Exception as exc:
+            logger.warning("No se pudo borrar archivo temporal en Gemini: %s", name)
+            failed.append(name)
+            if proc_dir is not None:
+                from .gemini_orphans import log_gemini_orphan
+
+                log_gemini_orphan(
+                    proc_dir, kind="file", resource_id=name, error=str(exc)
+                )
+    return failed

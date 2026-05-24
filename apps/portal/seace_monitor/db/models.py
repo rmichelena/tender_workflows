@@ -119,6 +119,7 @@ class AnalysisResult(Base):
         ForeignKey("processes.id"), unique=True, index=True
     )
     status: Mapped[str] = mapped_column(String(32), default="pending")  # pending|running|done|error
+    run_id: Mapped[str | None] = mapped_column(String(36))
     error_message: Mapped[str | None] = mapped_column(Text)
 
     alcance: Mapped[str | None] = mapped_column(Text)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,18 +15,24 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from ..analysis.runner import AnalysisRunner
+from ..analysis.analysis_lock import AnalysisBusyError
 from ..config import AppConfig
 from ..db.list_views import build_process_list_views
-from ..db.maintenance import is_stale_running_analysis, recover_stale_analyses
+from ..db.maintenance import (
+    abandon_stale_analysis_run,
+    is_stale_running_analysis,
+    recover_stale_analyses,
+)
 from ..db.models import AnalysisResult, Entity, Process, ProcessStatus, utcnow
 from ..db.session import init_db, session_factory
-from ..document_storage import cleanup_partial_downloads
 from ..process_storage import (
     clear_process_download_metadata,
     delete_process_analysis,
+    delete_process_data_dir,
     archive_analyzed_process,
     discard_process_downloads,
     purge_all_stale_process_data,
+    recover_stale_downloads,
     repair_archived_processes,
     repair_discarded_processes,
     repair_processes_missing_data,
@@ -112,17 +119,27 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     "Actualizadas %s rutas data_dir tras migración de layout",
                     path_updates,
                 )
-            recovered = recover_stale_analyses(db, _config.stale_analysis_seconds)
+            recovered = recover_stale_analyses(
+                db, _config.stale_analysis_seconds, config=_config
+            )
             if recovered:
                 logger.warning(
                     "Recuperados %s análisis en estado running obsoletos",
                     recovered,
                 )
+            downloads_recovered = recover_stale_downloads(
+                _config, db, _config.stale_analysis_seconds
+            )
+            if downloads_recovered:
+                logger.warning(
+                    "Recuperadas %s descargas obsoletas en descargando",
+                    downloads_recovered,
+                )
             db_cleaned, orphans = purge_all_stale_process_data(_config, db)
             repaired = repair_processes_missing_data(_config, db)
             archived = repair_archived_processes(_config, db)
             discarded = repair_discarded_processes(_config, db)
-            if db_cleaned or orphans or repaired or archived or discarded:
+            if db_cleaned or orphans or repaired or archived or discarded or downloads_recovered:
                 db.commit()
                 logger.info(
                     "Limpieza data/procesos: %s metadato(s) obsoleto(s), %s huérfana(s), "
@@ -423,10 +440,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 proc_fail = session.get(Process, process_id)
                 if proc_fail is not None:
                     proc_fail.status = ProcessStatus.publicada
-                    if proc_fail.data_dir:
-                        cleanup_partial_downloads(
-                            Path(proc_fail.data_dir) / "documentos"
-                        )
+                    delete_process_data_dir(_config, proc_fail)
+                    clear_process_download_metadata(proc_fail)
                     session.commit()
                 logger.exception("Background download failed")
             finally:
@@ -531,12 +546,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             save_analysis_selection(Path(proc.data_dir), selected)
 
         analysis = proc.analysis
+        run_id = uuid.uuid4().hex
         if analysis is None:
-            analysis = AnalysisResult(process_id=proc.id, status="running")
+            analysis = AnalysisResult(process_id=proc.id, status="running", run_id=run_id)
             db.add(analysis)
         else:
-            AnalysisRunner._reset_analysis_for_rerun(analysis)
-        analysis.started_at = utcnow()
+            AnalysisRunner._mark_analysis_running(analysis, run_id)
         if proc.status == ProcessStatus.analizada:
             proc.status = ProcessStatus.descargada
         db.commit()
@@ -548,9 +563,23 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             session = session_factory()
             try:
                 runner = AnalysisRunner(_config, session)
-                runner.analyze(process_id, selected_paths)
+                runner.analyze(process_id, selected_paths, run_id=run_id)
+            except AnalysisBusyError as exc:
+                logger.warning("Análisis concurrente bloqueado para proceso %s", process_id)
+                abandon_stale_analysis_run(
+                    session,
+                    process_id,
+                    run_id,
+                    message=str(exc),
+                )
             except Exception:
                 logger.exception("Background analysis failed")
+                abandon_stale_analysis_run(
+                    session,
+                    process_id,
+                    run_id,
+                    message="Análisis interrumpido inesperadamente. Reintenta.",
+                )
             finally:
                 session.close()
 

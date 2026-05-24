@@ -8,6 +8,7 @@ from pathlib import Path
 from .analysis.gemini_session import (
     GeminiSession,
     GeminiTurn,
+    _resolve_stored_paths,
     load_session,
     public_chat_payload,
     save_session,
@@ -18,12 +19,15 @@ from .analysis.gemini_session import (
 
 def test_gemini_session_roundtrip(tmp_path: Path):
     proc_dir = tmp_path / "proc"
+    pdf = proc_dir / "documentos" / "bases.pdf"
+    pdf.parent.mkdir(parents=True)
+    pdf.write_bytes(b"%PDF-1.4 test")
     session = GeminiSession(
         model="gemini-2.5-flash",
         cache_name="cachedContents/abc123",
         cache_expire_at="2026-05-20T12:00:00+00:00",
-        upload_paths=[str(proc_dir / "docs" / "bases.pdf")],
-        source_paths=[str(proc_dir / "docs" / "bases.pdf")],
+        upload_paths=["documentos/bases.pdf"],
+        source_paths=["documentos/bases.pdf"],
         bootstrap_user="Analiza estas bases.",
         bootstrap_model="## Resumen\n\nContenido inicial.",
         chat_turns=[
@@ -42,6 +46,17 @@ def test_gemini_session_roundtrip(tmp_path: Path):
     assert loaded.bootstrap_model == session.bootstrap_model
     assert len(loaded.chat_turns) == 2
     assert loaded.chat_turns[0].text == "¿Plazo?"
+
+
+def test_resolve_stored_paths_relative_and_legacy(tmp_path: Path):
+    proc_dir = tmp_path / "proc"
+    pdf = proc_dir / "fast_analysis" / "merged.pdf"
+    pdf.parent.mkdir(parents=True)
+    pdf.write_bytes(b"%PDF")
+    rel = _resolve_stored_paths(proc_dir, ["fast_analysis/merged.pdf"])
+    assert rel == [pdf.resolve()]
+    legacy = _resolve_stored_paths(proc_dir, [str(pdf)])
+    assert legacy == [pdf.resolve()]
 
 
 def test_public_chat_payload_available():

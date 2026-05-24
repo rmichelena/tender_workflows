@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 _FICHA_REFRESH_STATUSES = frozenset(
     {
         ProcessStatus.publicada,
-        ProcessStatus.descargando,
         ProcessStatus.descargada,
     }
 )
@@ -125,16 +124,16 @@ class MultiEntityScanner:
                 try:
                     if proc is None:
                         if self._upsert_from_ficha(
-                            entity, client, row, proc=None, options=options
+                            entity, client, row, proc=None, options=options, list_page=page
                         ):
                             new_count += 1
                     elif proc.list_hash != list_hash:
                         self._upsert_from_ficha(
-                            entity, client, row, proc=proc, options=options
+                            entity, client, row, proc=proc, options=options, list_page=page
                         )
                     elif self._needs_ficha_refresh(proc):
                         self._upsert_from_ficha(
-                            entity, client, row, proc=proc, options=options
+                            entity, client, row, proc=proc, options=options, list_page=page
                         )
                     else:
                         proc.last_seen_at = utcnow()
@@ -171,10 +170,12 @@ class MultiEntityScanner:
         proc: Process | None,
         *,
         options: ScanOptions,
+        list_page: int = 0,
     ) -> bool:
         is_new = proc is None
         ficha_result = client.open_ficha(row)
         ficha = parse_ficha(ficha_result.html, ficha_result.ficha_id, row.nid_proceso)
+        client.refresh_list_page_state(list_page)
         fechas = extract_cronograma_fechas(ficha.cronograma)
         fecha_presentacion = fechas.fecha_presentacion or row.fecha_publicacion
 

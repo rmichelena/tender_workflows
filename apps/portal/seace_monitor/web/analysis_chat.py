@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from ..analysis.analysis_lock import AnalysisBusyError
 from ..analysis.gemini_session import (
     GeminiSession,
     load_session,
@@ -88,6 +89,8 @@ def register_analysis_chat_routes(app, config: AppConfig, get_db):
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        except AnalysisBusyError as exc:
+            raise HTTPException(409, str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
         return {

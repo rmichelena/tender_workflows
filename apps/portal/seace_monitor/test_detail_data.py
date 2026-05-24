@@ -50,7 +50,7 @@ def test_assign_default_selection_picks_single_bases_pdf():
             default_checked=False,
         ),
     ]
-    _assign_default_selection(rows)
+    rows = _assign_default_selection(rows)
     assert rows[0].default_checked is False
     assert rows[1].default_checked is True
 

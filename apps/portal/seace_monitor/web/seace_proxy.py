@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import threading
+import time
 import uuid
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
 
@@ -19,7 +20,7 @@ from ..client import ProcessRow
 from ..config import AppConfig
 from ..db.models import Process
 from ..http_util import requests_proxies
-from .seace_view import can_open_seace, process_row_from_model, row_from_list_html
+from .seace_view import can_open_seace, row_from_list_html
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,9 @@ REWRITE_TYPES = (
 )
 
 _lock = threading.Lock()
-_sessions: dict[str, requests.Session] = {}
+_sessions: dict[str, tuple[requests.Session, float]] = {}
+_SESSION_TTL_SECONDS = 3600
+_SESSION_MAX = 200
 
 
 def _create_session(http_proxy: str | None) -> requests.Session:
@@ -53,14 +56,29 @@ def _create_session(http_proxy: str | None) -> requests.Session:
     return session
 
 
+def _evict_stale_sessions(now: float | None = None) -> None:
+    now = now if now is not None else time.time()
+    expired = [
+        sid
+        for sid, (_, ts) in _sessions.items()
+        if now - ts > _SESSION_TTL_SECONDS
+    ]
+    for sid in expired:
+        _sessions.pop(sid, None)
+    while len(_sessions) > _SESSION_MAX:
+        oldest = min(_sessions.items(), key=lambda item: item[1][1])[0]
+        _sessions.pop(oldest, None)
+
+
 def get_or_create_session(sid: str, http_proxy: str | None) -> requests.Session:
+    now = time.time()
     with _lock:
+        _evict_stale_sessions(now)
         if sid not in _sessions:
-            _sessions[sid] = _create_session(http_proxy)
-            if len(_sessions) > 200:
-                oldest = next(iter(_sessions))
-                _sessions.pop(oldest, None)
-        return _sessions[sid]
+            _sessions[sid] = (_create_session(http_proxy), now)
+        session, _ = _sessions[sid]
+        _sessions[sid] = (session, now)
+        return session
 
 
 def new_session_id() -> str:
@@ -146,7 +164,7 @@ def _proxy_location_from_absolute(absolute_url: str) -> str | None:
     return location
 
 
-def _row_for_open(process: Process, list_html: str) -> ProcessRow:
+def _row_for_open(process: Process, list_html: str) -> ProcessRow | None:
     resolved = row_from_list_html(list_html, process.nid_proceso)
     if resolved is not None:
         if resolved.link_id != (process.link_id or ""):
@@ -157,7 +175,12 @@ def _row_for_open(process: Process, list_html: str) -> ProcessRow:
                 process.nid_proceso,
             )
         return resolved
-    return process_row_from_model(process)
+    logger.warning(
+        "SEACE proxy: fila no encontrada en listado vivo (nid=%s); "
+        "no se usa link_id almacenado",
+        process.nid_proceso,
+    )
+    return None
 
 
 def _try_server_open_ficha(
@@ -171,7 +194,7 @@ def _try_server_open_ficha(
     if not vs_el or not vs_el.get("value"):
         return None
     row = _row_for_open(process, list_html)
-    if not row.link_id:
+    if row is None or not row.link_id:
         return None
     try:
         action = _buscador_form_action(soup, list_url)
@@ -252,6 +275,8 @@ def _auto_open_script(row: ProcessRow) -> str:
 
 def _inject_auto_open(html: str, process: Process, *, list_html: str) -> str:
     row = _row_for_open(process, list_html)
+    if row is None or not row.link_id:
+        return html
     script = _auto_open_script(row)
     if re.search(r"</body>", html, re.I):
         return re.sub(r"</body>", script + "</body>", html, count=1, flags=re.I)

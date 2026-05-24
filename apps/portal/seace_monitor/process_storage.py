@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from .config import AppConfig
-from .db.models import Process, ProcessStatus
+from .db.models import Process, ProcessStatus, utcnow
 from .tenant_paths import procesos_root, remap_process_data_dir, trash_root
 
 logger = logging.getLogger(__name__)
@@ -179,6 +179,34 @@ def restore_archived_process(config: AppConfig, process: Process) -> None:
         process.status = ProcessStatus.analizada
     else:
         process.status = ProcessStatus.descargada
+
+
+def recover_stale_downloads(
+    config: AppConfig, session: Session, stale_seconds: int
+) -> int:
+    """Resetea descargas colgadas en descargando con carpeta parcial o sin progreso."""
+    if stale_seconds <= 0:
+        return 0
+    from datetime import timedelta, timezone
+
+    cutoff = utcnow() - timedelta(seconds=stale_seconds)
+    recovered = 0
+    for proc in session.query(Process).filter(Process.status == ProcessStatus.descargando):
+        updated = proc.updated_at
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        if updated >= cutoff:
+            continue
+        delete_process_data_dir(config, proc)
+        clear_process_download_metadata(proc)
+        proc.status = ProcessStatus.publicada
+        recovered += 1
+        logger.warning(
+            "Descarga obsoleta recuperada: proceso id=%s nid=%s",
+            proc.id,
+            proc.nid_proceso,
+        )
+    return recovered
 
 
 def repair_processes_missing_data(config: AppConfig, session: Session) -> int:

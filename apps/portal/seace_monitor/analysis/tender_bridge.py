@@ -18,6 +18,7 @@ from ..tender_repo import resolve_tender_repo_root
 logger = logging.getLogger(__name__)
 
 EXIT_VISUAL_PENDING = 23
+PLANO_SCHEMA_VERSION = "0.3"
 
 
 def tender_project_root(proc_dir: Path) -> Path:
@@ -104,9 +105,23 @@ def resolve_planos_pending(project: Path, mode: str) -> bool:
     planos_dir.mkdir(parents=True, exist_ok=True)
 
     for item in pending:
-        stem = item["stem"]
-        audit_path = Path(item["audit_path"])
-        audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        if not isinstance(item, dict):
+            logger.warning("Entrada inválida en planos pending: %r", item)
+            continue
+        stem = item.get("stem")
+        audit_raw = item.get("audit_path")
+        if not stem or not audit_raw:
+            logger.warning("planos pending incompleto (stem/audit_path): %r", item)
+            continue
+        audit_path = Path(audit_raw)
+        if not audit_path.is_file():
+            logger.warning("audit_path inexistente para %s: %s", stem, audit_path)
+            continue
+        try:
+            audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("audit_path ilegible para %s: %s", stem, exc)
+            continue
         pages = []
         for cand in audit.get("candidates", []):
             pages.append(
@@ -124,7 +139,8 @@ def resolve_planos_pending(project: Path, mode: str) -> bool:
             )
         out = planos_dir / f"planos_analysis_{stem}.json"
         payload = {
-            "schema_version": "0.3",
+            "schema_version": PLANO_SCHEMA_VERSION,
+            "analysis_status": "placeholder",
             "source_pdf": item.get("clean_pdf", ""),
             "model": "seace-monitor/auto_leave",
             "pages": pages,
@@ -132,7 +148,7 @@ def resolve_planos_pending(project: Path, mode: str) -> bool:
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         logger.info("planos_analysis auto_leave: %s (%s páginas)", out.name, len(pages))
 
-    marker.unlink()
+    marker.unlink(missing_ok=True)
     return True
 
 
@@ -179,8 +195,11 @@ def run_axis0_gemini(
         parts.append(f"\n\n### ARCHIVO: {md.name}\n\n{text[:80_000]}")
 
     user = "".join(parts)
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
+    from .gemini_client import generate_content_with_retry, get_genai_client
+
+    client = get_genai_client(api_key)
+    response = generate_content_with_retry(
+        client,
         model=tender_cfg.gemini_model,
         contents=[system, user],
     )
@@ -252,8 +271,18 @@ def run_tender_stage1(config: AppConfig, proc_dir: Path, documents_dir: Path) ->
             code = run_step1_deterministic(repo, project, overwrite=False)
 
     if code != 0:
+        art = project / "artifacts"
+        hints: list[str] = []
+        for rel in (
+            "step_1_3_outputs.json",
+            "step_1_normalizados",
+            "step_1_planos_candidates_pending.json",
+        ):
+            path = art / rel
+            hints.append(f"{rel}={'ok' if path.exists() else 'missing'}")
         raise RuntimeError(
-            f"tender_procurement run_step1_to_1_3 terminó con código {code}"
+            f"tender_procurement run_step1_to_1_3 terminó con código {code}. "
+            f"Artefactos: {', '.join(hints)}"
         )
 
     result: dict[str, Any] = {

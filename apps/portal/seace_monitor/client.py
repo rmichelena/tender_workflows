@@ -15,6 +15,18 @@ from .http_util import requests_proxies
 
 logger = logging.getLogger(__name__)
 
+_FICHA_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.I,
+)
+
+
+def validate_ficha_id(ficha_id: str) -> str:
+    text = (ficha_id or "").strip()
+    if not _FICHA_ID_RE.match(text):
+        raise ValueError(f"ficha_id inválido: {ficha_id!r}")
+    return text
+
 BASE_URL = "https://prod2.seace.gob.pe/seacebus-uiwd-pub"
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -256,7 +268,12 @@ class SeaceClient:
         if not ficha_id:
             raise RuntimeError(f"No se obtuvo ID de ficha para proceso {row.nid_proceso}")
 
+        ficha_id = validate_ficha_id(ficha_id)
         return FichaResult(ficha_id=ficha_id, html=r2.text, url=r2.url)
+
+    def refresh_list_page_state(self, page_index: int = 0) -> None:
+        """Re-sincroniza ViewState del listado tras abrir una ficha (JSF invalida estado)."""
+        self.fetch_list_page(page_index)
 
 
 def _cell_text(cell: Any) -> str:

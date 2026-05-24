@@ -78,13 +78,14 @@ def parse_seace_date(value: str | None) -> datetime | None:
     for fmt in (
         "%d/%m/%Y %H:%M",
         "%d/%m/%Y",
-        "%d/%m/%y %H:%M",
-        "%d/%m/%y",
     ):
         try:
-            return datetime.strptime(text, fmt).replace(tzinfo=LIMA)
+            dt = datetime.strptime(text, fmt).replace(tzinfo=LIMA)
         except ValueError:
             continue
+        if dt.year < 2000 or dt.year > datetime.now(LIMA).year + 2:
+            return None
+        return dt
     return None
 
 

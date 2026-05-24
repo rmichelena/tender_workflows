@@ -19,18 +19,50 @@ UPLOAD_SUFFIXES = {".pdf", ".docx", ".doc", ".xlsx", ".xls"}
 CONVERTIBLE_SUFFIXES = {".docx", ".doc", ".xlsx", ".xls"}
 ANALYZABLE_SUFFIXES = UPLOAD_SUFFIXES
 GEMINI_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+GEMINI_MAX_PDF_COUNT = 8
+GEMINI_MAX_TOTAL_BYTES = 48 * 1024 * 1024
+LIBREOFFICE_CONVERT_TIMEOUT = 900
 
 
-def validate_gemini_upload_size(path: Path) -> None:
+def validate_gemini_upload_size(path: Path, *, merged: bool = False) -> None:
     size = path.stat().st_size
+    if size <= 0:
+        raise RuntimeError(
+            f"{path.name} está vacío o corrupto; no se puede enviar a Gemini."
+        )
     if size <= GEMINI_MAX_UPLOAD_BYTES:
         return
     size_mb = size / (1024 * 1024)
     limit_mb = GEMINI_MAX_UPLOAD_BYTES / (1024 * 1024)
+    if merged:
+        raise RuntimeError(
+            f"Los documentos combinados ({size_mb:.1f} MB) exceden el límite de Gemini "
+            f"(~{limit_mb:.0f} MB). Selecciona menos archivos o más pequeños."
+        )
     raise RuntimeError(
         f"{path.name} pesa {size_mb:.1f} MB; Gemini acepta hasta ~{limit_mb:.0f} MB por archivo. "
         "Elige un archivo más pequeño (p. ej. la versión DOCX editable en lugar del PDF firmado)."
     )
+
+
+def validate_gemini_upload_batch(paths: list[Path]) -> None:
+    if not paths:
+        raise RuntimeError("No hay archivos para subir a Gemini.")
+    if len(paths) > GEMINI_MAX_PDF_COUNT:
+        raise RuntimeError(
+            f"Demasiados archivos seleccionados ({len(paths)}). "
+            f"Máximo recomendado: {GEMINI_MAX_PDF_COUNT} PDFs por análisis."
+        )
+    total = sum(p.stat().st_size for p in paths)
+    if total <= 0:
+        raise RuntimeError("Los archivos seleccionados están vacíos.")
+    if total > GEMINI_MAX_TOTAL_BYTES:
+        total_mb = total / (1024 * 1024)
+        limit_mb = GEMINI_MAX_TOTAL_BYTES / (1024 * 1024)
+        raise RuntimeError(
+            f"El lote seleccionado pesa {total_mb:.1f} MB (límite ~{limit_mb:.0f} MB). "
+            "Selecciona menos archivos o versiones más livianas."
+        )
 
 
 def normalize_doc_name(name: str) -> str:
@@ -184,20 +216,26 @@ def select_bases_document(documents_dir: Path) -> Path:
 def _convert_to_pdf(source: Path, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     with _LIBREOFFICE_LOCK:
-        proc = subprocess.run(
-            [
-                "soffice",
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                str(out_dir),
-                str(source),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        try:
+            proc = subprocess.run(
+                [
+                    "soffice",
+                    "--headless",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    str(out_dir),
+                    str(source),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=LIBREOFFICE_CONVERT_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"LibreOffice no terminó de convertir {source.name} en "
+                f"{LIBREOFFICE_CONVERT_TIMEOUT}s. Archivo muy grande o conversión colgada."
+            ) from exc
     if proc.returncode != 0:
         raise RuntimeError(
             f"LibreOffice no convirtió {source.name}: {(proc.stderr or proc.stdout)[-1000:]}"
@@ -208,6 +246,7 @@ def _convert_to_pdf(source: Path, out_dir: Path) -> Path:
         if not pdfs:
             raise RuntimeError(f"Conversión a PDF no produjo salida para {source.name}")
         pdf = pdfs[0]
+    validate_gemini_upload_size(pdf)
     return pdf
 
 
