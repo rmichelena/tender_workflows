@@ -1,7 +1,12 @@
-"""Proxy HTTP hacia SEACE para navegación JSF completa en el navegador."""
+"""Proxy HTTP hacia SEACE para navegación JSF completa en el navegador.
+
+Nota operativa: las sesiones proxy viven en memoria del proceso web. Usar un solo
+worker uvicorn (o sticky sessions) cuando se use /seace/p; ver deploy/README.md.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -41,10 +46,20 @@ REWRITE_TYPES = (
     "application/x-javascript",
 )
 
+_JSF_FORWARD_HEADERS = (
+    "accept",
+    "accept-language",
+    "content-type",
+    "faces-request",
+    "x-requested-with",
+)
+
 _lock = threading.Lock()
 _sessions: dict[str, tuple[requests.Session, float]] = {}
+_session_locks: dict[str, threading.Lock] = {}
 _SESSION_TTL_SECONDS = 3600
 _SESSION_MAX = 200
+_SESSION_CLEANUP_INTERVAL_SECONDS = 300
 
 
 def _create_session(http_proxy: str | None) -> requests.Session:
@@ -65,9 +80,17 @@ def _evict_stale_sessions(now: float | None = None) -> None:
     ]
     for sid in expired:
         _sessions.pop(sid, None)
+        _session_locks.pop(sid, None)
     while len(_sessions) > _SESSION_MAX:
         oldest = min(_sessions.items(), key=lambda item: item[1][1])[0]
         _sessions.pop(oldest, None)
+        _session_locks.pop(oldest, None)
+
+
+def evict_stale_sessions(now: float | None = None) -> None:
+    """Limpia sesiones proxy expiradas (también invocado periódicamente)."""
+    with _lock:
+        _evict_stale_sessions(now)
 
 
 def get_or_create_session(sid: str, http_proxy: str | None) -> requests.Session:
@@ -76,9 +99,29 @@ def get_or_create_session(sid: str, http_proxy: str | None) -> requests.Session:
         _evict_stale_sessions(now)
         if sid not in _sessions:
             _sessions[sid] = (_create_session(http_proxy), now)
+            _session_locks[sid] = threading.Lock()
         session, _ = _sessions[sid]
         _sessions[sid] = (session, now)
         return session
+
+
+def _session_request_lock(sid: str) -> threading.Lock:
+    with _lock:
+        lock = _session_locks.get(sid)
+        if lock is None:
+            lock = threading.Lock()
+            _session_locks[sid] = lock
+        return lock
+
+
+async def periodic_session_cleanup(interval_seconds: int = _SESSION_CLEANUP_INTERVAL_SECONDS):
+    """Tarea asyncio para expirar sesiones proxy durante idle."""
+    try:
+        while True:
+            await asyncio.sleep(interval_seconds)
+            evict_stale_sessions()
+    except asyncio.CancelledError:
+        return
 
 
 def new_session_id() -> str:
@@ -129,6 +172,12 @@ def _rewrite_url(url: str) -> str:
 def _rewrite_text(text: str) -> str:
     text = text.replace(f"{SEACE_ORIGIN}:443{SEACE_APP}/", f"{PROXY_ROOT}/")
     text = text.replace(f"{SEACE_ORIGIN}{SEACE_APP}/", f"{PROXY_ROOT}/")
+    text = re.sub(
+        r'url\(\s*(["\']?)/seacebus-uiwd-pub/',
+        rf"url(\1{PROXY_ROOT}/",
+        text,
+        flags=re.I,
+    )
     text = re.sub(r'(?<=["\'])/seacebus-uiwd-pub/', f"{PROXY_ROOT}/", text)
     return text
 
@@ -273,10 +322,24 @@ def _auto_open_script(row: ProcessRow) -> str:
     )
 
 
+def _open_failure_notice(process: Process) -> str:
+    label = process.nomenclatura or process.nid_proceso
+    return (
+        '<div class="seace-open-notice" style="background:#fef2f2;border:1px solid #fca5a5;'
+        'padding:1rem;margin:1rem;border-radius:4px">'
+        f"No se pudo abrir automáticamente la ficha de <strong>{label}</strong> en SEACE. "
+        "Localiza el proceso en el listado de abajo o vuelve al portal e inténtalo más tarde."
+        "</div>"
+    )
+
+
 def _inject_auto_open(html: str, process: Process, *, list_html: str) -> str:
     row = _row_for_open(process, list_html)
     if row is None or not row.link_id:
-        return html
+        notice = _open_failure_notice(process)
+        if re.search(r"</body>", html, re.I):
+            return re.sub(r"</body>", notice + "</body>", html, count=1, flags=re.I)
+        return html + notice
     script = _auto_open_script(row)
     if re.search(r"</body>", html, re.I):
         return re.sub(r"</body>", script + "</body>", html, count=1, flags=re.I)
@@ -292,12 +355,18 @@ def _upstream_path(path: str, query: str) -> str:
 
 def _forward_headers(request: Request) -> dict[str, str]:
     headers: dict[str, str] = {"User-Agent": USER_AGENT}
-    if request.headers.get("accept"):
-        headers["Accept"] = request.headers["accept"]
-    if request.headers.get("accept-language"):
-        headers["Accept-Language"] = request.headers["accept-language"]
-    if request.headers.get("content-type") and request.method == "POST":
-        headers["Content-Type"] = request.headers["content-type"]
+    for name in _JSF_FORWARD_HEADERS:
+        value = request.headers.get(name)
+        if not value:
+            continue
+        if name == "content-type" and request.method != "POST":
+            continue
+        key = "Content-Type" if name == "content-type" else name.title()
+        if name == "faces-request":
+            key = "Faces-Request"
+        elif name == "x-requested-with":
+            key = "X-Requested-With"
+        headers[key] = value
     return headers
 
 
@@ -373,30 +442,32 @@ def proxy_seace_request(
     upstream_url = _upstream_path(path, query)
     headers = _forward_headers(request)
 
+    sid_lock = _session_request_lock(sid)
     try:
-        if request.method == "GET":
-            upstream = session.get(
-                f"{SEACE_ORIGIN}{upstream_url}",
-                headers=headers,
-                timeout=60,
-                allow_redirects=False,
-            )
-        elif request.method == "HEAD":
-            upstream = session.head(
-                f"{SEACE_ORIGIN}{upstream_url}",
-                headers=headers,
-                timeout=60,
-                allow_redirects=False,
-            )
-        else:
-            payload = body if body is not None else b""
-            upstream = session.post(
-                f"{SEACE_ORIGIN}{upstream_url}",
-                data=payload,
-                headers=headers,
-                timeout=120,
-                allow_redirects=False,
-            )
+        with sid_lock:
+            if request.method == "GET":
+                upstream = session.get(
+                    f"{SEACE_ORIGIN}{upstream_url}",
+                    headers=headers,
+                    timeout=60,
+                    allow_redirects=False,
+                )
+            elif request.method == "HEAD":
+                upstream = session.head(
+                    f"{SEACE_ORIGIN}{upstream_url}",
+                    headers=headers,
+                    timeout=60,
+                    allow_redirects=False,
+                )
+            else:
+                payload = body if body is not None else b""
+                upstream = session.post(
+                    f"{SEACE_ORIGIN}{upstream_url}",
+                    data=payload,
+                    headers=headers,
+                    timeout=120,
+                    allow_redirects=False,
+                )
     except requests.RequestException as exc:
         logger.exception("Proxy SEACE falló: %s", upstream_url)
         return Response(f"Error conectando con SEACE: {exc}", status_code=502)
@@ -408,12 +479,13 @@ def proxy_seace_request(
         and upstream.status_code == 200
     ):
         list_url = f"{SEACE_ORIGIN}{upstream_url}"
-        proxied = _try_server_open_ficha(
-            session,
-            inject_process,
-            upstream.text,
-            list_url,
-        )
+        with sid_lock:
+            proxied = _try_server_open_ficha(
+                session,
+                inject_process,
+                upstream.text,
+                list_url,
+            )
         if proxied:
             return RedirectResponse(proxied, status_code=302)
 

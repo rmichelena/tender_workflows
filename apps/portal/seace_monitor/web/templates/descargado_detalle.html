@@ -70,7 +70,7 @@
             {{ file_icon(archivo) }}
             <div class="doc-meta">
               <div class="doc-name">
-                <a href="/descargados/{{ process.id }}/documentos/{{ archivo.rel_path }}" download="{{ archivo.nombre }}">{{ archivo.nombre }}</a>
+                <a href="/descargados/{{ process.id }}/documentos/{{ archivo.rel_path | urlquote_path }}" download="{{ archivo.nombre }}">{{ archivo.nombre }}</a>
               </div>
               <div class="doc-sub muted">
                 {{ archivo.origen }}
@@ -98,9 +98,13 @@
 
 <p style="margin-top:1.5rem">
   <a href="/descargados" class="btn btn-secondary">← Volver</a>
+  {% if process.status.value == 'descargada' %}
   <form method="post" action="/descargados/{{ process.id }}/descartar" style="display:inline">
     <button type="submit" class="btn btn-danger"{% if analizando %} disabled{% endif %}>Descartar</button>
   </form>
+  {% elif process.status.value == 'analizada' %}
+  <a href="/analizados/{{ process.id }}" class="btn btn-secondary">Ver análisis →</a>
+  {% endif %}
 </p>
 {% endblock %}
 {% block scripts %}

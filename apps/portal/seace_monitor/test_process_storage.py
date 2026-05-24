@@ -74,6 +74,9 @@ def test_discard_clears_metadata(tmp_path: Path):
         def delete(self, _obj):
             pass
 
+        def flush(self):
+            pass
+
     discard_process_downloads(cfg, proc, FakeSession())
     assert proc.data_dir is None
     assert proc.documentos_json is None
@@ -150,6 +153,24 @@ def test_purge_orphans_and_descartada(tmp_path: Path):
     assert not orphan.exists()
     assert keep.exists()
     assert stale_proc.documentos_json is None
+
+
+def test_archive_collision_uses_unique_suffix(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    proc_dir = _proc_dir(tmp_path)
+    proc_dir.mkdir(parents=True)
+    trash = trash_root(cfg)
+    trash.mkdir(parents=True)
+    (trash / proc_dir.name).mkdir()
+    (trash / f"1_{proc_dir.name}").mkdir()
+    proc = _proc(str(proc_dir), ProcessStatus.analizada)
+
+    archive_analyzed_process(cfg, proc)
+
+    dest = Path(proc.data_dir)
+    assert dest.is_dir()
+    assert dest.name.startswith(f"1_{proc_dir.name}_")
+    assert not proc_dir.exists()
 
 
 def test_resolve_restore_status_without_files(tmp_path: Path):

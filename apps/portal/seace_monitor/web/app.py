@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -54,6 +57,7 @@ from .markdown_render import render_free_reader_summary
 from .filters import publicaciones_query
 from .seace_proxy import (
     new_session_id,
+    periodic_session_cleanup,
     proxy_seace_request,
     seace_open_redirect,
     seace_view_path,
@@ -152,13 +156,20 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 )
         finally:
             db.close()
-        yield
+        cleanup_task = asyncio.create_task(periodic_session_cleanup())
+        try:
+            yield
+        finally:
+            cleanup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cleanup_task
 
     app = FastAPI(title="SEACE Monitor", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.globals["can_open_seace"] = can_open_seace
     templates.env.globals["seace_view_path"] = seace_view_path
+    templates.env.filters["urlquote_path"] = lambda value: quote(str(value), safe="/")
 
     def render(request: Request, name: str, **ctx):
         ctx["request"] = request
@@ -329,6 +340,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
         if proc.status == ProcessStatus.descargando:
             raise HTTPException(409, "Descarga en curso")
+        if proc.status != ProcessStatus.publicada:
+            raise HTTPException(
+                400, "Solo procesos publicados pueden descartarse desde Publicaciones"
+            )
         proc.status = ProcessStatus.descartada
         return _filter_redirect(
             entidad=entidad, objeto=objeto, sort=sort, dir=dir, scroll=scroll

@@ -48,6 +48,10 @@ docker compose --env-file .env -f docker-compose.vps.yml up -d --build
 - **Un solo worker** por volumen de datos: lock en `data/.worker.lock` (falla si `--scale worker=2`).
 - Heartbeat en `data/worker_heartbeat.json` para el healthcheck Docker (`worker-healthcheck`).
 
+## SEACE proxy
+
+- El proxy `/seace/p` guarda sesiones JSF **en memoria del proceso web**. Usar **un solo worker uvicorn** (como en el Dockerfile actual) o sticky sessions; con `--workers N>1` las cookies pueden enrutar a un worker sin sesión.
+
 ## Archivos en contenedor
 
 - `unar` + `p7zip-full` para ZIP/RAR en descargas SEACE (`document_prep.py` prueba `7z`, `unar`, `unrar`).

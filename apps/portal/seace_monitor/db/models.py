@@ -64,7 +64,9 @@ class Process(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    entity_id: Mapped[int] = mapped_column(ForeignKey("entities.id"), index=True)
+    entity_id: Mapped[int] = mapped_column(
+        ForeignKey("entities.id", ondelete="RESTRICT"), index=True
+    )
     anio: Mapped[int] = mapped_column(Integer, index=True)
 
     nid_proceso: Mapped[str] = mapped_column(String(32), index=True)

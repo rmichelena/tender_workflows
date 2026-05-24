@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import time
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -42,6 +43,35 @@ def resolve_process_data_dir(config: AppConfig, data_dir: str | None) -> Path | 
             continue
     logger.warning("data_dir fuera de procesos/trash, no se borra: %s", path)
     return None
+
+
+def _delete_resolved_path(path: Path | None) -> bool:
+    """Borra ruta ya resuelta en disco (sin tocar el modelo Process)."""
+    if path is None:
+        return False
+    if path.is_dir():
+        shutil.rmtree(path)
+        return True
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
+
+def _unique_subdir(parent: Path, base_name: str, process_id: int) -> Path:
+    """Destino sin colisión; nunca borra un directorio existente."""
+    for candidate in (
+        parent / base_name,
+        parent / f"{process_id}_{base_name}",
+    ):
+        if not candidate.exists():
+            return candidate
+    stamp = int(time.time())
+    while True:
+        candidate = parent / f"{process_id}_{base_name}_{stamp}"
+        if not candidate.exists():
+            return candidate
+        stamp += 1
 
 
 def delete_process_data_dir(config: AppConfig, process: Process) -> bool:
@@ -130,28 +160,29 @@ def resolve_restore_status(config: AppConfig, process: Process) -> ProcessStatus
 def discard_process_downloads(
     config: AppConfig, process: Process, session: Session
 ) -> None:
-    """Descarte desde descargada: borra disco, metadatos de descarga y análisis."""
-    if process.data_dir:
+    """Descarte desde descargada: limpia BD primero, luego borra disco."""
+    path = resolve_process_data_dir(config, process.data_dir)
+    if path is not None and path.is_dir():
         from .analysis.gemini_session import cleanup_gemini_session
 
-        cleanup_gemini_session(config, Path(process.data_dir))
-    delete_process_data_dir(config, process)
-    clear_process_download_metadata(process)
+        cleanup_gemini_session(config, path)
     delete_process_analysis(session, process)
+    clear_process_download_metadata(process)
+    session.flush()
+    if path is not None and _delete_resolved_path(path):
+        logger.info("Eliminada carpeta proceso id=%s path=%s", process.id, path)
 
 
 def archive_analyzed_process(config: AppConfig, process: Process) -> None:
     """Archiva analizado/portafolio: mueve carpeta a trash/, conserva análisis."""
+    if process.status == ProcessStatus.archivada:
+        return
     src = resolve_process_data_dir(config, process.data_dir)
     trash = trash_root(config)
     trash.mkdir(parents=True, exist_ok=True)
 
     if src is not None and src.is_dir():
-        dest = trash / src.name
-        if dest.exists():
-            dest = trash / f"{process.id}_{src.name}"
-            if dest.exists():
-                shutil.rmtree(dest)
+        dest = _unique_subdir(trash, src.name, process.id)
         shutil.move(str(src), str(dest))
         process.data_dir = str(dest.resolve())
     process.status = ProcessStatus.archivada
@@ -170,9 +201,7 @@ def restore_archived_process(config: AppConfig, process: Process) -> None:
 
     procesos = procesos_root(config)
     procesos.mkdir(parents=True, exist_ok=True)
-    dest = procesos / src.name
-    if dest.exists():
-        dest = procesos / f"{process.id}_{src.name}"
+    dest = _unique_subdir(procesos, src.name, process.id)
     shutil.move(str(src), str(dest))
     process.data_dir = str(dest.resolve())
     if process.analysis and process.analysis.status == "done":

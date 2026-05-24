@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import random
 import re
+import time
 from pathlib import Path
 
 import requests
@@ -16,6 +17,9 @@ ALFRESCO_API = (
 )
 ALFRESCO_BASE = "https://alfprod.seace.gob.pe/alfresco"
 ALFRESCO_BASE_OP = "https://prodcont2.seace.gob.pe/alfresco"
+
+_DOWNLOAD_RETRIES = 3
+_DOWNLOAD_BACKOFF_SECONDS = (1.0, 2.0)
 
 
 def resolve_download_url(
@@ -46,7 +50,7 @@ def resolve_download_url(
     raise RuntimeError(f"Alfresco result={result} para documento {doc_uuid}")
 
 
-def download_file(
+def _download_file_once(
     doc_uuid: str, dest: Path, guest: bool = False, http_proxy: str | None = None
 ) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -59,13 +63,33 @@ def download_file(
     if part.exists():
         part.unlink()
     written = 0
-    with open(part, "wb") as f:
-        for chunk in r.iter_content(chunk_size=65536):
-            if chunk:
-                f.write(chunk)
-                written += len(chunk)
+    try:
+        with open(part, "wb") as f:
+            for chunk in r.iter_content(chunk_size=65536):
+                if chunk:
+                    f.write(chunk)
+                    written += len(chunk)
+    except Exception:
+        part.unlink(missing_ok=True)
+        raise
     if written == 0:
         part.unlink(missing_ok=True)
         raise RuntimeError(f"Descarga vacía para documento {doc_uuid}")
     part.replace(dest)
     return dest
+
+
+def download_file(
+    doc_uuid: str, dest: Path, guest: bool = False, http_proxy: str | None = None
+) -> Path:
+    last_error: Exception | None = None
+    for attempt in range(_DOWNLOAD_RETRIES):
+        try:
+            return _download_file_once(doc_uuid, dest, guest=guest, http_proxy=http_proxy)
+        except (requests.RequestException, RuntimeError, OSError) as exc:
+            last_error = exc
+            if attempt < _DOWNLOAD_RETRIES - 1:
+                backoff = _DOWNLOAD_BACKOFF_SECONDS[attempt]
+                time.sleep(backoff)
+    assert last_error is not None
+    raise last_error

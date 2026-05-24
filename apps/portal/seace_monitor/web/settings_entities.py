@@ -73,6 +73,50 @@ def _diff_selection(
     return added, removed_ids, added_entities
 
 
+def _validate_save_request(
+    body: EntitiesSaveRequest,
+    *,
+    entities: list[Entity],
+    selected: set[str],
+    added_entities: list[Entity],
+) -> tuple[RemovedEntityPolicy, ScanOptions | None]:
+    known = {e.ruc for e in entities}
+    unknown = selected - known
+    if unknown:
+        raise HTTPException(400, f"RUC desconocidos: {', '.join(sorted(unknown)[:5])}")
+
+    try:
+        policy = RemovedEntityPolicy(body.removed_policy)
+    except ValueError as exc:
+        raise HTTPException(400, "Política de eliminación inválida") from exc
+
+    scan_options: ScanOptions | None = None
+    if added_entities and body.added_scan_mode:
+        try:
+            mode = ScanDateMode(body.added_scan_mode)
+        except ValueError as exc:
+            raise HTTPException(400, "Modo de escaneo inválido") from exc
+        since: date | None = None
+        if mode == ScanDateMode.since_date:
+            if not body.since_date:
+                raise HTTPException(400, "Fecha requerida")
+            since = parse_ddmmyy(body.since_date)
+            if since is None:
+                raise HTTPException(
+                    400,
+                    f"Fecha inválida o inexistente: {body.since_date!r} "
+                    "(use dd/mm/yy, día real del calendario)",
+                )
+        scan_options = ScanOptions(
+            entity_ids=frozenset(e.id for e in added_entities),
+            date_mode=mode,
+            since_date=since,
+            multipage=True,
+        )
+
+    return policy, scan_options
+
+
 def register_settings_routes(app, config: AppConfig, render, get_db):
     @app.get("/settings/entidades", response_class=HTMLResponse)
     def settings_entidades(request: Request, db: Session = Depends(get_db)):
@@ -121,44 +165,19 @@ def register_settings_routes(app, config: AppConfig, render, get_db):
     ):
         selected = _normalize_rucs(body.selected_rucs)
         entities = db.query(Entity).all()
-        known = {e.ruc for e in entities}
-        unknown = selected - known
-        if unknown:
-            raise HTTPException(400, f"RUC desconocidos: {', '.join(sorted(unknown)[:5])}")
-
         added_rucs, removed_ids, added_entities = _diff_selection(db, selected)
+        policy, scan_options = _validate_save_request(
+            body,
+            entities=entities,
+            selected=selected,
+            added_entities=added_entities,
+        )
+
         for ent in entities:
             ent.activa = ent.ruc in selected
 
-        try:
-            policy = RemovedEntityPolicy(body.removed_policy)
-        except ValueError as exc:
-            raise HTTPException(400, "Política de eliminación inválida") from exc
-
-        if removed_ids:
-            apply_removed_entity_policy(db, config, list(removed_ids), policy)
-
+        cleanup = apply_removed_entity_policy(db, config, list(removed_ids), policy)
         db.commit()
-
-        scan_options: ScanOptions | None = None
-        if added_entities and body.added_scan_mode:
-            try:
-                mode = ScanDateMode(body.added_scan_mode)
-            except ValueError as exc:
-                raise HTTPException(400, "Modo de escaneo inválido") from exc
-            since: date | None = None
-            if mode == ScanDateMode.since_date:
-                if not body.since_date:
-                    raise HTTPException(400, "Fecha requerida")
-                since = parse_ddmmyy(body.since_date)
-                if since is None:
-                    raise HTTPException(400, "Fecha inválida (use dd/mm/yy)")
-            scan_options = ScanOptions(
-                entity_ids=frozenset(e.id for e in added_entities),
-                date_mode=mode,
-                since_date=since,
-                multipage=True,
-            )
 
         if scan_options:
             entity_ids = list(scan_options.entity_ids or [])
@@ -170,6 +189,8 @@ def register_settings_routes(app, config: AppConfig, render, get_db):
                 "added_scan_scheduled": scan_options is not None,
                 "added_count": len(added_rucs),
                 "removed_count": len(removed_ids),
+                "cleanup_affected": cleanup.affected,
+                "cleanup_deferred": cleanup.deferred,
             }
         )
 

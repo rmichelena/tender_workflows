@@ -102,9 +102,9 @@
       {% if doc.downloaded and doc.filename %}
       <div class="doc-actions">
         {% if doc.icon == 'pdf' %}
-        <a href="/analizados/{{ process.id }}/preview/{{ doc.filename }}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">Preview</a>
+        <a href="/analizados/{{ process.id }}/preview/{{ doc.filename | urlquote_path }}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">Preview</a>
         {% endif %}
-        <a href="/analizados/{{ process.id }}/documentos/{{ doc.filename }}" class="btn btn-primary btn-sm" download>Descargar</a>
+        <a href="/analizados/{{ process.id }}/documentos/{{ doc.filename | urlquote_path }}" class="btn btn-primary btn-sm" download>Descargar</a>
       </div>
       {% endif %}
     </li>
