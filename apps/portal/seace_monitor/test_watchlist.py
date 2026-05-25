@@ -46,8 +46,10 @@ def test_parse_cronograma_diff():
     rows = parse_cronograma(current, prev_cronograma_json=prev)
     assert len(rows) == 1
     assert rows[0].changed is True
+    assert rows[0].fecha_fin_changed is True
     assert rows[0].fecha_fin_prev == "05/01/26"
     assert rows[0].fecha_fin == "10/01/26"
+    assert rows[0].fecha_inicio_changed is False
 
 
 def test_parse_cronograma_new_and_removed_stages():

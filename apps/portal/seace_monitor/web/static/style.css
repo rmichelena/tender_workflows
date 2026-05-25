@@ -67,6 +67,21 @@ body {
   font-size: 0.85em;
   text-decoration: line-through;
 }
+.cronograma-val-changed {
+  color: #b91c1c;
+  font-weight: 700;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.cronograma-val-new {
+  color: #047857;
+  font-weight: 700;
+}
+.doc-fecha {
+  font-size: 0.9em;
+  white-space: nowrap;
+}
 .cronograma-changed {
   background: #fffbeb;
 }

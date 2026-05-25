@@ -73,6 +73,7 @@ class ArchivoAnalizable:
     origen: str
     tipo_documento: str
     default_checked: bool
+    fecha_publicacion: str = ""
     is_new: bool = False
 
 
@@ -86,6 +87,34 @@ class CronogramaFila:
     changed: bool = False
     is_new: bool = False
     is_removed: bool = False
+    fecha_inicio_changed: bool = False
+    fecha_fin_changed: bool = False
+
+
+def _documentos_by_uuid(documentos_json: str | None) -> dict[str, dict]:
+    if not documentos_json:
+        return {}
+    try:
+        raw = json.loads(documentos_json)
+    except json.JSONDecodeError:
+        return {}
+    index: dict[str, dict] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        uuid = str(item.get("uuid", "")).strip()
+        if uuid:
+            index[uuid] = item
+    return index
+
+
+def _merge_doc_meta(meta: dict, uuid_index: dict[str, dict]) -> dict:
+    uuid = str(meta.get("uuid", "")).strip()
+    if uuid and uuid in uuid_index:
+        merged = dict(uuid_index[uuid])
+        merged.update(meta)
+        return merged
+    return meta
 
 
 def _document_uuids_from_json(documentos_json: str | None) -> set[str]:
@@ -238,6 +267,7 @@ def list_analyzable_files(
         return []
 
     by_path = _index_manifest_by_path(docs_dir)
+    uuid_index = _documentos_by_uuid(process.documentos_json)
     rows: list[ArchivoAnalizable] = []
     extract_root = docs_dir / "_extracted"
 
@@ -248,7 +278,7 @@ def list_analyzable_files(
             continue
         if path.suffix.lower() not in ANALYZABLE_SUFFIXES:
             continue
-        meta = by_path.get(path.resolve(), {})
+        meta = _merge_doc_meta(by_path.get(path.resolve(), {}), uuid_index)
         nombre = meta.get("nombre") or path.name
         tipo = meta.get("tipo_documento", "")
         rows.append(
@@ -260,6 +290,7 @@ def list_analyzable_files(
                 size_label=format_bytes(path.stat().st_size),
                 origen="descarga SEACE",
                 tipo_documento=tipo,
+                fecha_publicacion=str(meta.get("fecha_publicacion", "") or ""),
                 default_checked=False,
             )
         )
@@ -309,6 +340,8 @@ def list_downloaded_documents(
     meta_list = json.loads(process.documentos_json or "[]")
     docs_dir = _documents_dir(process)
     on_disk = _index_downloaded_files(docs_dir) if docs_dir else {}
+    uuid_index = _documentos_by_uuid(process.documentos_json)
+    manifest_by_path = _index_manifest_by_path(docs_dir) if docs_dir else {}
 
     rows: list[DocumentoDescargado] = []
     seen_paths: set[str] = set()
@@ -382,7 +415,7 @@ def list_downloaded_documents(
             key = str(path.resolve())
             if key in seen_paths:
                 continue
-            meta = _index_manifest_by_path(docs_dir).get(path.resolve(), {})
+            meta = _merge_doc_meta(manifest_by_path.get(path.resolve(), {}), uuid_index)
             seen_paths.add(key)
             rows.append(
                 DocumentoDescargado(
@@ -393,7 +426,7 @@ def list_downloaded_documents(
                     size_label=format_bytes(path.stat().st_size),
                     etapa="",
                     tipo_documento="",
-                    fecha_publicacion="",
+                    fecha_publicacion=str(meta.get("fecha_publicacion", "") or ""),
                     downloaded=True,
                     filename=path.name,
                 )
@@ -446,24 +479,21 @@ def parse_cronograma(
         fecha_inicio_prev = str(prev.get("fecha_inicio", "")) if prev else None
         fecha_fin_prev = str(prev.get("fecha_fin", "")) if prev else None
         is_new = bool(prev_by_etapa) and prev is None
-        changed = bool(
-            prev
-            and (
-                fecha_inicio_prev != fecha_inicio or fecha_fin_prev != fecha_fin
-            )
-        )
-        if is_new:
-            changed = True
+        inicio_changed = bool(prev and fecha_inicio_prev != fecha_inicio)
+        fin_changed = bool(prev and fecha_fin_prev != fecha_fin)
+        changed = is_new or inicio_changed or fin_changed
         current_etapas.add(etapa)
         rows.append(
             CronogramaFila(
                 etapa=etapa,
                 fecha_inicio=fecha_inicio,
                 fecha_fin=fecha_fin,
-                fecha_inicio_prev=fecha_inicio_prev if changed and prev else None,
-                fecha_fin_prev=fecha_fin_prev if changed and prev else None,
+                fecha_inicio_prev=fecha_inicio_prev if inicio_changed else None,
+                fecha_fin_prev=fecha_fin_prev if fin_changed else None,
                 changed=changed,
                 is_new=is_new,
+                fecha_inicio_changed=inicio_changed,
+                fecha_fin_changed=fin_changed,
             )
         )
     for etapa, prev_item in prev_by_etapa.items():

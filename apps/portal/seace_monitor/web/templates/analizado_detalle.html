@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import status_cell, file_icon %}
+{% from "_macros.html" import status_cell, file_icon, doc_fecha, cronograma_fecha %}
 {% block title %}{{ process.nomenclatura }} — Análisis{% endblock %}
 {% block content %}
 <h2>{{ process.nomenclatura }}</h2>
@@ -50,26 +50,8 @@
             {% if row.is_new %}<span class="cronograma-tag cronograma-tag-new">Nueva</span>{% endif %}
             {% if row.is_removed %}<span class="cronograma-tag cronograma-tag-removed">Eliminada</span>{% endif %}
           </td>
-          <td>
-            {% if row.is_removed %}
-            <span class="cronograma-prev">{{ row.fecha_inicio_prev or '—' }}</span>
-            {% else %}
-            {% if row.fecha_inicio_prev and row.fecha_inicio_prev != row.fecha_inicio %}
-            <span class="cronograma-prev">{{ row.fecha_inicio_prev }}</span><br/>
-            {% endif %}
-            {{ row.fecha_inicio or '—' }}
-            {% endif %}
-          </td>
-          <td>
-            {% if row.is_removed %}
-            <span class="cronograma-prev">{{ row.fecha_fin_prev or '—' }}</span>
-            {% else %}
-            {% if row.fecha_fin_prev and row.fecha_fin_prev != row.fecha_fin %}
-            <span class="cronograma-prev">{{ row.fecha_fin_prev }}</span><br/>
-            {% endif %}
-            {{ row.fecha_fin or '—' }}
-            {% endif %}
-          </td>
+          <td>{{ cronograma_fecha(row.fecha_inicio, row.fecha_inicio_prev, row.fecha_inicio_changed, row.is_new, row.is_removed) }}</td>
+          <td>{{ cronograma_fecha(row.fecha_fin, row.fecha_fin_prev, row.fecha_fin_changed, row.is_new, row.is_removed) }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -119,7 +101,7 @@
     <li class="doc-item{% if not doc.downloaded %} doc-item-missing{% endif %}{% if doc.is_new %} doc-item-new{% endif %}">
       {{ file_icon(doc) }}
       <div class="doc-meta">
-        <div class="doc-name">{{ doc.nombre }}</div>
+        <div class="doc-name">{{ doc.nombre }}{{ doc_fecha(doc.fecha_publicacion) }}</div>
         {% if doc.etapa or doc.tipo_documento %}
         <div class="doc-sub muted">{{ doc.etapa }}{% if doc.etapa and doc.tipo_documento %} · {% endif %}{{ doc.tipo_documento }}</div>
         {% endif %}
@@ -153,7 +135,7 @@
           <input type="checkbox" name="selected_files" value="{{ archivo.rel_path }}"{% if archivo.default_checked %} checked{% endif %}/>
           {{ file_icon(archivo) }}
           <div class="doc-meta">
-            <div class="doc-name">{{ archivo.nombre }}</div>
+            <div class="doc-name">{{ archivo.nombre }}{{ doc_fecha(archivo.fecha_publicacion) }}</div>
             <div class="doc-sub muted">{{ archivo.origen }}</div>
           </div>
         </label>

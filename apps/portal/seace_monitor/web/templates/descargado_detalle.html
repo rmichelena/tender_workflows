@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import status_cell, file_icon %}
+{% from "_macros.html" import status_cell, file_icon, doc_fecha, cronograma_fecha %}
 {% block title %}{{ process.nomenclatura }} — Descargado{% endblock %}
 {% block content %}
 {% set analizando = process.analysis and process.analysis.status == 'running' %}
@@ -52,26 +52,8 @@
             {% if row.is_new %}<span class="cronograma-tag cronograma-tag-new">Nueva</span>{% endif %}
             {% if row.is_removed %}<span class="cronograma-tag cronograma-tag-removed">Eliminada</span>{% endif %}
           </td>
-          <td>
-            {% if row.is_removed %}
-            <span class="cronograma-prev">{{ row.fecha_inicio_prev or '—' }}</span>
-            {% else %}
-            {% if row.fecha_inicio_prev and row.fecha_inicio_prev != row.fecha_inicio %}
-            <span class="cronograma-prev">{{ row.fecha_inicio_prev }}</span><br/>
-            {% endif %}
-            {{ row.fecha_inicio or '—' }}
-            {% endif %}
-          </td>
-          <td>
-            {% if row.is_removed %}
-            <span class="cronograma-prev">{{ row.fecha_fin_prev or '—' }}</span>
-            {% else %}
-            {% if row.fecha_fin_prev and row.fecha_fin_prev != row.fecha_fin %}
-            <span class="cronograma-prev">{{ row.fecha_fin_prev }}</span><br/>
-            {% endif %}
-            {{ row.fecha_fin or '—' }}
-            {% endif %}
-          </td>
+          <td>{{ cronograma_fecha(row.fecha_inicio, row.fecha_inicio_prev, row.fecha_inicio_changed, row.is_new, row.is_removed) }}</td>
+          <td>{{ cronograma_fecha(row.fecha_fin, row.fecha_fin_prev, row.fecha_fin_changed, row.is_new, row.is_removed) }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -96,7 +78,7 @@
             {{ file_icon(archivo) }}
             <div class="doc-meta">
               <div class="doc-name">
-                <a href="/descargados/{{ process.id }}/documentos/{{ archivo.rel_path | urlquote_path }}" download="{{ archivo.nombre }}">{{ archivo.nombre }}</a>
+                <a href="/descargados/{{ process.id }}/documentos/{{ archivo.rel_path | urlquote_path }}" download="{{ archivo.nombre }}">{{ archivo.nombre }}</a>{{ doc_fecha(archivo.fecha_publicacion) }}
               </div>
               <div class="doc-sub muted">
                 {{ archivo.origen }}
