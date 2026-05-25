@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import status_cell, file_icon, doc_fecha, cronograma_fecha %}
+{% from "_macros.html" import status_cell, file_icon, doc_fecha, cronograma_fecha, doc_tree %}
 {% block title %}{{ process.nomenclatura }} — Descargado{% endblock %}
 {% block content %}
 {% set analizando = process.analysis and process.analysis.status == 'running' %}
@@ -64,31 +64,12 @@
   </div>
 
   <div class="detail-box detail-box-wide">
-    <h3>Archivos ({{ archivos|length }})</h3>
-    <p class="muted">ZIP/RAR ya descomprimidos. Marca los documentos a enviar al análisis.</p>
-    {% if archivos %}
+    <h3>Archivos ({{ documento_count }})</h3>
+    <p class="muted">Los ZIP/RAR se muestran con su contenido extraído. Marca los documentos a enviar al análisis.</p>
+    {% if documentos %}
     <form method="post" action="/descargados/{{ process.id }}/analizar" id="form-analizar"{% if analizando %} data-analyzing="1"{% endif %}>
-      <ul class="doc-list doc-list-selectable">
-        {% for archivo in archivos %}
-        <li class="doc-item{% if archivo.is_new %} doc-item-new{% endif %}">
-          <label class="doc-select-label">
-            <input type="checkbox" name="selected_files" value="{{ archivo.rel_path }}"
-              {% if archivo.default_checked %}checked{% endif %}
-              {% if analizando %}disabled{% endif %}/>
-            {{ file_icon(archivo) }}
-            <div class="doc-meta">
-              <div class="doc-name">
-                <a href="/descargados/{{ process.id }}/documentos/{{ archivo.rel_path | urlquote_path }}" download="{{ archivo.nombre }}">{{ archivo.nombre }}</a>{{ doc_fecha(archivo.fecha_publicacion) }}
-              </div>
-              <div class="doc-sub muted">
-                {{ archivo.origen }}
-                {% if archivo.tipo_documento %} · {{ archivo.tipo_documento }}{% endif %}
-              </div>
-            </div>
-            <span class="doc-size muted">{{ archivo.size_label }}</span>
-          </label>
-        </li>
-        {% endfor %}
+      <ul class="doc-list doc-list-selectable doc-list-tree">
+        {{ doc_tree(documentos, process.id, 'descargados', selectable=true, analizando=analizando) }}
       </ul>
       <p style="margin-top:1rem">
         {% if analizando %}

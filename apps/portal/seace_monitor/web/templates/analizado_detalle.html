@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import status_cell, file_icon, doc_fecha, cronograma_fecha %}
+{% from "_macros.html" import status_cell, file_icon, doc_fecha, cronograma_fecha, doc_tree %}
 {% block title %}{{ process.nomenclatura }} — Análisis{% endblock %}
 {% block content %}
 <h2>{{ process.nomenclatura }}</h2>
@@ -94,29 +94,10 @@
 {% endif %}
 
 <div class="detail-box detail-docs">
-  <h3>Documentos descargados ({{ documentos|length }})</h3>
+  <h3>Documentos descargados ({{ documento_count }})</h3>
   {% if documentos %}
-  <ul class="doc-list">
-    {% for doc in documentos %}
-    <li class="doc-item{% if not doc.downloaded %} doc-item-missing{% endif %}{% if doc.is_new %} doc-item-new{% endif %}">
-      {{ file_icon(doc) }}
-      <div class="doc-meta">
-        <div class="doc-name">{{ doc.nombre }}{{ doc_fecha(doc.fecha_publicacion) }}</div>
-        {% if doc.etapa or doc.tipo_documento %}
-        <div class="doc-sub muted">{{ doc.etapa }}{% if doc.etapa and doc.tipo_documento %} · {% endif %}{{ doc.tipo_documento }}</div>
-        {% endif %}
-      </div>
-      <span class="doc-size muted">{{ doc.size_label }}</span>
-      {% if doc.downloaded and doc.filename %}
-      <div class="doc-actions">
-        {% if doc.icon == 'pdf' %}
-        <a href="/analizados/{{ process.id }}/preview/{{ doc.filename | urlquote_path }}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">Preview</a>
-        {% endif %}
-        <a href="/analizados/{{ process.id }}/documentos/{{ doc.filename | urlquote_path }}" class="btn btn-primary btn-sm" download>Descargar</a>
-      </div>
-      {% endif %}
-    </li>
-    {% endfor %}
+  <ul class="doc-list doc-list-tree">
+    {{ doc_tree(documentos, process.id, 'analizados') }}
   </ul>
   {% else %}
   <p class="muted">Sin documentos registrados.</p>
@@ -128,19 +109,8 @@
   <h3>Volver a analizar</h3>
   <p class="muted">Selecciona documentos (los nuevos vienen marcados). El análisis anterior se archiva con timestamp.</p>
   <form method="post" action="/descargados/{{ process.id }}/analizar">
-    <ul class="doc-list doc-list-selectable">
-      {% for archivo in archivos %}
-      <li class="doc-item{% if archivo.is_new %} doc-item-new{% endif %}">
-        <label class="doc-select-label">
-          <input type="checkbox" name="selected_files" value="{{ archivo.rel_path }}"{% if archivo.default_checked %} checked{% endif %}/>
-          {{ file_icon(archivo) }}
-          <div class="doc-meta">
-            <div class="doc-name">{{ archivo.nombre }}{{ doc_fecha(archivo.fecha_publicacion) }}</div>
-            <div class="doc-sub muted">{{ archivo.origen }}</div>
-          </div>
-        </label>
-      </li>
-      {% endfor %}
+    <ul class="doc-list doc-list-selectable doc-list-tree">
+      {{ doc_tree(archivos, process.id, 'analizados', selectable=true) }}
     </ul>
     <p style="margin-top:1rem">
       <button type="submit" class="btn btn-primary">Volver a analizar seleccionados</button>

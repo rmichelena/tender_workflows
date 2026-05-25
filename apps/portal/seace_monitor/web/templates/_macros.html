@@ -30,3 +30,55 @@
 {{ valor or '—' }}
 {% endif %}
 {% endmacro %}
+
+{% macro doc_file_actions(process_id, node, route_prefix) %}
+{% if node.downloaded and node.rel_path %}
+<div class="doc-actions">
+  {% if node.previewable %}
+  <a href="/{{ route_prefix }}/{{ process_id }}/preview/{{ node.rel_path | urlquote_path }}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">Preview</a>
+  {% endif %}
+  <a href="/{{ route_prefix }}/{{ process_id }}/documentos/{{ node.rel_path | urlquote_path }}" class="btn btn-primary btn-sm" download="{{ node.nombre }}">Descargar</a>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro doc_tree(nodes, process_id, route_prefix, selectable=false, analizando=false) %}
+{% for node in nodes %}
+<li class="doc-item doc-tree-item{% if node.is_new %} doc-item-new{% endif %}{% if not node.downloaded %} doc-item-missing{% endif %}{% if node.is_folder %} doc-item-folder{% endif %}">
+  <div class="doc-row">
+    {% if selectable %}
+      {% if node.selectable %}
+      <input type="checkbox" class="doc-checkbox" name="selected_files" value="{{ node.rel_path }}"
+        {% if node.default_checked %}checked{% endif %}
+        {% if analizando %}disabled{% endif %}/>
+      {% else %}
+      <span class="doc-checkbox-spacer" aria-hidden="true"></span>
+      {% endif %}
+    {% endif %}
+    {{ file_icon(node) }}
+    <div class="doc-meta">
+      <div class="doc-name">{{ node.nombre }}{{ doc_fecha(node.fecha_publicacion) }}</div>
+      {% if node.etapa or node.tipo_documento or node.origen %}
+      <div class="doc-sub muted">
+        {% if node.etapa %}{{ node.etapa }}{% endif %}
+        {% if node.etapa and node.tipo_documento %} · {% endif %}
+        {% if node.tipo_documento %}{{ node.tipo_documento }}{% endif %}
+        {% if node.origen and not node.is_folder %}
+          {% if node.etapa or node.tipo_documento %} · {% endif %}{{ node.origen }}
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% if node.size_label %}
+    <span class="doc-size muted">{{ node.size_label }}</span>
+    {% endif %}
+    {{ doc_file_actions(process_id, node, route_prefix) }}
+  </div>
+  {% if node.children %}
+  <ul class="doc-tree-children">
+    {{ doc_tree(node.children, process_id, route_prefix, selectable, analizando) }}
+  </ul>
+  {% endif %}
+</li>
+{% endfor %}
+{% endmacro %}

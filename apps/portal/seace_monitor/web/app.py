@@ -46,9 +46,10 @@ from ..process_storage import (
 from ..watchlist import mark_watchlist_read, watchlist_nav_badges
 from ..tenant_paths import migrate_legacy_layout, migrate_process_data_dir_refs
 from .detail_data import (
+    build_document_tree,
+    count_document_nodes,
     download_filename_for_path,
-    list_analyzable_files,
-    list_downloaded_documents,
+    flatten_selectable_leaves,
     load_analysis_selection,
     media_type_for_path,
     parse_cronograma,
@@ -540,7 +541,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         checked_paths = None
         if proc.data_dir and proc.analysis and proc.analysis.status in ("running", "error"):
             checked_paths = load_analysis_selection(Path(proc.data_dir))
-        archivos = list_analyzable_files(
+        documentos = build_document_tree(
             proc,
             checked_paths=checked_paths,
             prev_documentos_json=prev_docs,
@@ -548,14 +549,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         cronograma = parse_cronograma(
             proc.cronograma_json, prev_cronograma_json=prev_cron
         )
-        archivos_analizando = [a.nombre for a in archivos if a.default_checked]
+        archivos_analizando = [
+            leaf.nombre
+            for leaf in flatten_selectable_leaves(documentos)
+            if leaf.default_checked
+        ]
         had_watch_updates = bool(prev_cron or prev_docs)
         return render(
             request,
             "descargado_detalle.html",
             active_page="descargados",
             process=proc,
-            archivos=archivos,
+            documentos=documentos,
+            documento_count=count_document_nodes(documentos),
             archivos_analizando=archivos_analizando,
             cronograma=cronograma,
             had_watch_updates=had_watch_updates,
@@ -782,6 +788,26 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             db, proc, background_tasks, redirect=redirect
         )
 
+    @app.get("/descargados/{process_id}/preview/{filename:path}")
+    def preview_documento_descargado(
+        process_id: int, filename: str, db: Session = Depends(get_db)
+    ):
+        proc = db.get(Process, process_id)
+        if proc is None:
+            raise HTTPException(404)
+        path = resolve_document_path(proc, filename)
+        if path is None:
+            raise HTTPException(404, "Documento no encontrado")
+        if path.suffix.lower() != ".pdf":
+            raise HTTPException(400, "Preview solo disponible para PDF")
+        display_name = download_filename_for_path(proc, path)
+        return FileResponse(
+            path,
+            media_type="application/pdf",
+            filename=display_name,
+            headers={"Content-Disposition": f'inline; filename="{display_name}"'},
+        )
+
     @app.get("/descargados/{process_id}/documentos/{filename:path}")
     def descargar_documento_descargado(
         process_id: int, filename: str, db: Session = Depends(get_db)
@@ -920,14 +946,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         prev_docs = proc.watch_documentos_prev_json if proc.watch_unread else None
         if proc.watch_unread:
             mark_watchlist_read(proc)
-        documentos = list_downloaded_documents(
-            proc, prev_documentos_json=prev_docs
+        documentos = build_document_tree(
+            proc,
+            prev_documentos_json=prev_docs,
+            apply_default_selection=False,
         )
         cronograma = parse_cronograma(
             proc.cronograma_json, prev_cronograma_json=prev_cron
         )
         archivos = (
-            list_analyzable_files(proc, prev_documentos_json=prev_docs)
+            build_document_tree(proc, prev_documentos_json=prev_docs)
             if prev_docs
             else []
         )
@@ -951,6 +979,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             active_page="analizados",
             process=proc,
             documentos=documentos,
+            documento_count=count_document_nodes(documentos),
             archivos=archivos,
             cronograma=cronograma,
             had_watch_updates=had_watch_updates,
