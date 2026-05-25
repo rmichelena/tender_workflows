@@ -16,12 +16,12 @@ from .client import ProcessRow, SeaceClient
 from .config import AppConfig
 from .db.models import Process, ProcessStatus, utcnow
 from .document_storage import (
+    download_and_store_document,
     normalize_legacy_filenames,
     prefer_canonical_archivo,
-    prepare_download_dest,
+    sync_doc_from_existing,
     write_manifest,
 )
-from .downloader import download_file
 from .parser import extract_cronograma_fechas, parse_ficha
 from .watchlist_compare import watchlist_content_changed
 
@@ -63,8 +63,8 @@ def watchlist_fingerprint(
     fecha_publicacion: str | None = None,
 ) -> str:
     from .watchlist_compare import (
+        documento_fingerprint_entry,
         normalize_cronograma_entry,
-        normalize_documento_entry,
         _parse_json_list,
     )
 
@@ -73,9 +73,9 @@ def watchlist_fingerprint(
     ]
     documentos = sorted(
         (
-            normalize_documento_entry(item)
+            documento_fingerprint_entry(item)
             for item in _parse_json_list(documentos_json)
-            if normalize_documento_entry(item)["uuid"]
+            if documento_fingerprint_entry(item)["uuid"]
         ),
         key=lambda item: item["uuid"],
     )
@@ -148,6 +148,40 @@ def refresh_watchlist_processes(config: AppConfig, session: Session) -> int:
     return updated
 
 
+def _repair_document_metadata(process: Process) -> bool:
+    """Corrige nombres erróneos en documentos_json usando manifest/disco."""
+    if not process.data_dir or not process.documentos_json:
+        return False
+    docs_dir = Path(process.data_dir) / "documentos"
+    if not docs_dir.is_dir():
+        return False
+    try:
+        docs = json.loads(process.documentos_json)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(docs, list):
+        return False
+
+    changed = False
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        before = json.dumps(doc, sort_keys=True, ensure_ascii=False)
+        sync_doc_from_existing(docs_dir, doc)
+        if json.dumps(doc, sort_keys=True, ensure_ascii=False) != before:
+            changed = True
+
+    if not changed:
+        return False
+
+    normalize_legacy_filenames(docs_dir, docs)
+    for doc in docs:
+        prefer_canonical_archivo(docs_dir, doc)
+    write_manifest(docs_dir, docs)
+    process.documentos_json = json.dumps(docs, ensure_ascii=False)
+    return True
+
+
 def _refresh_watchlist_process(
     config: AppConfig, session: Session, process: Process
 ) -> bool:
@@ -160,6 +194,8 @@ def _refresh_watchlist_process(
             process.nid_proceso,
         )
         return False
+
+    _repair_document_metadata(process)
 
     client = SeaceClient(
         process.entity.ruc,
@@ -242,19 +278,19 @@ def _download_new_documents(
         uuid = doc.get("uuid", "")
         if not uuid:
             continue
-        dest, exists = prepare_download_dest(docs_dir, doc)
-        if exists:
-            continue
         tipo = doc.get("tipo_descarga", "3")
-        download_file(
-            uuid, dest, guest=tipo != "3", http_proxy=config.http_proxy
-        )
-        logger.info(
-            "Watchlist: descargado doc nuevo %s → %s (proceso %s)",
-            doc.get("nombre", uuid),
-            dest.name,
-            process.id,
-        )
+        if download_and_store_document(
+            docs_dir,
+            doc,
+            guest=tipo != "3",
+            http_proxy=config.http_proxy,
+        ):
+            logger.info(
+                "Watchlist: descargado doc nuevo %s → %s (proceso %s)",
+                uuid,
+                doc.get("archivo", ""),
+                process.id,
+            )
     normalize_legacy_filenames(docs_dir, docs)
     for doc in docs:
         prefer_canonical_archivo(docs_dir, doc)

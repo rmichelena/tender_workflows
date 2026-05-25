@@ -7,6 +7,7 @@ import random
 import re
 import time
 from pathlib import Path
+from urllib.parse import unquote
 
 import requests
 
@@ -20,6 +21,26 @@ ALFRESCO_BASE_OP = "https://prodcont2.seace.gob.pe/alfresco"
 
 _DOWNLOAD_RETRIES = 3
 _DOWNLOAD_BACKOFF_SECONDS = (1.0, 2.0)
+
+
+def filename_from_content_disposition(header: str | None) -> str | None:
+    """Extrae el nombre de archivo del header Content-Disposition."""
+    if not header:
+        return None
+    match = re.search(
+        r"filename\*=(?:UTF-8''|utf-8'')(.*?)(?:;|$)",
+        header,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return unquote(match.group(1).strip().strip('"'))
+    match = re.search(r'filename="([^"]+)"', header, flags=re.IGNORECASE)
+    if match:
+        return match.group(1)
+    match = re.search(r"filename=([^;]+)", header, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).strip().strip('"')
+    return None
 
 
 def resolve_download_url(
@@ -52,12 +73,15 @@ def resolve_download_url(
 
 def _download_file_once(
     doc_uuid: str, dest: Path, guest: bool = False, http_proxy: str | None = None
-) -> Path:
+) -> tuple[Path, str | None]:
     dest.parent.mkdir(parents=True, exist_ok=True)
     url = resolve_download_url(doc_uuid, guest=guest, http_proxy=http_proxy)
     proxies = requests_proxies(http_proxy)
     r = requests.get(url, timeout=120, stream=True, proxies=proxies)
     r.raise_for_status()
+    server_filename = filename_from_content_disposition(
+        r.headers.get("Content-Disposition")
+    )
 
     part = dest.with_name(f"{dest.name}.part")
     if part.exists():
@@ -76,16 +100,18 @@ def _download_file_once(
         part.unlink(missing_ok=True)
         raise RuntimeError(f"Descarga vacía para documento {doc_uuid}")
     part.replace(dest)
-    return dest
+    return dest, server_filename
 
 
 def download_file(
     doc_uuid: str, dest: Path, guest: bool = False, http_proxy: str | None = None
-) -> Path:
+) -> tuple[Path, str | None]:
     last_error: Exception | None = None
     for attempt in range(_DOWNLOAD_RETRIES):
         try:
-            return _download_file_once(doc_uuid, dest, guest=guest, http_proxy=http_proxy)
+            return _download_file_once(
+                doc_uuid, dest, guest=guest, http_proxy=http_proxy
+            )
         except (requests.RequestException, RuntimeError, OSError) as exc:
             last_error = exc
             if attempt < _DOWNLOAD_RETRIES - 1:

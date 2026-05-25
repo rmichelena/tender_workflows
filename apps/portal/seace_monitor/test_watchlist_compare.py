@@ -28,6 +28,30 @@ def test_documentos_equal_ignores_fecha_backfill_and_tamano():
     assert documentos_semantically_equal(old, new)
 
 
+def test_documentos_equal_ignores_parser_nombre_noise():
+    old = json.dumps(
+        [
+            {
+                "uuid": "u1",
+                "nombre": "Bases_LPA+0012026F_20260518_123248_485.pdf",
+                "etapa": "Convocatoria",
+                "tipo_documento": "Bases Administrativas",
+            }
+        ]
+    )
+    new = json.dumps(
+        [
+            {
+                "uuid": "u1",
+                "nombre": "(2646 KB)",
+                "etapa": "Convocatoria",
+                "tipo_documento": "Bases Administrativas",
+            }
+        ]
+    )
+    assert documentos_semantically_equal(old, new)
+
+
 def test_documentos_detect_new_uuid():
     a = json.dumps([{"uuid": "u1", "nombre": "a.pdf"}])
     b = json.dumps(

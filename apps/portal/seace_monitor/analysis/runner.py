@@ -15,11 +15,11 @@ from ..config import AppConfig
 from ..db.models import AnalysisResult, Process, ProcessStatus, utcnow
 from ..process_storage import delete_process_data_dir, clear_process_download_metadata
 from ..tenant_paths import procesos_root
-from ..downloader import download_file
 from ..document_storage import (
     cleanup_partial_downloads,
+    download_and_store_document,
     normalize_legacy_filenames,
-    prepare_download_dest,
+    prefer_canonical_archivo,
     write_manifest,
 )
 from ..parser import parse_ficha
@@ -247,16 +247,22 @@ class AnalysisRunner:
 
     def _fetch_documents(self, docs: list[dict], docs_dir: Path) -> None:
         for doc in docs:
-            uuid = doc["uuid"]
-            nombre = doc.get("nombre", uuid)
-            dest, exists = prepare_download_dest(docs_dir, doc)
-            if exists:
-                continue
             tipo = doc.get("tipo_descarga", "3")
-            download_file(uuid, dest, guest=tipo != "3", http_proxy=self.config.http_proxy)
-            logger.info("Descargado %s → %s", nombre, dest.name)
+            if download_and_store_document(
+                docs_dir,
+                doc,
+                guest=tipo != "3",
+                http_proxy=self.config.http_proxy,
+            ):
+                logger.info(
+                    "Descargado %s → %s",
+                    doc.get("uuid", ""),
+                    doc.get("archivo", ""),
+                )
 
         normalize_legacy_filenames(docs_dir, docs)
+        for doc in docs:
+            prefer_canonical_archivo(docs_dir, doc)
         write_manifest(docs_dir, docs)
 
     def _fetch_documentos_from_seace(self, process: Process, ruc: str) -> list[dict]:

@@ -180,7 +180,7 @@ def test_refresh_preserves_prev_baseline_while_unread(
     with (
         patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
-        patch("seace_monitor.watchlist.download_file"),
+        patch("seace_monitor.watchlist.download_and_store_document"),
     ):
         assert _refresh_watchlist_process(cfg, watch_session, proc) is True
 
@@ -209,7 +209,7 @@ def test_refresh_rollback_on_download_failure(
     with (
         patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
-        patch("seace_monitor.watchlist.download_file", side_effect=_fail_u2),
+        patch("seace_monitor.watchlist.download_and_store_document", side_effect=_fail_u2),
     ):
         updated = refresh_watchlist_processes(cfg, watch_session)
 
@@ -237,7 +237,7 @@ def test_refresh_advances_checked_at_on_success(
     with (
         patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
-        patch("seace_monitor.watchlist.download_file"),
+        patch("seace_monitor.watchlist.download_and_store_document"),
     ):
         refresh_watchlist_processes(cfg, watch_session)
 

@@ -6,7 +6,7 @@ import json
 
 from .parser import clean_cronograma_etapa
 
-_DOC_COMPARE_KEYS = ("nombre", "etapa", "tipo_documento", "tipo_descarga")
+_DOC_COMPARE_KEYS = ("etapa", "tipo_documento", "tipo_descarga")
 
 
 def _parse_json_list(raw: str | None) -> list[dict]:
@@ -27,6 +27,15 @@ def normalize_documento_entry(doc: dict) -> dict:
         "tipo_documento": str(doc.get("tipo_documento", "")).strip(),
         "fecha_publicacion": str(doc.get("fecha_publicacion", "") or "").strip(),
         "tipo_descarga": str(doc.get("tipo_descarga", "3")).strip(),
+    }
+
+
+def documento_fingerprint_entry(doc: dict) -> dict:
+    norm = normalize_documento_entry(doc)
+    return {
+        "uuid": norm["uuid"],
+        **{key: norm[key] for key in _DOC_COMPARE_KEYS},
+        "fecha_publicacion": norm["fecha_publicacion"],
     }
 
 

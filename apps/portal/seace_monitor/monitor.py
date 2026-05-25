@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .client import ProcessRow, SeaceClient
-from .downloader import download_file
+from .document_storage import download_and_store_document, resolve_existing_download
 from .parser import FichaData, parse_ficha, row_snapshot_hash
 from .tenant_paths import DEFAULT_TENANT_ID
 
@@ -126,14 +126,24 @@ class SeaceMonitor:
         if self.download_documents:
             docs_dir = proc_dir / "documentos"
             for doc in ficha.documentos:
-                ext = Path(doc.nombre).suffix or ".pdf"
-                dest = docs_dir / f"{doc.uuid}{ext}"
-                if dest.exists():
+                doc_entry = {
+                    "uuid": doc.uuid,
+                    "nombre": doc.nombre,
+                    "tipo_descarga": doc.tipo_descarga,
+                }
+                if resolve_existing_download(docs_dir, doc_entry) is not None:
                     downloaded.append(doc.uuid)
                     continue
                 try:
-                    download_file(doc.uuid, dest, guest=doc.tipo_descarga != "3")
-                    logger.info("Descargado: %s", doc.nombre)
+                    if download_and_store_document(
+                        docs_dir,
+                        doc_entry,
+                        guest=doc.tipo_descarga != "3",
+                        http_proxy=None,
+                    ):
+                        logger.info(
+                            "Descargado: %s", doc_entry.get("archivo", doc.uuid)
+                        )
                     downloaded.append(doc.uuid)
                 except Exception:
                     logger.exception("No se pudo descargar %s", doc.nombre)

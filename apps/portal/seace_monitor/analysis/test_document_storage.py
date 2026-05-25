@@ -1,10 +1,15 @@
 """Tests para nombres de documentos descargados."""
 
+import json
 from pathlib import Path
 
 from ..document_storage import (
     allocate_unique_path,
+    commit_downloaded_file,
+    looks_like_size_label,
     normalize_legacy_filenames,
+    prepare_download_dest,
+    resolve_existing_download,
     sanitize_download_filename,
 )
 
@@ -30,6 +35,56 @@ def test_sanitize_preserves_seace_archivo_name():
     raw = "Bases_LPA+0012026F_20260518_123248_485.pdf"
     name = sanitize_download_filename(raw, "uuid-1")
     assert name == raw
+
+
+def test_looks_like_size_label():
+    assert looks_like_size_label("(2646 KB)")
+    assert looks_like_size_label("2646 KB")
+    assert not looks_like_size_label("Bases_LPA+0012026F.pdf")
+
+
+def test_resolve_existing_ignores_bad_parser_nombre(tmp_path: Path):
+    docs_dir = tmp_path / "documentos"
+    docs_dir.mkdir()
+    uuid = "85b414d9-b722-41dd-ab61-f5dac6490b05"
+    good = docs_dir / "Bases_LPA+0012026F_20260518_123248_485.pdf"
+    good.write_bytes(b"pdf")
+    (docs_dir / "manifest.json").write_text(
+        json.dumps(
+            [
+                {
+                    "uuid": uuid,
+                    "nombre": good.name,
+                    "archivo": good.name,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    doc = {"uuid": uuid, "nombre": "(2646 KB)"}
+    assert resolve_existing_download(docs_dir, doc) == good
+    dest, exists = prepare_download_dest(docs_dir, doc)
+    assert exists is True
+    assert dest == good
+    assert doc["nombre"] == good.name
+
+
+def test_commit_downloaded_file_uses_content_disposition_name(tmp_path: Path):
+    docs_dir = tmp_path / "documentos"
+    docs_dir.mkdir()
+    uuid = "85b414d9-b722-41dd-ab61-f5dac6490b05"
+    temp = docs_dir / f"{uuid}.download"
+    temp.write_bytes(b"pdf")
+    doc = {"uuid": uuid, "nombre": "(2646 KB)"}
+    final = commit_downloaded_file(
+        docs_dir,
+        doc,
+        temp,
+        "Bases_LPA+0012026F_20260518_123248_485.pdf",
+    )
+    assert final.name == "Bases_LPA+0012026F_20260518_123248_485.pdf"
+    assert doc["nombre"] == "Bases_LPA+0012026F_20260518_123248_485.pdf"
+    assert doc["archivo"] == final.name
 
 
 def test_allocate_unique_path(tmp_path: Path):

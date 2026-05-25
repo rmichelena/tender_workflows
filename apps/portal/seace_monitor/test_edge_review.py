@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 from .config import AppConfig
 from .db.models import AnalysisResult, Process, ProcessStatus
-from .downloader import download_file
+from .downloader import download_file, filename_from_content_disposition
 from .entity_process_cleanup import apply_removed_entity_policy
 from .process_storage import archive_analyzed_process
 from .scan_options import RemovedEntityPolicy
@@ -143,9 +143,18 @@ def test_download_file_retries_then_succeeds(tmp_path: Path):
         if calls["n"] == 1:
             raise RuntimeError("transient")
         dest.write_bytes(b"ok")
-        return dest
+        return dest, "doc.pdf"
 
     with patch("seace_monitor.downloader._download_file_once", side_effect=fake_once):
-        result = download_file("uuid", dest)
+        result, server_name = download_file("uuid", dest)
     assert result == dest
+    assert server_name == "doc.pdf"
     assert calls["n"] == 2
+
+
+def test_filename_from_content_disposition_utf8():
+    header = "attachment; filename*=UTF-8''Bases_LPA%2B0012026F_20260518_123248_485.pdf"
+    assert (
+        filename_from_content_disposition(header)
+        == "Bases_LPA+0012026F_20260518_123248_485.pdf"
+    )
