@@ -26,6 +26,12 @@ def test_sanitize_strips_invalid_chars():
     assert ":" not in name
 
 
+def test_sanitize_preserves_seace_archivo_name():
+    raw = "Bases_LPA+0012026F_20260518_123248_485.pdf"
+    name = sanitize_download_filename(raw, "uuid-1")
+    assert name == raw
+
+
 def test_allocate_unique_path(tmp_path: Path):
     first = allocate_unique_path(tmp_path, "bases.pdf")
     first.write_bytes(b"x")

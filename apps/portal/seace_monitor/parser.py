@@ -285,16 +285,19 @@ def _parse_documentos(soup: BeautifulSoup) -> list[Documento]:
         )
         if not m:
             continue
-        uuid, tipo, nombre = m.groups()
+        uuid, tipo, onclick_nombre = m.groups()
         tr = a.find_parent("tr")
-        etapa, tipo_doc, fecha = "", "", ""
+        etapa, tipo_doc, archivo, fecha = "", "", "", ""
         if tr:
             cells = [td.get_text(strip=True) for td in tr.find_all("td")]
             # Nro | Etapa | Documento | Archivo | Fecha | Acciones
             if len(cells) >= 5:
                 etapa = cells[1] if len(cells) > 1 else ""
                 tipo_doc = cells[2] if len(cells) > 2 else ""
+                archivo = cells[3] if len(cells) > 3 else ""
                 fecha = cells[4] if len(cells) > 4 else ""
+        # Alfresco sirve el nombre de la columna Archivo (con + y timestamp), no el del onclick.
+        nombre = archivo or onclick_nombre
         tamano = a.get_text(strip=True).strip("()")
         docs.append(
             Documento(
