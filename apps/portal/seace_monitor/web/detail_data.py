@@ -15,6 +15,7 @@ from ..document_storage import (
     index_downloaded_by_uuid,
     manifest_path_for_doc,
     read_manifest,
+    resolve_existing_download,
 )
 from ..analysis.document_prep import ANALYZABLE_SUFFIXES, ARCHIVE_SUFFIXES, score_bases_candidate
 
@@ -74,6 +75,7 @@ class ArchivoAnalizable:
     tipo_documento: str
     default_checked: bool
     fecha_publicacion: str = ""
+    uuid: str = ""
     is_new: bool = False
 
 
@@ -145,20 +147,11 @@ def _mark_new_documents(
 def _mark_new_analyzable_files(
     rows: list[ArchivoAnalizable], prev_documentos_json: str | None
 ) -> None:
-    if not prev_documentos_json:
+    prev_uuids = _document_uuids_from_json(prev_documentos_json)
+    if not prev_uuids:
         return
-    try:
-        prev_docs = json.loads(prev_documentos_json)
-    except json.JSONDecodeError:
-        return
-    prev_names = {
-        str(d.get("nombre", "")).strip().lower()
-        for d in prev_docs
-        if isinstance(d, dict) and d.get("nombre")
-    }
     for row in rows:
-        name_key = row.nombre.strip().lower()
-        if name_key and name_key not in prev_names:
+        if row.uuid and row.uuid not in prev_uuids:
             row.is_new = True
 
 
@@ -270,30 +263,74 @@ def list_analyzable_files(
     uuid_index = _documentos_by_uuid(process.documentos_json)
     rows: list[ArchivoAnalizable] = []
     extract_root = docs_dir / "_extracted"
+    seen_rel: set[str] = set()
 
-    for path in sorted(docs_dir.iterdir()):
-        if not path.is_file() or path.name in _SKIP_NAMES:
+    manifest = read_manifest(docs_dir)
+    if manifest:
+        doc_sources = manifest
+    else:
+        doc_sources = json.loads(process.documentos_json or "[]")
+
+    for doc in doc_sources:
+        if not isinstance(doc, dict):
             continue
-        if path.suffix.lower() in ARCHIVE_SUFFIXES:
+        path = resolve_existing_download(docs_dir, doc)
+        if path is None or not path.is_file():
             continue
         if path.suffix.lower() not in ANALYZABLE_SUFFIXES:
             continue
-        meta = _merge_doc_meta(by_path.get(path.resolve(), {}), uuid_index)
+        try:
+            rel = str(path.relative_to(docs_dir)).replace("\\", "/")
+        except ValueError:
+            continue
+        if rel in seen_rel:
+            continue
+        seen_rel.add(rel)
+        meta = _merge_doc_meta(by_path.get(path.resolve(), doc), uuid_index)
         nombre = meta.get("nombre") or path.name
-        tipo = meta.get("tipo_documento", "")
         rows.append(
             ArchivoAnalizable(
-                rel_path=path.name,
+                rel_path=rel,
                 nombre=nombre,
                 extension=path.suffix.lower().lstrip(".") or "file",
                 icon=file_icon_key(nombre),
                 size_label=format_bytes(path.stat().st_size),
                 origen="descarga SEACE",
-                tipo_documento=tipo,
+                tipo_documento=str(meta.get("tipo_documento", "") or ""),
                 fecha_publicacion=str(meta.get("fecha_publicacion", "") or ""),
+                uuid=str(meta.get("uuid", "") or ""),
                 default_checked=False,
             )
         )
+
+    if not manifest:
+        for path in sorted(docs_dir.iterdir()):
+            if not path.is_file() or path.name in _SKIP_NAMES:
+                continue
+            if path.suffix.lower() in ARCHIVE_SUFFIXES:
+                continue
+            if path.suffix.lower() not in ANALYZABLE_SUFFIXES:
+                continue
+            rel = path.name
+            if rel in seen_rel:
+                continue
+            seen_rel.add(rel)
+            meta = _merge_doc_meta(by_path.get(path.resolve(), {}), uuid_index)
+            nombre = meta.get("nombre") or path.name
+            rows.append(
+                ArchivoAnalizable(
+                    rel_path=rel,
+                    nombre=nombre,
+                    extension=path.suffix.lower().lstrip(".") or "file",
+                    icon=file_icon_key(nombre),
+                    size_label=format_bytes(path.stat().st_size),
+                    origen="descarga SEACE",
+                    tipo_documento=str(meta.get("tipo_documento", "") or ""),
+                    fecha_publicacion=str(meta.get("fecha_publicacion", "") or ""),
+                    uuid=str(meta.get("uuid", "") or ""),
+                    default_checked=False,
+                )
+            )
 
     if extract_root.exists():
         for path in sorted(extract_root.rglob("*")):
@@ -339,19 +376,17 @@ def list_downloaded_documents(
 ) -> list[DocumentoDescargado]:
     meta_list = json.loads(process.documentos_json or "[]")
     docs_dir = _documents_dir(process)
-    on_disk = _index_downloaded_files(docs_dir) if docs_dir else {}
     uuid_index = _documentos_by_uuid(process.documentos_json)
     manifest_by_path = _index_manifest_by_path(docs_dir) if docs_dir else {}
 
     rows: list[DocumentoDescargado] = []
     seen_paths: set[str] = set()
+    manifest = read_manifest(docs_dir) if docs_dir else []
 
     for meta in meta_list:
         uuid = meta.get("uuid", "")
         nombre = meta.get("nombre") or uuid or "documento"
-        path = on_disk.get(uuid) if uuid else None
-        if path is None and docs_dir:
-            path = manifest_path_for_doc(docs_dir, meta)
+        path = resolve_existing_download(docs_dir, meta) if docs_dir else None
         ext = Path(nombre).suffix.lower().lstrip(".") or (
             path.suffix.lower().lstrip(".") if path else ""
         )
@@ -365,6 +400,7 @@ def list_downloaded_documents(
             filename = None
             downloaded = False
 
+        merged = _merge_doc_meta(meta, uuid_index)
         rows.append(
             DocumentoDescargado(
                 uuid=uuid,
@@ -372,9 +408,9 @@ def list_downloaded_documents(
                 extension=ext or "file",
                 icon=file_icon_key(nombre),
                 size_label=size_label,
-                etapa=meta.get("etapa", ""),
-                tipo_documento=meta.get("tipo_documento", ""),
-                fecha_publicacion=meta.get("fecha_publicacion", ""),
+                etapa=merged.get("etapa", ""),
+                tipo_documento=merged.get("tipo_documento", ""),
+                fecha_publicacion=str(merged.get("fecha_publicacion", "") or ""),
                 downloaded=downloaded,
                 filename=filename,
             )
@@ -409,28 +445,29 @@ def list_downloaded_documents(
                     )
                 )
 
-        for path in sorted(docs_dir.iterdir()):
-            if not path.is_file() or path.name in _SKIP_NAMES:
-                continue
-            key = str(path.resolve())
-            if key in seen_paths:
-                continue
-            meta = _merge_doc_meta(manifest_by_path.get(path.resolve(), {}), uuid_index)
-            seen_paths.add(key)
-            rows.append(
-                DocumentoDescargado(
-                    uuid=meta.get("uuid", ""),
-                    nombre=meta.get("nombre") or path.name,
-                    extension=path.suffix.lower().lstrip(".") or "file",
-                    icon=file_icon_key(path.name),
-                    size_label=format_bytes(path.stat().st_size),
-                    etapa="",
-                    tipo_documento="",
-                    fecha_publicacion=str(meta.get("fecha_publicacion", "") or ""),
-                    downloaded=True,
-                    filename=path.name,
+        if not manifest:
+            for path in sorted(docs_dir.iterdir()):
+                if not path.is_file() or path.name in _SKIP_NAMES:
+                    continue
+                key = str(path.resolve())
+                if key in seen_paths:
+                    continue
+                meta = _merge_doc_meta(manifest_by_path.get(path.resolve(), {}), uuid_index)
+                seen_paths.add(key)
+                rows.append(
+                    DocumentoDescargado(
+                        uuid=meta.get("uuid", ""),
+                        nombre=meta.get("nombre") or path.name,
+                        extension=path.suffix.lower().lstrip(".") or "file",
+                        icon=file_icon_key(path.name),
+                        size_label=format_bytes(path.stat().st_size),
+                        etapa="",
+                        tipo_documento="",
+                        fecha_publicacion=str(meta.get("fecha_publicacion", "") or ""),
+                        downloaded=True,
+                        filename=path.name,
+                    )
                 )
-            )
 
     if prev_documentos_json:
         _mark_new_documents(rows, prev_documentos_json)

@@ -17,11 +17,13 @@ from .config import AppConfig
 from .db.models import Process, ProcessStatus, utcnow
 from .document_storage import (
     normalize_legacy_filenames,
+    prefer_canonical_archivo,
     prepare_download_dest,
     write_manifest,
 )
 from .downloader import download_file
 from .parser import extract_cronograma_fechas, parse_ficha
+from .watchlist_compare import watchlist_content_changed
 
 logger = logging.getLogger(__name__)
 
@@ -60,18 +62,27 @@ def watchlist_fingerprint(
     documentos_json: str | None,
     fecha_publicacion: str | None = None,
 ) -> str:
-    try:
-        cronograma = json.loads(cronograma_json or "[]")
-    except json.JSONDecodeError:
-        cronograma = []
-    try:
-        documentos = json.loads(documentos_json or "[]")
-    except json.JSONDecodeError:
-        documentos = []
+    from .watchlist_compare import (
+        normalize_cronograma_entry,
+        normalize_documento_entry,
+        _parse_json_list,
+    )
+
+    cronograma = [
+        normalize_cronograma_entry(item) for item in _parse_json_list(cronograma_json)
+    ]
+    documentos = sorted(
+        (
+            normalize_documento_entry(item)
+            for item in _parse_json_list(documentos_json)
+            if normalize_documento_entry(item)["uuid"]
+        ),
+        key=lambda item: item["uuid"],
+    )
     payload = {
         "cronograma": cronograma,
         "documentos": documentos,
-        "fecha_publicacion": fecha_publicacion or "",
+        "fecha_publicacion": (fecha_publicacion or "").strip(),
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
@@ -176,11 +187,15 @@ def _refresh_watchlist_process(
         documentos_json=new_docs_json,
         fecha_publicacion=ficha.fecha_publicacion or process.fecha_publicacion,
     )
-    if old_fp == new_fp:
+    cron_changed, docs_changed = watchlist_content_changed(
+        cronograma_json=process.cronograma_json,
+        documentos_json=process.documentos_json,
+        new_cronograma_json=new_cron_json,
+        new_documentos_json=new_docs_json,
+    )
+    if old_fp == new_fp or (not cron_changed and not docs_changed):
         return False
 
-    cron_changed = (process.cronograma_json or "") != new_cron_json
-    docs_changed = (process.documentos_json or "") != new_docs_json
     new_docs = json.loads(new_docs_json)
 
     # Descargar antes de mutar documentos_json para que un fallo no suprima reintentos.
@@ -241,4 +256,6 @@ def _download_new_documents(
             process.id,
         )
     normalize_legacy_filenames(docs_dir, docs)
+    for doc in docs:
+        prefer_canonical_archivo(docs_dir, doc)
     write_manifest(docs_dir, docs)

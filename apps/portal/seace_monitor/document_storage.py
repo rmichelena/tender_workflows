@@ -88,9 +88,58 @@ def index_downloaded_by_uuid(docs_dir: Path) -> dict[str, Path]:
     for path in docs_dir.iterdir():
         if not path.is_file() or path.name == MANIFEST_NAME:
             continue
-        if path.stem not in by_uuid:
+        # Legacy: archivo guardado como {uuid}.pdf
+        if path.stem in by_uuid:
+            continue
+        if len(path.stem) == 36 and path.stem.count("-") == 4:
             by_uuid[path.stem] = path
     return by_uuid
+
+
+def resolve_existing_download(docs_dir: Path, doc: dict) -> Path | None:
+    """Localiza un archivo ya descargado para este doc (uuid / manifest / nombre)."""
+    uuid = str(doc.get("uuid", "")).strip()
+    if not uuid:
+        return None
+
+    canonical = docs_dir / sanitize_download_filename(doc.get("nombre") or uuid, uuid)
+    if canonical.is_file() and canonical.stat().st_size > 0:
+        return canonical
+
+    by_uuid = index_downloaded_by_uuid(docs_dir)
+    path = by_uuid.get(uuid)
+    if path is not None and path.is_file() and path.stat().st_size > 0:
+        return path
+
+    manifest_path = manifest_path_for_doc(docs_dir, doc)
+    if manifest_path is not None and manifest_path.stat().st_size > 0:
+        return manifest_path
+
+    nombre = doc.get("nombre") or uuid
+    ext = Path(nombre).suffix or ".pdf"
+    legacy = docs_dir / f"{uuid}{ext}"
+    if legacy.is_file() and legacy.stat().st_size > 0:
+        return legacy
+    return None
+
+
+def prefer_canonical_archivo(docs_dir: Path, doc: dict) -> None:
+    """Apunta manifest al nombre canónico y elimina copias numeradas (_2, _3)."""
+    uuid = str(doc.get("uuid", "")).strip()
+    if not uuid:
+        return
+    canonical_name = sanitize_download_filename(doc.get("nombre") or uuid, uuid)
+    canonical = docs_dir / canonical_name
+    if not canonical.is_file() or canonical.stat().st_size == 0:
+        return
+
+    stem, ext = Path(canonical_name).stem, Path(canonical_name).suffix
+    for path in docs_dir.glob(f"{stem}_*{ext}"):
+        if path.name == canonical_name or not path.is_file():
+            continue
+        path.unlink()
+
+    doc["archivo"] = canonical_name
 
 
 def display_name_for_path(docs_dir: Path, path: Path) -> str:
@@ -134,13 +183,11 @@ def prepare_download_dest(docs_dir: Path, doc: dict) -> tuple[Path, bool]:
     """Ruta destino y si ya existe (skip download)."""
     uuid = doc["uuid"]
     nombre = doc.get("nombre") or uuid
-    existing = manifest_path_for_doc(docs_dir, doc)
+    existing = resolve_existing_download(docs_dir, doc)
     if existing is not None:
-        if existing.stat().st_size == 0:
-            existing.unlink(missing_ok=True)
-        else:
-            doc["archivo"] = existing.name
-            return existing, True
+        doc["archivo"] = existing.name
+        prefer_canonical_archivo(docs_dir, doc)
+        return existing, True
 
     dest = allocate_unique_path(
         docs_dir, sanitize_download_filename(nombre, uuid)
