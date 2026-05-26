@@ -4,6 +4,11 @@ from pathlib import Path
 
 from .config import AppConfig
 from .db.models import AnalysisResult, Process, ProcessStatus
+from .document_storage import (
+    prefer_canonical_archivo,
+    prepare_download_dest,
+    write_manifest,
+)
 from .process_storage import (
     archive_analyzed_process,
     delete_process_data_dir,
@@ -188,3 +193,27 @@ def test_resolve_restore_status_with_files(tmp_path: Path):
     assert resolve_restore_status(cfg, proc) == ProcessStatus.descargada
     _with_analysis(proc)
     assert resolve_restore_status(cfg, proc) == ProcessStatus.analizada
+
+
+def test_prepare_download_dest_finds_canonical_without_manifest_archivo(tmp_path: Path):
+    docs_dir = tmp_path / "documentos"
+    docs_dir.mkdir()
+    doc = {
+        "uuid": "85b414d9-b722-41dd-ab61-f5dac6490b05",
+        "nombre": "Bases_LPA 0012026F.pdf",
+    }
+    canonical = docs_dir / "Bases_LPA 0012026F.pdf"
+    canonical.write_bytes(b"x" * 100)
+    (docs_dir / "Bases_LPA 0012026F_3.pdf").write_bytes(b"x" * 100)
+
+    dest, exists = prepare_download_dest(docs_dir, doc)
+
+    assert exists is True
+    assert dest == canonical
+    prefer_canonical_archivo(docs_dir, doc)
+    assert doc["archivo"] == canonical.name
+    assert not (docs_dir / "Bases_LPA 0012026F_3.pdf").exists()
+    write_manifest(docs_dir, [doc])
+    dest2, exists2 = prepare_download_dest(docs_dir, doc)
+    assert exists2 is True
+    assert dest2 == canonical

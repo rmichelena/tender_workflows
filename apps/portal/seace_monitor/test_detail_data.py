@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from .analysis.document_prep import validate_gemini_upload_size
 from .db.models import Process
 from .web.detail_data import (
     _assign_default_selection,
+    build_document_tree,
+    count_document_nodes,
+    flatten_selectable_leaves,
     load_analysis_selection,
     media_type_for_path,
     save_analysis_selection,
@@ -83,3 +87,34 @@ def test_list_analyzable_files_uses_saved_selection(tmp_path: Path):
     rows = list_analyzable_files(proc, checked_paths={"b.docx"})
     checked = [row.rel_path for row in rows if row.default_checked]
     assert checked == ["b.docx"]
+
+
+def test_build_document_tree_nests_zip_contents(tmp_path: Path):
+    docs = tmp_path / "documentos"
+    docs.mkdir()
+    (docs / "bases.zip").write_bytes(b"PK")
+    extract = docs / "_extracted" / "bases"
+    extract.mkdir(parents=True)
+    (extract / "inner.pdf").write_bytes(b"%PDF")
+    (extract / "inner.docx").write_bytes(b"docx")
+
+    proc = Process(
+        id=1,
+        data_dir=str(tmp_path),
+        documentos_json=json.dumps(
+            [{"uuid": "u1", "nombre": "bases.zip", "archivo": "bases.zip"}]
+        ),
+    )
+    tree = build_document_tree(proc, apply_default_selection=False)
+    assert len(tree) == 1
+    assert tree[0].rel_path == "bases.zip"
+    assert tree[0].selectable is False
+    assert tree[0].previewable is False
+    child_paths = {child.rel_path for child in tree[0].children}
+    assert child_paths == {
+        "_extracted/bases/inner.pdf",
+        "_extracted/bases/inner.docx",
+    }
+    assert count_document_nodes(tree) == 3
+    selectable = flatten_selectable_leaves(tree)
+    assert {row.rel_path for row in selectable} == child_paths

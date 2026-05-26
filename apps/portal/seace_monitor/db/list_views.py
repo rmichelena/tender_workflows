@@ -13,6 +13,7 @@ class ProcessListView:
     process: Process
     fin_consultas: str
     fin_presentacion: str
+    watch_unread: bool = False
 
 
 def build_process_list_views(processes: list[Process]) -> list[ProcessListView]:
@@ -28,6 +29,7 @@ def build_process_list_views(processes: list[Process]) -> list[ProcessListView]:
                 process=proc,
                 fin_consultas=fechas.fecha_consultas or "—",
                 fin_presentacion=fechas.fecha_presentacion or "—",
+                watch_unread=bool(proc.watch_unread),
             )
         )
     return views

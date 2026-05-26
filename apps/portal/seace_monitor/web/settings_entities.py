@@ -124,6 +124,7 @@ def register_settings_routes(app, config: AppConfig, render, get_db):
         return render(
             request,
             "settings_entidades.html",
+            db=db,
             active_page="settings_entidades",
             current_year=now.year,
             default_since_date=default_since_date(now).strftime("%d/%m/%y"),

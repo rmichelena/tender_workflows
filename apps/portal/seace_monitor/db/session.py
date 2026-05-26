@@ -35,6 +35,11 @@ _PROCESS_COLUMN_ADDITIONS = (
     ("list_hash", "VARCHAR(64)"),
     ("content_hash", "VARCHAR(64)"),
     ("data_dir", "VARCHAR(512)"),
+    ("watch_unread", "BOOLEAN DEFAULT 0"),
+    ("watch_checked_at", "DATETIME"),
+    ("watch_cronograma_prev_json", "TEXT"),
+    ("watch_documentos_prev_json", "TEXT"),
+    ("watch_changelog_json", "TEXT"),
 )
 
 _ANALYSIS_COLUMN_ADDITIONS = (("run_id", "VARCHAR(36)"),)
@@ -58,16 +63,30 @@ def _configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
     cursor.close()
 
 
+_PG_COLUMN_TYPE = {
+    "BOOLEAN DEFAULT 0": "BOOLEAN DEFAULT false",
+    "DATETIME": "TIMESTAMP WITH TIME ZONE",
+}
+
+
+def _adapt_column_type(col_type: str, dialect: str) -> str:
+    if dialect == "postgresql":
+        return _PG_COLUMN_TYPE.get(col_type, col_type)
+    return col_type
+
+
 def _ensure_table_columns(engine, table: str, additions: tuple[tuple[str, str], ...]) -> None:
     """ALTER TABLE ADD COLUMN para despliegues con BD creada antes de nuevas columnas."""
     insp = inspect(engine)
     if table not in insp.get_table_names():
         return
+    dialect = engine.dialect.name
     existing = {col["name"] for col in insp.get_columns(table)}
     with engine.begin() as conn:
         for name, col_type in additions:
             if name not in existing:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}"))
+                ddl_type = _adapt_column_type(col_type, dialect)
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}"))
 
 
 def init_db(database_url: str) -> None:
@@ -102,6 +121,7 @@ def _ensure_sqlite_indexes(engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_processes_objeto ON processes (objeto)",
         "CREATE INDEX IF NOT EXISTS ix_processes_status_entity ON processes (status, entity_id)",
         "CREATE INDEX IF NOT EXISTS ix_processes_status_objeto ON processes (status, objeto)",
+        "CREATE INDEX IF NOT EXISTS ix_processes_watch_unread ON processes (watch_unread)",
     )
     with engine.begin() as conn:
         for stmt in statements:

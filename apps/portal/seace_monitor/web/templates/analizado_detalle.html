@@ -1,5 +1,8 @@
 {% extends "base.html" %}
-{% from "_macros.html" import status_cell, file_icon %}
+{% from "_macros.html" import status_cell, file_icon, doc_fecha, cronograma_fecha, doc_tree, watch_changelog_panel %}
+{% set back_href = back_href|default('/analizados', true) %}
+{% set doc_route = doc_route|default('analizados', true) %}
+{% set is_archived = is_archived|default(false, true) %}
 {% block title %}{{ process.nomenclatura }} — Análisis{% endblock %}
 {% block content %}
 <h2>{{ process.nomenclatura }}</h2>
@@ -15,6 +18,10 @@
 <div class="alert" style="background:#fef2f2;border-color:#fca5a5">
   Error en análisis: {{ process.analysis.error_message }}
 </div>
+{% endif %}
+
+{% if had_watch_updates %}
+<div class="watch-update-banner">SEACE actualizó este proceso. El análisis previo se conservará al volver a analizar.</div>
 {% endif %}
 
 <div class="detail-split">
@@ -40,10 +47,14 @@
       </thead>
       <tbody>
         {% for row in cronograma %}
-        <tr>
-          <td>{{ row.etapa or '—' }}</td>
-          <td>{{ row.fecha_inicio or '—' }}</td>
-          <td>{{ row.fecha_fin or '—' }}</td>
+        <tr{% if row.is_removed %} class="cronograma-removed"{% elif row.is_new %} class="cronograma-new"{% elif row.changed %} class="cronograma-changed"{% endif %}>
+          <td>
+            {{ row.etapa or '—' }}
+            {% if row.is_new %}<span class="cronograma-tag cronograma-tag-new">Nueva</span>{% endif %}
+            {% if row.is_removed %}<span class="cronograma-tag cronograma-tag-removed">Eliminada</span>{% endif %}
+          </td>
+          <td>{{ cronograma_fecha(row.fecha_inicio, row.fecha_inicio_prev, row.fecha_inicio_changed, row.is_new, row.is_removed) }}</td>
+          <td>{{ cronograma_fecha(row.fecha_fin, row.fecha_fin_prev, row.fecha_fin_changed, row.is_new, row.is_removed) }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -86,37 +97,40 @@
 {% endif %}
 
 <div class="detail-box detail-docs">
-  <h3>Documentos descargados ({{ documentos|length }})</h3>
+  <h3>Documentos descargados ({{ documento_count }})</h3>
   {% if documentos %}
-  <ul class="doc-list">
-    {% for doc in documentos %}
-    <li class="doc-item{% if not doc.downloaded %} doc-item-missing{% endif %}">
-      {{ file_icon(doc) }}
-      <div class="doc-meta">
-        <div class="doc-name">{{ doc.nombre }}</div>
-        {% if doc.etapa or doc.tipo_documento %}
-        <div class="doc-sub muted">{{ doc.etapa }}{% if doc.etapa and doc.tipo_documento %} · {% endif %}{{ doc.tipo_documento }}</div>
-        {% endif %}
-      </div>
-      <span class="doc-size muted">{{ doc.size_label }}</span>
-      {% if doc.downloaded and doc.filename %}
-      <div class="doc-actions">
-        {% if doc.icon == 'pdf' %}
-        <a href="/analizados/{{ process.id }}/preview/{{ doc.filename | urlquote_path }}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">Preview</a>
-        {% endif %}
-        <a href="/analizados/{{ process.id }}/documentos/{{ doc.filename | urlquote_path }}" class="btn btn-primary btn-sm" download>Descargar</a>
-      </div>
-      {% endif %}
-    </li>
-    {% endfor %}
+  <ul class="doc-list doc-list-tree">
+    {{ doc_tree(documentos, process.id, doc_route) }}
   </ul>
   {% else %}
   <p class="muted">Sin documentos registrados.</p>
   {% endif %}
 </div>
 
+{% if had_watch_updates and archivos %}
+<div class="detail-box detail-box-wide">
+  <h3>Volver a analizar</h3>
+  <p class="muted">Selecciona documentos (los nuevos vienen marcados). El análisis anterior se archiva con timestamp.</p>
+  <form method="post" action="/descargados/{{ process.id }}/analizar">
+    <ul class="doc-list doc-list-selectable doc-list-tree">
+      {{ doc_tree(archivos, process.id, doc_route, selectable=true) }}
+    </ul>
+    <p style="margin-top:1rem">
+      <button type="submit" class="btn btn-primary">Volver a analizar seleccionados</button>
+    </p>
+  </form>
+</div>
+{% endif %}
+
+{{ watch_changelog_panel(watch_changelog|default([])) }}
+
 <p style="margin-top:1.5rem">
-  <a href="/analizados" class="btn btn-secondary">← Volver</a>
+  <a href="{{ back_href }}" class="btn btn-secondary">← Volver</a>
+  {% if is_archived %}
+  <form method="post" action="/archivados/{{ process.id }}/restaurar" style="display:inline">
+    <button type="submit" class="btn btn-primary">Restaurar</button>
+  </form>
+  {% else %}
   {% if process.status.value == 'analizada' %}
   <form method="post" action="/analizados/{{ process.id }}/estado" style="display:inline">
     <input type="hidden" name="estado" value="portafolio"/>
@@ -131,6 +145,7 @@
   <form method="post" action="/analizados/{{ process.id }}/archivar" style="display:inline">
     <button type="submit" class="btn btn-danger">Archivar</button>
   </form>
+  {% endif %}
 </p>
 {% endblock %}
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +76,7 @@ class AnalysisConfig:
 class AppConfig:
     poll_interval: str = "6h"
     ficha_refresh_interval: str = "6h"
+    watchlist_refresh_interval: str = "3h"
     stale_analysis_interval: str = "2h"
     anio: int = 2026
     database_url: str = "sqlite:///./data/seace.db"
@@ -92,6 +94,14 @@ class AppConfig:
     @property
     def ficha_refresh_seconds(self) -> int:
         return parse_duration(self.ficha_refresh_interval)
+
+    @property
+    def watchlist_refresh_seconds(self) -> int:
+        return parse_duration(self.watchlist_refresh_interval)
+
+    @property
+    def watchlist_refresh_timedelta(self) -> timedelta:
+        return timedelta(seconds=self.watchlist_refresh_seconds)
 
     @property
     def stale_analysis_seconds(self) -> int:
@@ -147,6 +157,9 @@ class AppConfig:
             poll_interval=str(raw.get("poll_interval", raw.get("poll_interval_seconds", "6h"))),
             ficha_refresh_interval=str(
                 raw.get("ficha_refresh_interval", raw.get("poll_interval", "6h"))
+            ),
+            watchlist_refresh_interval=str(
+                raw.get("watchlist_refresh_interval", "3h")
             ),
             stale_analysis_interval=str(raw.get("stale_analysis_interval", "2h")),
             anio=int(raw.get("anio", 2026)),

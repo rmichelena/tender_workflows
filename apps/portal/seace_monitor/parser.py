@@ -285,16 +285,18 @@ def _parse_documentos(soup: BeautifulSoup) -> list[Documento]:
         )
         if not m:
             continue
-        uuid, tipo, nombre = m.groups()
+        uuid, tipo, onclick_nombre = m.groups()
         tr = a.find_parent("tr")
         etapa, tipo_doc, fecha = "", "", ""
         if tr:
             cells = [td.get_text(strip=True) for td in tr.find_all("td")]
-            # Nro | Etapa | Documento | Archivo | Fecha | Acciones
+            # Nro | Etapa | Documento | Archivo (icono+tamaño) | Fecha | Acciones
             if len(cells) >= 5:
                 etapa = cells[1] if len(cells) > 1 else ""
                 tipo_doc = cells[2] if len(cells) > 2 else ""
                 fecha = cells[4] if len(cells) > 4 else ""
+        # El nombre real lo entrega Alfresco al descargar (Content-Disposition).
+        nombre = onclick_nombre or tipo_doc
         tamano = a.get_text(strip=True).strip("()")
         docs.append(
             Documento(

@@ -30,8 +30,10 @@ class ProcessStatus(str, enum.Enum):
     publicada = "publicada"
     descargando = "descargando"
     descargada = "descargada"
+    descartando = "descartando"
     analizada = "analizada"
     portafolio = "portafolio"
+    archivando = "archivando"
     descartada = "descartada"
     archivada = "archivada"
 
@@ -100,6 +102,14 @@ class Process(Base):
     list_hash: Mapped[str | None] = mapped_column(String(64))
     content_hash: Mapped[str | None] = mapped_column(String(64))
     data_dir: Mapped[str | None] = mapped_column(String(512))
+
+    watch_unread: Mapped[bool] = mapped_column(default=False, index=True)
+    watch_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    watch_cronograma_prev_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    watch_documentos_prev_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    watch_changelog_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

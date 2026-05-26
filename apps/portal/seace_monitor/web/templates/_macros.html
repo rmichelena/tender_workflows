@@ -12,5 +12,109 @@
 {% endmacro %}
 
 {% macro file_icon(doc) %}
+{% if doc.is_folder or doc.icon == 'folder' %}
+<span class="file-badge file-badge-folder" title="Carpeta">carpeta</span>
+{% else %}
 <span class="file-badge file-badge-{{ doc.icon }}" title="{{ doc.extension|upper }}">{{ doc.icon[:4]|upper }}</span>
+{% endif %}
+{% endmacro %}
+
+{% macro doc_fecha(fecha) %}
+{% if fecha %}<span class="doc-fecha muted"> · {{ fecha }}</span>{% endif %}
+{% endmacro %}
+
+{% macro cronograma_fecha(valor, prev, changed, is_new, is_removed) %}
+{% if is_removed %}
+<span class="cronograma-prev" title="Etapa eliminada">{{ prev or '—' }}</span>
+{% elif changed and prev %}
+<span class="cronograma-val-changed" title="Anterior: {{ prev }}">{{ valor or '—' }}</span>
+{% elif is_new %}
+<span class="cronograma-val-new" title="Etapa nueva">{{ valor or '—' }}</span>
+{% else %}
+{{ valor or '—' }}
+{% endif %}
+{% endmacro %}
+
+{% macro doc_file_actions(process_id, node, route_prefix) %}
+{% if node.downloaded and node.rel_path %}
+<div class="doc-actions">
+  {% if node.previewable %}
+  <a href="/{{ route_prefix }}/{{ process_id }}/preview/{{ node.rel_path | urlquote_path }}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">Preview</a>
+  {% endif %}
+  <a href="/{{ route_prefix }}/{{ process_id }}/documentos/{{ node.rel_path | urlquote_path }}" class="btn btn-primary btn-sm" download="{{ node.nombre }}">Descargar</a>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro doc_tree(nodes, process_id, route_prefix, selectable=false, analizando=false) %}
+{% for node in nodes %}
+<li class="doc-item doc-tree-item{% if node.is_new %} doc-item-new{% endif %}{% if not node.downloaded %} doc-item-missing{% endif %}{% if node.is_folder %} doc-item-folder{% endif %}">
+  <div class="doc-row">
+    {% if selectable %}
+      {% if node.selectable %}
+      <input type="checkbox" class="doc-checkbox" name="selected_files" value="{{ node.rel_path }}"
+        {% if node.default_checked %}checked{% endif %}
+        {% if analizando %}disabled{% endif %}/>
+      {% else %}
+      <span class="doc-checkbox-spacer" aria-hidden="true"></span>
+      {% endif %}
+    {% endif %}
+    {{ file_icon(node) }}
+    <div class="doc-meta">
+      <div class="doc-name">{{ node.nombre }}{{ doc_fecha(node.fecha_publicacion) }}</div>
+      {% if node.etapa or node.tipo_documento or node.origen %}
+      <div class="doc-sub muted">
+        {% if node.etapa %}{{ node.etapa }}{% endif %}
+        {% if node.etapa and node.tipo_documento %} · {% endif %}
+        {% if node.tipo_documento %}{{ node.tipo_documento }}{% endif %}
+        {% if node.origen and not node.is_folder %}
+          {% if node.etapa or node.tipo_documento %} · {% endif %}{{ node.origen }}
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% if node.size_label %}
+    <span class="doc-size muted">{{ node.size_label }}</span>
+    {% endif %}
+    {{ doc_file_actions(process_id, node, route_prefix) }}
+  </div>
+  {% if node.children %}
+  <ul class="doc-tree-children">
+    {{ doc_tree(node.children, process_id, route_prefix, selectable, analizando) }}
+  </ul>
+  {% endif %}
+</li>
+{% endfor %}
+{% endmacro %}
+
+{% macro watch_changelog_panel(entries) %}
+{% if entries %}
+<div class="detail-box detail-box-wide watch-changelog">
+  <h3>Historial de cambios SEACE</h3>
+  {% for entry in entries %}
+  <div class="watch-changelog-entry">
+    <div class="watch-changelog-at">{{ entry.at_label }}</div>
+    <table class="watch-changelog-table">
+      <tbody>
+        {% for change in entry.changes %}
+        <tr>
+          <th>{{ change.area_label }} · {{ change.kind_label }}</th>
+          <td>
+            <div>{{ change.label }}</div>
+            {% if change.kind == 'added' %}
+            <div class="watch-changelog-new">{{ change.new or '—' }}</div>
+            {% elif change.kind == 'removed' %}
+            <div class="watch-changelog-old">{{ change.old or '—' }}</div>
+            {% else %}
+            <div><span class="watch-changelog-old">{{ change.old or '—' }}</span> → <span class="watch-changelog-new">{{ change.new or '—' }}</span></div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 {% endmacro %}

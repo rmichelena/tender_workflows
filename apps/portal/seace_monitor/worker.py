@@ -14,6 +14,7 @@ from .db.models import Entity
 from .db.session import init_db, session_factory
 from .entity_catalog import sync_entity_catalog_if_changed
 from .scanner import MultiEntityScanner
+from .watchlist import refresh_watchlist_processes
 from .worker_heartbeat import write_worker_heartbeat
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,13 @@ logger = logging.getLogger(__name__)
 _CATALOG_SYNC_RETRIES = 3
 _CATALOG_SYNC_BACKOFF_SECONDS = 5
 _worker_lock_fd = None
+
+
+def seconds_until_next_wake(
+    now: float, next_scan_at: float, next_watch_at: float
+) -> float:
+    """Segundos de sleep del worker (independiente de poll vs watchlist)."""
+    return max(1.0, min(next_scan_at, next_watch_at) - now)
 
 
 def _acquire_worker_lock(data_dir: Path) -> None:
@@ -76,12 +84,15 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
     data_dir = Path(cfg.data_dir)
     _acquire_worker_lock(data_dir)
     init_db(cfg.database_url)
-    interval = cfg.poll_interval_seconds
+    poll_s = cfg.poll_interval_seconds
+    watch_s = cfg.watchlist_refresh_seconds
 
     logger.info(
-        "Worker iniciado — intervalo %s (%ss), tenant: %s",
+        "Worker iniciado — scan %s (%ss), watchlist %s (%ss), tenant: %s",
         cfg.poll_interval,
-        interval,
+        poll_s,
+        cfg.watchlist_refresh_interval,
+        watch_s,
         cfg.tenant_id,
     )
 
@@ -91,26 +102,51 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
     finally:
         session.close()
 
-    write_worker_heartbeat(data_dir, poll_interval_seconds=interval)
+    write_worker_heartbeat(data_dir, poll_interval_seconds=poll_s)
+
+    now = time.time()
+    next_scan_at = now
+    next_watch_at = now
 
     while True:
+        now = time.time()
         session = session_factory()
+        n = 0
+        w = 0
+        ran_scan = False
+        ran_watch = False
         try:
-            scanner = MultiEntityScanner(cfg, session)
-            n = scanner.run_once()
-            session.commit()
-            logger.info("Ciclo completado: %s proceso(s) nuevo(s)", n)
+            if now >= next_scan_at:
+                scanner = MultiEntityScanner(cfg, session)
+                n = scanner.run_once()
+                next_scan_at = now + poll_s
+                ran_scan = True
+            if now >= next_watch_at:
+                w = refresh_watchlist_processes(cfg, session)
+                next_watch_at = now + watch_s
+                ran_watch = True
+            if ran_scan or ran_watch:
+                session.commit()
+            if n or w:
+                logger.info(
+                    "Ciclo completado: %s proceso(s) nuevo(s), %s watchlist actualizado(s)",
+                    n,
+                    w,
+                )
         except Exception:
             session.rollback()
-            logger.exception("Error en ciclo de escaneo")
+            logger.exception("Error en ciclo de escaneo/watchlist")
         finally:
             session.close()
 
-        write_worker_heartbeat(data_dir, poll_interval_seconds=interval)
+        write_worker_heartbeat(data_dir, poll_interval_seconds=poll_s)
 
         if once:
             break
-        time.sleep(interval)
+        sleep_for = seconds_until_next_wake(
+            time.time(), next_scan_at, next_watch_at
+        )
+        time.sleep(sleep_for)
 
 
 if __name__ == "__main__":

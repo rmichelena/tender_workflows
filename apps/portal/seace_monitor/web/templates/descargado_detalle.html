@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import status_cell, file_icon %}
+{% from "_macros.html" import status_cell, file_icon, doc_fecha, cronograma_fecha, doc_tree, watch_changelog_panel %}
 {% block title %}{{ process.nomenclatura }} — Descargado{% endblock %}
 {% block content %}
 {% set analizando = process.analysis and process.analysis.status == 'running' %}
@@ -28,6 +28,10 @@
 <div class="alert">Análisis en curso{% if archivos_analizando %}: {{ archivos_analizando | join(', ') }}{% endif %}…</div>
 {% endif %}
 
+{% if had_watch_updates %}
+<div class="watch-update-banner">SEACE actualizó este proceso desde tu última visita. Revisa el cronograma y los archivos marcados.</div>
+{% endif %}
+
 <div class="detail-grid">
   <div class="detail-box detail-box-wide">
     <h3>Cronograma</h3>
@@ -42,10 +46,14 @@
       </thead>
       <tbody>
         {% for row in cronograma %}
-        <tr>
-          <td>{{ row.etapa or '—' }}</td>
-          <td>{{ row.fecha_inicio or '—' }}</td>
-          <td>{{ row.fecha_fin or '—' }}</td>
+        <tr{% if row.is_removed %} class="cronograma-removed"{% elif row.is_new %} class="cronograma-new"{% elif row.changed %} class="cronograma-changed"{% endif %}>
+          <td>
+            {{ row.etapa or '—' }}
+            {% if row.is_new %}<span class="cronograma-tag cronograma-tag-new">Nueva</span>{% endif %}
+            {% if row.is_removed %}<span class="cronograma-tag cronograma-tag-removed">Eliminada</span>{% endif %}
+          </td>
+          <td>{{ cronograma_fecha(row.fecha_inicio, row.fecha_inicio_prev, row.fecha_inicio_changed, row.is_new, row.is_removed) }}</td>
+          <td>{{ cronograma_fecha(row.fecha_fin, row.fecha_fin_prev, row.fecha_fin_changed, row.is_new, row.is_removed) }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -56,31 +64,12 @@
   </div>
 
   <div class="detail-box detail-box-wide">
-    <h3>Archivos ({{ archivos|length }})</h3>
-    <p class="muted">ZIP/RAR ya descomprimidos. Marca los documentos a enviar al análisis.</p>
-    {% if archivos %}
+    <h3>Archivos ({{ documento_count }})</h3>
+    <p class="muted">Los ZIP/RAR se muestran con su contenido extraído. Marca los documentos a enviar al análisis.</p>
+    {% if documentos %}
     <form method="post" action="/descargados/{{ process.id }}/analizar" id="form-analizar"{% if analizando %} data-analyzing="1"{% endif %}>
-      <ul class="doc-list doc-list-selectable">
-        {% for archivo in archivos %}
-        <li class="doc-item">
-          <label class="doc-select-label">
-            <input type="checkbox" name="selected_files" value="{{ archivo.rel_path }}"
-              {% if archivo.default_checked %}checked{% endif %}
-              {% if analizando %}disabled{% endif %}/>
-            {{ file_icon(archivo) }}
-            <div class="doc-meta">
-              <div class="doc-name">
-                <a href="/descargados/{{ process.id }}/documentos/{{ archivo.rel_path | urlquote_path }}" download="{{ archivo.nombre }}">{{ archivo.nombre }}</a>
-              </div>
-              <div class="doc-sub muted">
-                {{ archivo.origen }}
-                {% if archivo.tipo_documento %} · {{ archivo.tipo_documento }}{% endif %}
-              </div>
-            </div>
-            <span class="doc-size muted">{{ archivo.size_label }}</span>
-          </label>
-        </li>
-        {% endfor %}
+      <ul class="doc-list doc-list-selectable doc-list-tree">
+        {{ doc_tree(documentos, process.id, 'descargados', selectable=true, analizando=analizando) }}
       </ul>
       <p style="margin-top:1rem">
         {% if analizando %}
@@ -95,6 +84,8 @@
     {% endif %}
   </div>
 </div>
+
+{{ watch_changelog_panel(watch_changelog|default([])) }}
 
 <p style="margin-top:1.5rem">
   <a href="/descargados" class="btn btn-secondary">← Volver</a>

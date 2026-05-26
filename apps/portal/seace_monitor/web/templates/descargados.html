@@ -21,7 +21,7 @@
   <tbody>
     {% for item in processes %}
     {% set p = item.process %}
-    <tr>
+    <tr data-process-id="{{ p.id }}" class="{% if item.watch_unread %}row-unread{% endif %}"{% if p.status.value == 'descartando' %} data-discarding="1"{% endif %}>
       <td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
       <td>{{ p.nomenclatura }}</td>
       <td class="status-cell">{{ status_cell(p) }}</td>
@@ -30,14 +30,21 @@
       <td>{{ item.fin_consultas }}</td>
       <td>{{ item.fin_presentacion }}</td>
       <td class="actions-cell">
-        <div class="actions-stack">
-        {% if p.analysis and p.analysis.status == 'running' %}
+        <div class="actions-stack js-action-row">
+        {% if p.status.value == 'descartando' %}
+        <button type="button" class="btn btn-secondary btn-sm" disabled>Descartando…</button>
+        {% elif p.analysis and p.analysis.status == 'running' %}
         <a href="/descargados/{{ p.id }}" class="btn btn-analyzing btn-sm">Analizando</a>
         {% else %}
         <a href="/descargados/{{ p.id }}" class="btn btn-primary btn-sm">Ver / Analizar</a>
         {% endif %}
-        <form method="post" action="/descargados/{{ p.id }}/descartar">
-          <button type="submit" class="btn btn-danger btn-sm">Descartar</button>
+        <form method="post" action="/descargados/{{ p.id }}/descartar" class="js-keep-scroll js-descartar-form">
+          <input type="hidden" name="scroll" value=""/>
+          {% if p.status.value == 'descartando' %}
+          <button type="button" class="btn btn-danger btn-sm" disabled>Descartando…</button>
+          {% else %}
+          <button type="submit" class="btn btn-danger btn-sm js-descartar-btn"{% if p.analysis and p.analysis.status == 'running' %} disabled{% endif %}>Descartar</button>
+          {% endif %}
         </form>
         </div>
       </td>
@@ -47,4 +54,70 @@
     {% endfor %}
   </tbody>
 </table>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  function lockDiscardRow(row) {
+    if (!row) return;
+    row.dataset.discarding = "1";
+    row.querySelectorAll(".js-action-row button").forEach(function (btn) {
+      btn.disabled = true;
+    });
+    var discard = row.querySelector(".js-descartar-btn");
+    if (discard) discard.textContent = "Descartando…";
+  }
+
+  document.querySelectorAll("form.js-descartar-form").forEach(function (form) {
+    form.addEventListener("submit", function () {
+      var field = form.querySelector('input[name="scroll"]');
+      if (field) field.value = String(Math.round(window.scrollY));
+      lockDiscardRow(form.closest("tr"));
+    });
+  });
+
+  var params = new URLSearchParams(window.location.search);
+  var scroll = params.get("scroll");
+  if (scroll) {
+    var y = parseInt(scroll, 10);
+    if (Number.isFinite(y) && y >= 0) {
+      function restore() { window.scrollTo(0, y); }
+      restore();
+      requestAnimationFrame(restore);
+      window.addEventListener("load", restore);
+    }
+    params.delete("scroll");
+    var query = params.toString();
+    var next = window.location.pathname + (query ? "?" + query : "") + window.location.hash;
+    history.replaceState(null, "", next);
+  }
+
+  var discardingRows = document.querySelectorAll('tr[data-discarding="1"]');
+  if (!discardingRows.length) return;
+
+  var ids = Array.from(discardingRows).map(function (row) {
+    return row.getAttribute("data-process-id");
+  }).filter(Boolean);
+
+  function stillInDescargados(status) {
+    return status === "descargada" || status === "descartando";
+  }
+
+  function pollDiscarding() {
+    Promise.all(ids.map(function (id) {
+      return fetch("/api/processes/" + id + "/workflow")
+        .then(function (r) { return r.json(); });
+    })).then(function (rows) {
+      var pending = rows.some(function (row) {
+        return stillInDescargados(row.status);
+      });
+      if (!pending) {
+        window.location.reload();
+      }
+    }).catch(function () {});
+  }
+
+  window.setInterval(pollDiscarding, 3000);
+})();
+</script>
 {% endblock %}
