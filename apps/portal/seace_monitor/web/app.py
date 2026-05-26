@@ -53,6 +53,7 @@ from .detail_data import (
     load_analysis_selection,
     media_type_for_path,
     parse_cronograma,
+    parse_watch_changelog,
     resolve_document_path,
     save_analysis_selection,
 )
@@ -100,6 +101,50 @@ def get_db() -> Session:
         raise
     finally:
         db.close()
+
+
+def _build_analisis_detail_context(proc: Process, *, mark_read: bool) -> dict:
+    prev_cron = proc.watch_cronograma_prev_json if proc.watch_unread else None
+    prev_docs = proc.watch_documentos_prev_json if proc.watch_unread else None
+    if mark_read and proc.watch_unread:
+        mark_watchlist_read(proc)
+    documentos = build_document_tree(
+        proc,
+        prev_documentos_json=prev_docs,
+        apply_default_selection=False,
+    )
+    cronograma = parse_cronograma(
+        proc.cronograma_json, prev_cronograma_json=prev_cron
+    )
+    archivos = (
+        build_document_tree(proc, prev_documentos_json=prev_docs)
+        if prev_docs
+        else []
+    )
+    free_reader_html = None
+    chat_payload = {"available": False, "turns": [], "message": None}
+    if proc.data_dir:
+        proc_dir = Path(proc.data_dir)
+        summary_path = proc_dir / "free_reader_summary.md"
+        if summary_path.is_file():
+            free_reader_html = render_free_reader_summary(
+                summary_path.read_text(encoding="utf-8")
+            )
+        from .analysis_chat import api_chat_payload
+        from ..analysis.gemini_session import load_session
+
+        chat_payload = api_chat_payload(load_session(proc_dir))
+    return {
+        "process": proc,
+        "documentos": documentos,
+        "documento_count": count_document_nodes(documentos),
+        "archivos": archivos,
+        "cronograma": cronograma,
+        "had_watch_updates": bool(prev_cron or prev_docs),
+        "free_reader_html": free_reader_html,
+        "chat": chat_payload,
+        "watch_changelog": parse_watch_changelog(proc.watch_changelog_json),
+    }
 
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
@@ -437,6 +482,30 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         restore_archived_process(_config, proc)
         return RedirectResponse("/archivados", status_code=303)
 
+    @app.get("/archivados/{process_id}", response_class=HTMLResponse)
+    def archivado_detalle(request: Request, process_id: int, db: Session = Depends(get_db)):
+        proc = (
+            db.query(Process)
+            .options(joinedload(Process.entity), joinedload(Process.analysis))
+            .filter(Process.id == process_id)
+            .one_or_none()
+        )
+        if proc is None:
+            raise HTTPException(404)
+        if proc.status != ProcessStatus.archivada:
+            raise HTTPException(404)
+        ctx = _build_analisis_detail_context(proc, mark_read=False)
+        return render(
+            request,
+            "analizado_detalle.html",
+            active_page="archivados",
+            back_href="/archivados",
+            doc_route="analizados",
+            is_archived=True,
+            ProcessStatus=ProcessStatus,
+            **ctx,
+        )
+
     @app.post("/publicaciones/{process_id}/descargar")
     def descargar(
         process_id: int,
@@ -565,6 +634,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             archivos_analizando=archivos_analizando,
             cronograma=cronograma,
             had_watch_updates=had_watch_updates,
+            watch_changelog=parse_watch_changelog(proc.watch_changelog_json),
             ProcessStatus=ProcessStatus,
         )
 
@@ -936,56 +1006,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if proc.status == ProcessStatus.archivando:
             return RedirectResponse("/analizados", status_code=303)
         if proc.status == ProcessStatus.archivada:
-            return RedirectResponse(f"/archivados", status_code=303)
+            return RedirectResponse(f"/archivados/{process_id}", status_code=303)
         if proc.status not in (
             ProcessStatus.analizada,
             ProcessStatus.portafolio,
         ):
             raise HTTPException(404)
-        prev_cron = proc.watch_cronograma_prev_json if proc.watch_unread else None
-        prev_docs = proc.watch_documentos_prev_json if proc.watch_unread else None
-        if proc.watch_unread:
-            mark_watchlist_read(proc)
-        documentos = build_document_tree(
-            proc,
-            prev_documentos_json=prev_docs,
-            apply_default_selection=False,
-        )
-        cronograma = parse_cronograma(
-            proc.cronograma_json, prev_cronograma_json=prev_cron
-        )
-        archivos = (
-            build_document_tree(proc, prev_documentos_json=prev_docs)
-            if prev_docs
-            else []
-        )
-        had_watch_updates = bool(prev_cron or prev_docs)
-        free_reader_html = None
-        chat_payload = {"available": False, "turns": [], "message": None}
-        if proc.data_dir:
-            proc_dir = Path(proc.data_dir)
-            summary_path = proc_dir / "free_reader_summary.md"
-            if summary_path.is_file():
-                free_reader_html = render_free_reader_summary(
-                    summary_path.read_text(encoding="utf-8")
-                )
-            from .analysis_chat import api_chat_payload
-            from ..analysis.gemini_session import load_session
-
-            chat_payload = api_chat_payload(load_session(proc_dir))
+        ctx = _build_analisis_detail_context(proc, mark_read=True)
         return render(
             request,
             "analizado_detalle.html",
             active_page="analizados",
-            process=proc,
-            documentos=documentos,
-            documento_count=count_document_nodes(documentos),
-            archivos=archivos,
-            cronograma=cronograma,
-            had_watch_updates=had_watch_updates,
-            free_reader_html=free_reader_html,
-            chat=chat_payload,
+            back_href="/analizados",
+            doc_route="analizados",
+            is_archived=False,
             ProcessStatus=ProcessStatus,
+            **ctx,
         )
 
     @app.get("/analizados/{process_id}/preview/{filename:path}")

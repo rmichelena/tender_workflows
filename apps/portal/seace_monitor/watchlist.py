@@ -23,6 +23,7 @@ from .document_storage import (
     write_manifest,
 )
 from .parser import extract_cronograma_fechas, parse_ficha
+from .watchlist_changelog import append_watchlist_changelog, build_watchlist_changelog_entry
 from .watchlist_compare import watchlist_content_changed
 
 logger = logging.getLogger(__name__)
@@ -231,6 +232,16 @@ def _refresh_watchlist_process(
     )
     if old_fp == new_fp or (not cron_changed and not docs_changed):
         return False
+
+    changelog_entry = build_watchlist_changelog_entry(
+        old_cronograma_json=process.cronograma_json,
+        new_cronograma_json=new_cron_json,
+        old_documentos_json=process.documentos_json,
+        new_documentos_json=new_docs_json,
+        old_fecha_publicacion=process.fecha_publicacion,
+        new_fecha_publicacion=ficha.fecha_publicacion or process.fecha_publicacion,
+    )
+    append_watchlist_changelog(process, changelog_entry)
 
     new_docs = json.loads(new_docs_json)
 

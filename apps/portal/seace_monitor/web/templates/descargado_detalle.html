@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import status_cell, file_icon, doc_fecha, cronograma_fecha, doc_tree %}
+{% from "_macros.html" import status_cell, file_icon, doc_fecha, cronograma_fecha, doc_tree, watch_changelog_panel %}
 {% block title %}{{ process.nomenclatura }} — Descargado{% endblock %}
 {% block content %}
 {% set analizando = process.analysis and process.analysis.status == 'running' %}
@@ -84,6 +84,8 @@
     {% endif %}
   </div>
 </div>
+
+{{ watch_changelog_panel(watch_changelog|default([])) }}
 
 <p style="margin-top:1.5rem">
   <a href="/descargados" class="btn btn-secondary">← Volver</a>

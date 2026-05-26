@@ -109,6 +109,7 @@ class Process(Base):
     )
     watch_cronograma_prev_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     watch_documentos_prev_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    watch_changelog_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

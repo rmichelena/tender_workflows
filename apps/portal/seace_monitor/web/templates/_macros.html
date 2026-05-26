@@ -12,7 +12,11 @@
 {% endmacro %}
 
 {% macro file_icon(doc) %}
+{% if doc.is_folder or doc.icon == 'folder' %}
+<span class="file-badge file-badge-folder" title="Carpeta">carpeta</span>
+{% else %}
 <span class="file-badge file-badge-{{ doc.icon }}" title="{{ doc.extension|upper }}">{{ doc.icon[:4]|upper }}</span>
+{% endif %}
 {% endmacro %}
 
 {% macro doc_fecha(fecha) %}
@@ -81,4 +85,36 @@
   {% endif %}
 </li>
 {% endfor %}
+{% endmacro %}
+
+{% macro watch_changelog_panel(entries) %}
+{% if entries %}
+<div class="detail-box detail-box-wide watch-changelog">
+  <h3>Historial de cambios SEACE</h3>
+  {% for entry in entries %}
+  <div class="watch-changelog-entry">
+    <div class="watch-changelog-at">{{ entry.at_label }}</div>
+    <table class="watch-changelog-table">
+      <tbody>
+        {% for change in entry.changes %}
+        <tr>
+          <th>{{ change.area_label }} · {{ change.kind_label }}</th>
+          <td>
+            <div>{{ change.label }}</div>
+            {% if change.kind == 'added' %}
+            <div class="watch-changelog-new">{{ change.new or '—' }}</div>
+            {% elif change.kind == 'removed' %}
+            <div class="watch-changelog-old">{{ change.old or '—' }}</div>
+            {% else %}
+            <div><span class="watch-changelog-old">{{ change.old or '—' }}</span> → <span class="watch-changelog-new">{{ change.new or '—' }}</span></div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 {% endmacro %}

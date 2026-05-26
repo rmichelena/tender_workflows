@@ -39,6 +39,7 @@ _PROCESS_COLUMN_ADDITIONS = (
     ("watch_checked_at", "DATETIME"),
     ("watch_cronograma_prev_json", "TEXT"),
     ("watch_documentos_prev_json", "TEXT"),
+    ("watch_changelog_json", "TEXT"),
 )
 
 _ANALYSIS_COLUMN_ADDITIONS = (("run_id", "VARCHAR(36)"),)

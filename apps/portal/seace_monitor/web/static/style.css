@@ -589,6 +589,50 @@ table.data td.status-cell { vertical-align: top; white-space: nowrap; }
 .file-badge-zip { background: #ede9fe; color: #5b21b6; }
 .file-badge-rar { background: #fce7f3; color: #9d174d; }
 .file-badge-file { background: #e2e8f0; color: #475569; }
+.file-badge-folder {
+  background: #fef9c3;
+  color: #854d0e;
+  font-size: 0.55rem;
+  min-width: 3.2rem;
+}
+
+.watch-changelog {
+  margin-top: 1.5rem;
+}
+.watch-changelog-entry {
+  border-bottom: 1px solid var(--border);
+  padding: 0.65rem 0;
+}
+.watch-changelog-entry:last-child { border-bottom: none; }
+.watch-changelog-at {
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+.watch-changelog-table {
+  width: 100%;
+  font-size: 0.82rem;
+}
+.watch-changelog-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 500;
+  padding: 0.15rem 0.5rem 0.15rem 0;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.watch-changelog-table td {
+  padding: 0.15rem 0;
+  vertical-align: top;
+}
+.watch-changelog-kind-added { color: #047857; font-weight: 600; }
+.watch-changelog-kind-removed { color: #b91c1c; font-weight: 600; }
+.watch-changelog-kind-modified { color: #92400e; font-weight: 600; }
+.watch-changelog-old {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.watch-changelog-new { font-weight: 500; }
 
 table.cronograma-table { font-size: 0.85rem; }
 table.cronograma-table th { white-space: nowrap; }

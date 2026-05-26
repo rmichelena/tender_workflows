@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..parser import clean_cronograma_etapa, fechas_listado_from_cronograma_json
@@ -313,8 +314,8 @@ def _build_extract_subtree(extract_dir: Path, docs_dir: Path) -> list[DocumentoN
                 DocumentoNodo(
                     rel_path=None,
                     nombre=item.name,
-                    extension="",
-                    icon="file",
+                    extension="carpeta",
+                    icon="folder",
                     size_label="",
                     origen="",
                     is_folder=True,
@@ -644,3 +645,102 @@ def download_filename_for_path(process: Process, path: Path) -> str:
     if docs_dir is None:
         return path.name
     return display_name_for_path(docs_dir, path)
+
+
+@dataclass
+class WatchChangeLine:
+    area: str
+    label: str
+    field: str
+    kind: str
+    old: str
+    new: str
+    area_label: str = ""
+    kind_label: str = ""
+
+
+@dataclass
+class WatchChangelogEntry:
+    at: str
+    at_label: str
+    changes: list[WatchChangeLine]
+
+
+_CHANGE_KIND_LABELS = {
+    "added": "Nuevo",
+    "removed": "Eliminado",
+    "modified": "Cambio",
+}
+
+_AREA_LABELS = {
+    "cronograma": "Cronograma",
+    "documento": "Documento",
+    "proceso": "Proceso",
+}
+
+
+def parse_watch_changelog(raw: str | None) -> list[WatchChangelogEntry]:
+    if not raw:
+        return []
+    try:
+        rows = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(rows, list):
+        return []
+
+    entries: list[WatchChangelogEntry] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        at = str(row.get("at", "") or "")
+        changes_raw = row.get("changes")
+        if not at or not isinstance(changes_raw, list):
+            continue
+        changes: list[WatchChangeLine] = []
+        for item in changes_raw:
+            if not isinstance(item, dict):
+                continue
+            changes.append(
+                WatchChangeLine(
+                    area=str(item.get("area", "") or ""),
+                    label=str(item.get("label", "") or ""),
+                    field=str(item.get("field", "") or ""),
+                    kind=str(item.get("kind", "modified") or "modified"),
+                    old=str(item.get("old", "") or ""),
+                    new=str(item.get("new", "") or ""),
+                    area_label=changelog_area_label(str(item.get("area", "") or "")),
+                    kind_label=changelog_kind_label(
+                        str(item.get("kind", "modified") or "modified")
+                    ),
+                )
+            )
+        if not changes:
+            continue
+        entries.append(
+            WatchChangelogEntry(
+                at=at,
+                at_label=_format_changelog_timestamp(at),
+                changes=changes,
+            )
+        )
+    return entries
+
+
+def _format_changelog_timestamp(at: str) -> str:
+    try:
+        dt = datetime.fromisoformat(at.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local = dt.astimezone()
+        return local.strftime("%d/%m/%Y %H:%M")
+    except ValueError:
+        return at
+
+
+def changelog_area_label(area: str) -> str:
+    return _AREA_LABELS.get(area, area)
+
+
+def changelog_kind_label(kind: str) -> str:
+    return _CHANGE_KIND_LABELS.get(kind, kind)

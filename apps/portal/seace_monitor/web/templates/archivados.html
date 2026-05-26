@@ -26,7 +26,7 @@
       <td class="desc">{{ p.descripcion or '—' }}</td>
       <td class="actions-cell">
         <div class="actions-stack">
-          <a href="/analizados/{{ p.id }}" class="btn btn-secondary btn-sm">Ver</a>
+          <a href="/archivados/{{ p.id }}" class="btn btn-secondary btn-sm">Ver</a>
           <form method="post" action="/archivados/{{ p.id }}/restaurar">
             <button type="submit" class="btn btn-primary btn-sm">Restaurar</button>
           </form>
