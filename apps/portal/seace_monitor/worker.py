@@ -24,6 +24,13 @@ _CATALOG_SYNC_BACKOFF_SECONDS = 5
 _worker_lock_fd = None
 
 
+def seconds_until_next_wake(
+    now: float, next_scan_at: float, next_watch_at: float
+) -> float:
+    """Segundos de sleep del worker (independiente de poll vs watchlist)."""
+    return max(1.0, min(next_scan_at, next_watch_at) - now)
+
+
 def _acquire_worker_lock(data_dir: Path) -> None:
     """Un solo worker por volumen SQLite/datos (evita --scale worker=2)."""
     global _worker_lock_fd
@@ -136,8 +143,8 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
 
         if once:
             break
-        sleep_for = min(next_scan_at, next_watch_at) - time.time()
-        time.sleep(max(1.0, sleep_for))
+        sleep_for = seconds_until_next_wake(now, next_scan_at, next_watch_at)
+        time.sleep(sleep_for)
 
 
 if __name__ == "__main__":

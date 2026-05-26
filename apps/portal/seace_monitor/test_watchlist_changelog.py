@@ -60,3 +60,26 @@ def test_changelog_new_document():
         new_fecha_publicacion=None,
     )
     assert any(c["kind"] == "added" for c in entry["changes"])
+
+
+def test_changelog_cronograma_removed_stage():
+    old_cron = json.dumps(
+        [
+            {"etapa": "Consultas", "fecha_inicio": "01/01/2026", "fecha_fin": "10/01/2026"},
+            {"etapa": "Evaluación", "fecha_inicio": "11/01/2026", "fecha_fin": "20/01/2026"},
+        ]
+    )
+    new_cron = json.dumps(
+        [
+            {"etapa": "Consultas", "fecha_inicio": "01/01/2026", "fecha_fin": "10/01/2026"},
+        ]
+    )
+    entry = build_watchlist_changelog_entry(
+        old_cronograma_json=old_cron,
+        new_cronograma_json=new_cron,
+        old_documentos_json="[]",
+        new_documentos_json="[]",
+        old_fecha_publicacion=None,
+        new_fecha_publicacion=None,
+    )
+    assert any(c["kind"] == "removed" and c["label"] == "Evaluación" for c in entry["changes"])

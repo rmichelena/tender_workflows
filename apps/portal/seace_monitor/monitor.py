@@ -125,6 +125,7 @@ class SeaceMonitor:
         downloaded: list[str] = []
         if self.download_documents:
             docs_dir = proc_dir / "documentos"
+            docs_dir.mkdir(parents=True, exist_ok=True)
             for doc in ficha.documentos:
                 doc_entry = {
                     "uuid": doc.uuid,

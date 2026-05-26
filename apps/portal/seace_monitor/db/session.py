@@ -63,16 +63,30 @@ def _configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
     cursor.close()
 
 
+_PG_COLUMN_TYPE = {
+    "BOOLEAN DEFAULT 0": "BOOLEAN DEFAULT false",
+    "DATETIME": "TIMESTAMP",
+}
+
+
+def _adapt_column_type(col_type: str, dialect: str) -> str:
+    if dialect == "postgresql":
+        return _PG_COLUMN_TYPE.get(col_type, col_type)
+    return col_type
+
+
 def _ensure_table_columns(engine, table: str, additions: tuple[tuple[str, str], ...]) -> None:
     """ALTER TABLE ADD COLUMN para despliegues con BD creada antes de nuevas columnas."""
     insp = inspect(engine)
     if table not in insp.get_table_names():
         return
+    dialect = engine.dialect.name
     existing = {col["name"] for col in insp.get_columns(table)}
     with engine.begin() as conn:
         for name, col_type in additions:
             if name not in existing:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}"))
+                ddl_type = _adapt_column_type(col_type, dialect)
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}"))
 
 
 def init_db(database_url: str) -> None:

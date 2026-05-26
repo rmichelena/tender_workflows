@@ -103,6 +103,8 @@ def manifest_path_for_doc(docs_dir: Path, doc: dict) -> Path | None:
 
 
 def index_downloaded_by_uuid(docs_dir: Path) -> dict[str, Path]:
+    if not docs_dir.is_dir():
+        return {}
     by_uuid: dict[str, Path] = {}
     for doc in read_manifest(docs_dir):
         uuid = doc.get("uuid", "")

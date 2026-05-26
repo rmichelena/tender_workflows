@@ -50,6 +50,14 @@ def test_looks_like_uuid_filename():
     assert not looks_like_uuid_filename("Bases.pdf", uuid)
 
 
+def test_index_downloaded_by_uuid_missing_dir(tmp_path: Path):
+    missing = tmp_path / "documentos"
+    assert missing.is_dir() is False
+    from ..document_storage import index_downloaded_by_uuid
+
+    assert index_downloaded_by_uuid(missing) == {}
+
+
 def test_resolve_existing_ignores_bad_parser_nombre(tmp_path: Path):
     docs_dir = tmp_path / "documentos"
     docs_dir.mkdir()

@@ -49,6 +49,7 @@ from .detail_data import (
     build_document_tree,
     count_document_nodes,
     download_filename_for_path,
+    filter_new_document_nodes,
     flatten_selectable_leaves,
     load_analysis_selection,
     media_type_for_path,
@@ -116,11 +117,7 @@ def _build_analisis_detail_context(proc: Process, *, mark_read: bool) -> dict:
     cronograma = parse_cronograma(
         proc.cronograma_json, prev_cronograma_json=prev_cron
     )
-    archivos = (
-        build_document_tree(proc, prev_documentos_json=prev_docs)
-        if prev_docs
-        else []
-    )
+    archivos = filter_new_document_nodes(documentos) if prev_docs else []
     free_reader_html = None
     chat_payload = {"available": False, "turns": [], "message": None}
     if proc.data_dir:
@@ -235,14 +232,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     templates.env.globals["seace_view_path"] = seace_view_path
     templates.env.filters["urlquote_path"] = lambda value: quote(str(value), safe="/")
 
-    def render(request: Request, name: str, **ctx):
+    def render(request: Request, name: str, *, db: Session | None = None, **ctx):
         ctx["request"] = request
         ctx["active_page"] = ctx.get("active_page", "")
-        db = session_factory()
+        badge_session = db
+        own_session = False
+        if badge_session is None:
+            badge_session = session_factory()
+            own_session = True
         try:
-            ctx.setdefault("nav_badges", watchlist_nav_badges(db))
+            ctx.setdefault("nav_badges", watchlist_nav_badges(badge_session))
         finally:
-            db.close()
+            if own_session:
+                badge_session.close()
         return templates.TemplateResponse(request, name, ctx)
 
     @app.get("/", response_class=HTMLResponse)
@@ -262,6 +264,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return render(
             request,
             "dashboard.html",
+            db=db,
             active_page="dashboard",
             counts=counts,
             entities=entities,
@@ -355,6 +358,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return render(
             request,
             "publicaciones.html",
+            db=db,
             active_page="publicaciones",
             processes=processes,
             entities=entities,
@@ -430,6 +434,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return render(
             request,
             "descartados.html",
+            db=db,
             active_page="descartados",
             processes=rows,
         )
@@ -463,6 +468,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return render(
             request,
             "archivados.html",
+            db=db,
             active_page="archivados",
             processes=rows,
         )
@@ -498,6 +504,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return render(
             request,
             "analizado_detalle.html",
+            db=db,
             active_page="archivados",
             back_href="/archivados",
             doc_route="analizados",
@@ -581,6 +588,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return render(
             request,
             "descargados.html",
+            db=db,
             active_page="descargados",
             processes=processes,
         )
@@ -627,6 +635,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return render(
             request,
             "descargado_detalle.html",
+            db=db,
             active_page="descargados",
             process=proc,
             documentos=documentos,
@@ -686,6 +695,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
         analysis = proc.analysis
         run_id = uuid.uuid4().hex
+        prior_snapshot = None
+        if analysis is not None and analysis.status == "done":
+            prior_snapshot = AnalysisRunner._analysis_snapshot(analysis)
         if analysis is None:
             analysis = AnalysisResult(process_id=proc.id, status="running", run_id=run_id)
             db.add(analysis)
@@ -702,7 +714,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             session = session_factory()
             try:
                 runner = AnalysisRunner(_config, session)
-                runner.analyze(process_id, selected_paths, run_id=run_id)
+                runner.analyze(
+                    process_id,
+                    selected_paths,
+                    run_id=run_id,
+                    prior_snapshot=prior_snapshot,
+                )
             except AnalysisBusyError as exc:
                 logger.warning("Análisis concurrente bloqueado para proceso %s", process_id)
                 abandon_stale_analysis_run(
@@ -988,6 +1005,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return render(
             request,
             "analizados.html",
+            db=db,
             active_page="analizados",
             processes=processes,
             ProcessStatus=ProcessStatus,
@@ -1016,6 +1034,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         return render(
             request,
             "analizado_detalle.html",
+            db=db,
             active_page="analizados",
             back_href="/analizados",
             doc_route="analizados",

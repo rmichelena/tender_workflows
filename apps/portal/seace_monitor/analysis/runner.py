@@ -113,7 +113,12 @@ class AnalysisRunner:
         return process
 
     def analyze(
-        self, process_id: int, selected_rel_paths: list[str], *, run_id: str | None = None
+        self,
+        process_id: int,
+        selected_rel_paths: list[str],
+        *,
+        run_id: str | None = None,
+        prior_snapshot: dict | None = None,
     ) -> AnalysisResult:
         process = self.session.get(Process, process_id)
         if process is None:
@@ -132,11 +137,9 @@ class AnalysisRunner:
         docs_dir = proc_dir / "documentos"
 
         analysis = process.analysis
-        prior = (
-            self._analysis_snapshot(analysis)
-            if analysis is not None and analysis.status == "done"
-            else None
-        )
+        prior = prior_snapshot
+        if prior is None and analysis is not None and analysis.status == "done":
+            prior = self._analysis_snapshot(analysis)
         if analysis is None:
             analysis = AnalysisResult(process_id=process.id, status="running")
             self.session.add(analysis)

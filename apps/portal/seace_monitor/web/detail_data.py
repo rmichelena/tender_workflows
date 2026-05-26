@@ -497,6 +497,19 @@ def build_document_tree(
     return nodes
 
 
+def filter_new_document_nodes(nodes: list[DocumentoNodo]) -> list[DocumentoNodo]:
+    """Sub-árbol con documentos marcados como nuevos (sin reconstruir el árbol)."""
+    filtered: list[DocumentoNodo] = []
+    for node in nodes:
+        if node.is_folder:
+            children = filter_new_document_nodes(node.children)
+            if children:
+                filtered.append(replace(node, children=children))
+        elif node.is_new:
+            filtered.append(node)
+    return filtered
+
+
 def list_analyzable_files(
     process: Process,
     *,

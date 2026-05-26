@@ -19,6 +19,7 @@ from .document_storage import (
     download_and_store_document,
     normalize_legacy_filenames,
     prefer_canonical_archivo,
+    resolve_existing_download,
     sync_doc_from_existing,
     write_manifest,
 )
@@ -88,6 +89,24 @@ def watchlist_fingerprint(
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
+
+
+def _process_fecha_changed(old: str | None, new: str | None) -> bool:
+    return (old or "").strip() != (new or "").strip()
+
+
+def _document_uuids_from_json(documentos_json: str | None) -> set[str]:
+    if not documentos_json:
+        return set()
+    try:
+        raw = json.loads(documentos_json)
+    except json.JSONDecodeError:
+        return set()
+    return {
+        str(item.get("uuid", "")).strip()
+        for item in raw
+        if isinstance(item, dict) and str(item.get("uuid", "")).strip()
+    }
 
 
 def mark_watchlist_read(process: Process) -> None:
@@ -230,8 +249,23 @@ def _refresh_watchlist_process(
         new_cronograma_json=new_cron_json,
         new_documentos_json=new_docs_json,
     )
-    if old_fp == new_fp or (not cron_changed and not docs_changed):
+    new_fecha_publicacion = ficha.fecha_publicacion or process.fecha_publicacion
+    fecha_changed = _process_fecha_changed(
+        process.fecha_publicacion, new_fecha_publicacion
+    )
+    if old_fp == new_fp or (not cron_changed and not docs_changed and not fecha_changed):
         return False
+
+    new_docs = json.loads(new_docs_json)
+
+    if docs_changed and process.data_dir:
+        _download_new_documents(
+            config,
+            process,
+            new_docs,
+            old_documentos_json=process.documentos_json,
+        )
+        new_docs_json = json.dumps(new_docs, ensure_ascii=False)
 
     changelog_entry = build_watchlist_changelog_entry(
         old_cronograma_json=process.cronograma_json,
@@ -239,15 +273,9 @@ def _refresh_watchlist_process(
         old_documentos_json=process.documentos_json,
         new_documentos_json=new_docs_json,
         old_fecha_publicacion=process.fecha_publicacion,
-        new_fecha_publicacion=ficha.fecha_publicacion or process.fecha_publicacion,
+        new_fecha_publicacion=new_fecha_publicacion,
     )
     append_watchlist_changelog(process, changelog_entry)
-
-    new_docs = json.loads(new_docs_json)
-
-    # Descargar antes de mutar documentos_json para que un fallo no suprima reintentos.
-    if docs_changed and process.data_dir:
-        _download_new_documents(config, process, new_docs)
 
     if cron_changed and process.cronograma_json:
         if not process.watch_unread or not process.watch_cronograma_prev_json:
@@ -281,28 +309,53 @@ def _refresh_watchlist_process(
 
 
 def _download_new_documents(
-    config: AppConfig, process: Process, docs: list[dict]
+    config: AppConfig,
+    process: Process,
+    docs: list[dict],
+    *,
+    old_documentos_json: str | None,
 ) -> None:
     docs_dir = Path(process.data_dir) / "documentos"
     docs_dir.mkdir(parents=True, exist_ok=True)
+    old_uuids = _document_uuids_from_json(old_documentos_json)
+    new_uuids = {
+        str(doc.get("uuid", "")).strip()
+        for doc in docs
+        if isinstance(doc, dict) and str(doc.get("uuid", "")).strip()
+    }
+    added_uuids = new_uuids - old_uuids
     for doc in docs:
         uuid = doc.get("uuid", "")
         if not uuid:
             continue
         tipo = doc.get("tipo_descarga", "3")
-        if download_and_store_document(
-            docs_dir,
-            doc,
-            guest=tipo != "3",
-            http_proxy=config.http_proxy,
-        ):
-            logger.info(
-                "Watchlist: descargado doc nuevo %s → %s (proceso %s)",
-                uuid,
-                doc.get("archivo", ""),
-                process.id,
-            )
+        try:
+            if download_and_store_document(
+                docs_dir,
+                doc,
+                guest=tipo != "3",
+                http_proxy=config.http_proxy,
+            ):
+                logger.info(
+                    "Watchlist: descargado doc nuevo %s → %s (proceso %s)",
+                    uuid,
+                    doc.get("archivo", ""),
+                    process.id,
+                )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Watchlist: fallo al descargar documento {uuid} (proceso {process.id})"
+            ) from exc
     normalize_legacy_filenames(docs_dir, docs)
     for doc in docs:
         prefer_canonical_archivo(docs_dir, doc)
     write_manifest(docs_dir, docs)
+    for uuid in added_uuids:
+        doc = next((item for item in docs if item.get("uuid") == uuid), None)
+        if doc is None:
+            continue
+        existing = resolve_existing_download(docs_dir, doc)
+        if existing is None or existing.stat().st_size == 0:
+            raise RuntimeError(
+                f"Watchlist: documento nuevo {uuid} no quedó en disco (proceso {process.id})"
+            )

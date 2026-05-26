@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine
 
-from seace_monitor.db.session import init_db
+from seace_monitor.db.session import _adapt_column_type, init_db
 from seace_monitor.worker_heartbeat import (
     write_worker_heartbeat,
     worker_heartbeat_ok,
@@ -31,6 +31,12 @@ def test_init_db_sqlite(tmp_path: Path):
     db = tmp_path / "test.db"
     init_db(f"sqlite:///{db}")
     assert db.exists()
+
+
+def test_adapt_column_type_postgres():
+    assert _adapt_column_type("BOOLEAN DEFAULT 0", "postgresql") == "BOOLEAN DEFAULT false"
+    assert _adapt_column_type("DATETIME", "postgresql") == "TIMESTAMP"
+    assert _adapt_column_type("TEXT", "sqlite") == "TEXT"
 
 
 def test_worker_heartbeat_ok_within_stale_window(tmp_path: Path):
