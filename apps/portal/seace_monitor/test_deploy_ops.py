@@ -35,7 +35,10 @@ def test_init_db_sqlite(tmp_path: Path):
 
 def test_adapt_column_type_postgres():
     assert _adapt_column_type("BOOLEAN DEFAULT 0", "postgresql") == "BOOLEAN DEFAULT false"
-    assert _adapt_column_type("DATETIME", "postgresql") == "TIMESTAMP"
+    assert (
+        _adapt_column_type("DATETIME", "postgresql")
+        == "TIMESTAMP WITH TIME ZONE"
+    )
     assert _adapt_column_type("TEXT", "sqlite") == "TEXT"
 
 

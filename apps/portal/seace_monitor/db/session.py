@@ -65,7 +65,7 @@ def _configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
 
 _PG_COLUMN_TYPE = {
     "BOOLEAN DEFAULT 0": "BOOLEAN DEFAULT false",
-    "DATETIME": "TIMESTAMP",
+    "DATETIME": "TIMESTAMP WITH TIME ZONE",
 }
 
 

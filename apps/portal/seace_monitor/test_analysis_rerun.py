@@ -85,3 +85,9 @@ def test_analyze_restores_done_analysis_when_prior_snapshot_provided(
     assert analysis.status == "done"
     assert analysis.alcance == "Alcance previo"
     assert proc.status == ProcessStatus.analizada
+
+
+def test_analysis_snapshot_includes_run_id_for_rollback():
+    analysis = AnalysisResult(status="done", run_id="run-abc")
+    snap = AnalysisRunner._analysis_snapshot(analysis)
+    assert snap["run_id"] == "run-abc"

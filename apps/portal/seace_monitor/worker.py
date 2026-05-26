@@ -143,7 +143,9 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
 
         if once:
             break
-        sleep_for = seconds_until_next_wake(now, next_scan_at, next_watch_at)
+        sleep_for = seconds_until_next_wake(
+            time.time(), next_scan_at, next_watch_at
+        )
         time.sleep(sleep_for)
 
 

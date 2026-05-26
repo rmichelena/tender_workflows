@@ -17,6 +17,7 @@ from .config import AppConfig
 from .db.models import Process, ProcessStatus, utcnow
 from .document_storage import (
     download_and_store_document,
+    looks_like_size_label,
     normalize_legacy_filenames,
     prefer_canonical_archivo,
     resolve_existing_download,
@@ -107,6 +108,46 @@ def _document_uuids_from_json(documentos_json: str | None) -> set[str]:
         for item in raw
         if isinstance(item, dict) and str(item.get("uuid", "")).strip()
     }
+
+
+def _stored_docs_by_uuid(documentos_json: str | None) -> dict[str, dict]:
+    if not documentos_json:
+        return {}
+    try:
+        raw = json.loads(documentos_json)
+    except json.JSONDecodeError:
+        return {}
+    by_uuid: dict[str, dict] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        uuid = str(item.get("uuid", "")).strip()
+        if uuid:
+            by_uuid[uuid] = item
+    return by_uuid
+
+
+def _merge_parsed_docs_with_storage(
+    parsed_docs: list[dict], stored_documentos_json: str | None
+) -> list[dict]:
+    """Conserva archivo/nombre en disco cuando la ficha no cambió semánticamente."""
+    stored_by_uuid = _stored_docs_by_uuid(stored_documentos_json)
+    merged: list[dict] = []
+    for doc in parsed_docs:
+        if not isinstance(doc, dict):
+            continue
+        uuid = str(doc.get("uuid", "")).strip()
+        merged_doc = dict(doc)
+        stored = stored_by_uuid.get(uuid)
+        if stored:
+            archivo = str(stored.get("archivo", "") or "").strip()
+            nombre = str(stored.get("nombre", "") or "").strip()
+            if archivo:
+                merged_doc["archivo"] = archivo
+            if nombre and not looks_like_size_label(nombre):
+                merged_doc["nombre"] = nombre
+        merged.append(merged_doc)
+    return merged
 
 
 def mark_watchlist_read(process: Process) -> None:
@@ -266,6 +307,9 @@ def _refresh_watchlist_process(
             old_documentos_json=process.documentos_json,
         )
         new_docs_json = json.dumps(new_docs, ensure_ascii=False)
+    else:
+        new_docs = _merge_parsed_docs_with_storage(new_docs, process.documentos_json)
+        new_docs_json = json.dumps(new_docs, ensure_ascii=False)
 
     changelog_entry = build_watchlist_changelog_entry(
         old_cronograma_json=process.cronograma_json,
@@ -349,7 +393,6 @@ def _download_new_documents(
     normalize_legacy_filenames(docs_dir, docs)
     for doc in docs:
         prefer_canonical_archivo(docs_dir, doc)
-    write_manifest(docs_dir, docs)
     for uuid in added_uuids:
         doc = next((item for item in docs if item.get("uuid") == uuid), None)
         if doc is None:
@@ -359,3 +402,4 @@ def _download_new_documents(
             raise RuntimeError(
                 f"Watchlist: documento nuevo {uuid} no quedó en disco (proceso {process.id})"
             )
+    write_manifest(docs_dir, docs)

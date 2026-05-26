@@ -31,6 +31,7 @@ from .tender_bridge import run_tender_stage1
 logger = logging.getLogger(__name__)
 
 _ANALYSIS_SNAPSHOT_FIELDS = (
+    # run_id must stay here so rerun failure restores the pre-run identity.
     "status",
     "error_message",
     "alcance",

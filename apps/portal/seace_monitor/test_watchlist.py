@@ -281,6 +281,84 @@ def test_refresh_triggers_on_fecha_publicacion_only(
     assert proc.fecha_publicacion == "02/01/26"
 
 
+def test_refresh_fecha_only_preserves_stored_document_names(
+    watch_session: Session, tmp_path: Path
+):
+    cfg = AppConfig()
+    stored_doc = {
+        "uuid": "u1",
+        "nombre": "Bases-final.pdf",
+        "archivo": "Bases-final.pdf",
+        "tipo_descarga": "3",
+    }
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[stored_doc],
+    )
+    proc.fecha_publicacion = "01/01/26"
+    watch_session.flush()
+    ficha = _ficha_with_docs([Documento("u1", "(2646 KB)", "", "", "", "", "3")])
+    ficha.fecha_publicacion = "02/01/26"
+    mock_client = MagicMock()
+    mock_client.open_ficha.return_value = MagicMock(
+        html="<html>", url="http://x", ficha_id="f1"
+    )
+
+    with (
+        patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
+        patch("seace_monitor.watchlist.download_and_store_document"),
+    ):
+        assert _refresh_watchlist_process(cfg, watch_session, proc) is True
+
+    stored = json.loads(proc.documentos_json or "[]")
+    assert stored[0]["archivo"] == "Bases-final.pdf"
+    assert stored[0]["nombre"] == "Bases-final.pdf"
+
+
+def test_refresh_does_not_write_manifest_on_failed_download_validation(
+    watch_session: Session, tmp_path: Path
+):
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[{"uuid": "u1", "nombre": "a.pdf", "tipo_descarga": "3"}],
+    )
+    docs_dir = Path(proc.data_dir) / "documentos"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "u1.pdf").write_bytes(b"pdf")
+    new_docs = [
+        Documento("u1", "a.pdf", "", "", "", "", "3"),
+        Documento("u2", "b.pdf", "", "", "", "", "3"),
+    ]
+    ficha = _ficha_with_docs(new_docs)
+    mock_client = MagicMock()
+    mock_client.open_ficha.return_value = MagicMock(
+        html="<html>", url="http://x", ficha_id="f1"
+    )
+
+    def _download(docs_dir, doc, **kwargs):
+        path = docs_dir / f"{doc['uuid']}.pdf"
+        path.write_bytes(b"" if doc["uuid"] == "u2" else b"pdf")
+        doc["archivo"] = path.name
+        return doc["uuid"] == "u2"
+
+    with (
+        patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
+        patch("seace_monitor.watchlist.download_and_store_document", side_effect=_download),
+    ):
+        with pytest.raises(RuntimeError):
+            _refresh_watchlist_process(cfg, watch_session, proc)
+
+    manifest_path = docs_dir / "manifest.json"
+    assert not manifest_path.is_file() or "u2" not in manifest_path.read_text(
+        encoding="utf-8"
+    )
+
+
 def test_refresh_persists_post_download_document_names(
     watch_session: Session, tmp_path: Path
 ):
