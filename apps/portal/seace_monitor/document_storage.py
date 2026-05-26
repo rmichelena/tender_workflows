@@ -15,6 +15,19 @@ _SIZE_LABEL_RE = re.compile(
 _MAX_FILENAME_LEN = 180
 
 
+_UUID_STEM_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def looks_like_uuid_filename(name: str, uuid: str = "") -> bool:
+    stem = Path(str(name or "").replace("\\", "/")).stem
+    if uuid and stem.lower() == uuid.lower():
+        return True
+    return bool(_UUID_STEM_RE.match(stem))
+
+
 def looks_like_size_label(name: str) -> bool:
     text = (name or "").strip()
     if not text:

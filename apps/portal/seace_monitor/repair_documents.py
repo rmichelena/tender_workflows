@@ -10,13 +10,17 @@ from sqlalchemy.orm import Session
 from .config import AppConfig
 from .db.models import Process
 from .document_storage import (
+    allocate_unique_path,
     download_and_store_document,
     looks_like_size_label,
+    looks_like_uuid_filename,
     normalize_legacy_filenames,
     prefer_canonical_archivo,
     resolve_existing_download,
+    sanitize_download_filename,
     write_manifest,
 )
+from .downloader import resolve_download
 from .watchlist import _repair_document_metadata
 
 logger = logging.getLogger(__name__)
@@ -45,9 +49,44 @@ def cleanup_size_label_orphans(docs_dir: Path, docs: list[dict]) -> int:
 
 
 def _doc_has_bad_name(doc: dict) -> bool:
+    uuid = str(doc.get("uuid", "") or "")
     nombre = str(doc.get("nombre", "") or "")
     archivo = str(doc.get("archivo", "") or "")
-    return looks_like_size_label(nombre) or looks_like_size_label(Path(archivo).stem)
+    return (
+        looks_like_size_label(nombre)
+        or looks_like_size_label(Path(archivo).stem)
+        or looks_like_uuid_filename(nombre, uuid)
+        or looks_like_uuid_filename(archivo, uuid)
+    )
+
+
+def _rename_from_alfresco_url(
+    docs_dir: Path, doc: dict, *, http_proxy: str | None
+) -> bool:
+    uuid = str(doc.get("uuid", "")).strip()
+    if not uuid:
+        return False
+    existing = resolve_existing_download(docs_dir, doc)
+    if existing is None or existing.stat().st_size == 0:
+        return False
+    if not looks_like_uuid_filename(existing.name, uuid):
+        return False
+    guest = str(doc.get("tipo_descarga", "3")).strip() != "3"
+    try:
+        _, alfresco_name = resolve_download(uuid, guest=guest, http_proxy=http_proxy)
+    except Exception:
+        logger.exception("No se pudo resolver nombre Alfresco uuid=%s", uuid)
+        return False
+    if not alfresco_name or looks_like_size_label(alfresco_name):
+        return False
+    target = allocate_unique_path(
+        docs_dir, sanitize_download_filename(alfresco_name, uuid)
+    )
+    if existing.resolve() != target.resolve():
+        existing.rename(target)
+    doc["archivo"] = target.name
+    doc["nombre"] = alfresco_name
+    return True
 
 
 def _redownload_bad_named_doc(
@@ -56,10 +95,13 @@ def _redownload_bad_named_doc(
     uuid = str(doc.get("uuid", "")).strip()
     if not uuid:
         return False
+    if _rename_from_alfresco_url(docs_dir, doc, http_proxy=http_proxy):
+        return True
     existing = resolve_existing_download(docs_dir, doc)
-    if existing is not None and not looks_like_size_label(existing.stem):
-        return False
-    if existing is not None and looks_like_size_label(existing.stem):
+    if existing is not None and (
+        looks_like_size_label(existing.stem)
+        or looks_like_uuid_filename(existing.name, uuid)
+    ):
         existing.unlink()
     doc.pop("archivo", None)
     if _doc_has_bad_name(doc):

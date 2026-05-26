@@ -7,6 +7,7 @@ from ..document_storage import (
     allocate_unique_path,
     commit_downloaded_file,
     looks_like_size_label,
+    looks_like_uuid_filename,
     normalize_legacy_filenames,
     prepare_download_dest,
     resolve_existing_download,
@@ -41,6 +42,12 @@ def test_looks_like_size_label():
     assert looks_like_size_label("(2646 KB)")
     assert looks_like_size_label("2646 KB")
     assert not looks_like_size_label("Bases_LPA+0012026F.pdf")
+
+
+def test_looks_like_uuid_filename():
+    uuid = "1d8021e2-b946-4077-adc0-984f5332effb"
+    assert looks_like_uuid_filename(f"{uuid}.pdf", uuid)
+    assert not looks_like_uuid_filename("Bases.pdf", uuid)
 
 
 def test_resolve_existing_ignores_bad_parser_nombre(tmp_path: Path):
@@ -85,6 +92,22 @@ def test_commit_downloaded_file_uses_content_disposition_name(tmp_path: Path):
     assert final.name == "Bases_LPA+0012026F_20260518_123248_485.pdf"
     assert doc["nombre"] == "Bases_LPA+0012026F_20260518_123248_485.pdf"
     assert doc["archivo"] == final.name
+
+
+def test_commit_downloaded_file_prefers_alfresco_name_over_uuid_fallback(
+    tmp_path: Path,
+):
+    docs_dir = tmp_path / "documentos"
+    docs_dir.mkdir()
+    uuid = "1d8021e2-b946-4077-adc0-984f5332effb"
+    temp = docs_dir / f"{uuid}.download"
+    temp.write_bytes(b"pdf")
+    doc = {"uuid": uuid, "nombre": "(2646 KB)"}
+    alfresco = "BASES_SERVIDORES_20260513_180726_833.pdf"
+    final = commit_downloaded_file(docs_dir, doc, temp, alfresco)
+    assert final.name == alfresco
+    assert doc["nombre"] == alfresco
+    assert not final.name.startswith(uuid)
 
 
 def test_allocate_unique_path(tmp_path: Path):
