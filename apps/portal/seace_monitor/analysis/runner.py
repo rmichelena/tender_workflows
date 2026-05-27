@@ -155,6 +155,7 @@ class AnalysisRunner:
             self._mark_analysis_running(analysis, run_id)
 
         if process.status == ProcessStatus.analizada:
+            leave_analizados_list(self.session, process)
             process.status = ProcessStatus.descargada
             enter_descargados_list(self.session, process)
         self.session.commit()
@@ -183,9 +184,8 @@ class AnalysisRunner:
                     )
                 self._apply_result(analysis, result_data)
                 leave_descargados_list(self.session, process)
-                if process.list_rank_analizados is None:
-                    enter_analizados_list(self.session, process)
                 process.status = ProcessStatus.analizada
+                enter_analizados_list(self.session, process)
                 analysis.status = "done"
                 analysis.finished_at = utcnow()
         except AnalysisBusyError:
@@ -200,6 +200,7 @@ class AnalysisRunner:
                             self._restore_analysis_snapshot(analysis, prior)
                             leave_descargados_list(self.session, process)
                             process.status = ProcessStatus.analizada
+                            enter_analizados_list(self.session, process)
                             err_path = proc_dir / "fast_analysis" / "last_rerun_error.txt"
                             err_path.parent.mkdir(parents=True, exist_ok=True)
                             err_path.write_text(str(exc), encoding="utf-8")

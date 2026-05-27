@@ -396,6 +396,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             status_code=303,
         )
 
+    def _workflow_list_redirect(
+        path: str,
+        *,
+        sort: str = "",
+        dir: str = "",
+        scroll: str = "",
+    ) -> RedirectResponse:
+        return RedirectResponse(
+            workflow_list_query(path, sort=sort, dir=dir, scroll=scroll),
+            status_code=303,
+        )
+
     @app.post("/publicaciones/{process_id}/descartar")
     def descartar(
         process_id: int,
@@ -858,6 +870,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
         scroll: str = Form(""),
+        sort: str = Form(""),
+        dir: str = Form(""),
     ):
         proc = (
             db.query(Process)
@@ -867,9 +881,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if proc is None:
             raise HTTPException(404)
-        redirect = "/descargados"
-        if scroll.strip().isdigit():
-            redirect = f"/descargados?scroll={scroll.strip()}"
+        redirect = workflow_list_query(
+            "/descargados",
+            sort=sort,
+            dir=dir,
+            scroll=scroll.strip() if scroll.strip().isdigit() else "",
+        )
         return _discard_downloaded(
             db, proc, background_tasks, redirect=redirect
         )
@@ -880,6 +897,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
         scroll: str = Form(""),
+        sort: str = Form(""),
+        dir: str = Form(""),
     ):
         proc = (
             db.query(Process)
@@ -889,9 +908,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if proc is None:
             raise HTTPException(404)
-        redirect = "/analizados"
-        if scroll.strip().isdigit():
-            redirect = f"/analizados?scroll={scroll.strip()}"
+        redirect = workflow_list_query(
+            "/analizados",
+            sort=sort,
+            dir=dir,
+            scroll=scroll.strip() if scroll.strip().isdigit() else "",
+        )
         return _archive_analyzed(
             db, proc, background_tasks, redirect=redirect
         )

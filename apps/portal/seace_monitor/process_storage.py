@@ -208,11 +208,11 @@ def restore_archived_process(
     """Restaura desde archivados: devuelve carpeta a procesos/ y estado analizada."""
     src = resolve_process_data_dir(config, process.data_dir)
     if src is None or not src.is_dir():
-        process.status = (
-            ProcessStatus.analizada
-            if process.analysis and process.analysis.status == "done"
-            else ProcessStatus.publicada
-        )
+        if process.analysis and process.analysis.status == "done":
+            process.status = ProcessStatus.analizada
+            enter_analizados_list(session, process)
+        else:
+            process.status = ProcessStatus.publicada
         return
 
     procesos = procesos_root(config)
@@ -342,6 +342,7 @@ def repair_archived_processes(config: AppConfig, session: Session) -> int:
         clear_process_download_metadata(proc)
         if proc.analysis and proc.analysis.status == "done":
             proc.status = ProcessStatus.analizada
+            enter_analizados_list(session, proc)
         else:
             delete_process_analysis(session, proc)
             proc.status = ProcessStatus.publicada

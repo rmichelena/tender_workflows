@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,6 +14,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from .analysis.runner import AnalysisRunner
 from .config import AppConfig
 from .db.models import AnalysisResult, Base, Entity, Process, ProcessStatus
+
+
+@contextmanager
+def _noop_analysis_lock(_path):
+    yield
 
 
 @pytest.fixture
@@ -85,6 +91,87 @@ def test_analyze_restores_done_analysis_when_prior_snapshot_provided(
     assert analysis.status == "done"
     assert analysis.alcance == "Alcance previo"
     assert proc.status == ProcessStatus.analizada
+
+
+def _setup_descargado_process(
+    analysis_session: Session, tmp_path: Path, *, nid: str = "nid-1"
+) -> tuple[AppConfig, Process]:
+    cfg = AppConfig()
+    entity = analysis_session.query(Entity).one()
+    proc_dir = tmp_path / nid
+    docs_dir = proc_dir / "documentos"
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "bases.pdf").write_bytes(b"pdf")
+    (docs_dir / "manifest.json").write_text(
+        json.dumps(
+            [{"uuid": "u1", "nombre": "bases.pdf", "archivo": "bases.pdf"}]
+        ),
+        encoding="utf-8",
+    )
+    proc = Process(
+        entity_id=entity.id,
+        anio=2026,
+        nid_proceso=nid,
+        nomenclatura=f"T-{nid}",
+        status=ProcessStatus.descargada,
+        documentos_json=json.dumps([{"uuid": "u1", "nombre": "bases.pdf"}]),
+        data_dir=str(proc_dir),
+    )
+    analysis_session.add(proc)
+    analysis_session.flush()
+    return cfg, proc
+
+
+def test_analyze_success_assigns_analizados_rank(
+    analysis_session: Session, tmp_path: Path
+):
+    cfg, proc = _setup_descargado_process(analysis_session, tmp_path)
+    runner = AnalysisRunner(cfg, analysis_session)
+    with patch("seace_monitor.analysis.runner.analysis_lock", _noop_analysis_lock):
+        with patch.object(
+            runner,
+            "_run_pipeline",
+            return_value={"stage1": {"mode": "fast_gemini", "alcance": "X"}},
+        ):
+            runner.analyze(proc.id, ["bases.pdf"])
+
+    analysis_session.refresh(proc)
+    assert proc.status == ProcessStatus.analizada
+    assert proc.list_rank_analizados == 1
+    assert proc.list_rank_descargados is None
+
+
+def test_rerun_leaves_and_reenters_analizados_without_duplicate_ranks(
+    analysis_session: Session, tmp_path: Path
+):
+    cfg, p1 = _setup_descargado_process(analysis_session, tmp_path, nid="p1")
+    _, p2 = _setup_descargado_process(analysis_session, tmp_path, nid="p2")
+    p1.status = ProcessStatus.analizada
+    p1.list_rank_analizados = 1
+    p2.status = ProcessStatus.analizada
+    p2.list_rank_analizados = 2
+    analysis_session.add(
+        AnalysisResult(process_id=p1.id, status="done", alcance="A1")
+    )
+    analysis_session.add(
+        AnalysisResult(process_id=p2.id, status="done", alcance="A2")
+    )
+    analysis_session.commit()
+
+    runner = AnalysisRunner(cfg, analysis_session)
+    with patch("seace_monitor.analysis.runner.analysis_lock", _noop_analysis_lock):
+        with patch.object(
+            runner,
+            "_run_pipeline",
+            return_value={"stage1": {"mode": "fast_gemini", "alcance": "A1b"}},
+        ):
+            runner.analyze(p1.id, ["bases.pdf"])
+
+    analysis_session.refresh(p1)
+    analysis_session.refresh(p2)
+    assert p1.list_rank_analizados == 2
+    assert p2.list_rank_analizados == 1
+    assert {p1.list_rank_analizados, p2.list_rank_analizados} == {1, 2}
 
 
 def test_analysis_snapshot_includes_run_id_for_rollback():

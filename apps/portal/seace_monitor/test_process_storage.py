@@ -3,8 +3,11 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
 from .config import AppConfig
-from .db.models import AnalysisResult, Process, ProcessStatus
+from .db.models import AnalysisResult, Base, Entity, Process, ProcessStatus
 from .document_storage import (
     prefer_canonical_archivo,
     prepare_download_dest,
@@ -15,6 +18,7 @@ from .process_storage import (
     delete_process_data_dir,
     discard_process_downloads,
     purge_all_stale_process_data,
+    repair_archived_processes,
     restore_archived_process,
     resolve_restore_status,
 )
@@ -45,6 +49,66 @@ def _proc(data_dir: str | None, status: ProcessStatus = ProcessStatus.descartada
 def _with_analysis(proc: Process, status: str = "done") -> Process:
     proc.__dict__["analysis"] = AnalysisResult(status=status)
     return proc
+
+
+def _sqlite_session(tmp_path: Path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'storage.db'}")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    db = SessionLocal()
+    entity = Entity(ruc="20100000001", nombre="Test", activa=True)
+    db.add(entity)
+    db.flush()
+    return db, entity
+
+
+def test_restore_archived_missing_dir_assigns_rank(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    db, entity = _sqlite_session(tmp_path)
+    proc = Process(
+        entity_id=entity.id,
+        anio=2026,
+        nid_proceso="123",
+        nomenclatura="TEST-1",
+        status=ProcessStatus.archivada,
+        data_dir=str(tmp_path / "missing"),
+    )
+    db.add(proc)
+    db.flush()
+    analysis = AnalysisResult(process_id=proc.id, status="done")
+    db.add(analysis)
+    db.flush()
+
+    restore_archived_process(cfg, proc, db)
+
+    assert proc.status == ProcessStatus.analizada
+    assert proc.list_rank_analizados == 1
+    db.close()
+
+
+def test_repair_archived_missing_dir_assigns_rank(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    db, entity = _sqlite_session(tmp_path)
+    proc = Process(
+        entity_id=entity.id,
+        anio=2026,
+        nid_proceso="456",
+        nomenclatura="TEST-2",
+        status=ProcessStatus.archivada,
+        data_dir=str(tmp_path / "missing"),
+    )
+    db.add(proc)
+    db.flush()
+    analysis = AnalysisResult(process_id=proc.id, status="done")
+    db.add(analysis)
+    db.flush()
+
+    repaired = repair_archived_processes(cfg, db)
+
+    assert repaired == 1
+    assert proc.status == ProcessStatus.analizada
+    assert proc.list_rank_analizados == 1
+    db.close()
 
 
 def test_delete_process_data_dir(tmp_path: Path):
