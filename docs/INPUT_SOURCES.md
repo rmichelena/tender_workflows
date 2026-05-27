@@ -175,6 +175,35 @@ Ejemplos:
 
 ---
 
+## Reglas de autoreject
+
+Las reglas de descarte automático operan sobre items todavía `publicada`. Si una regla coincide, el item pasa a `status=autorejected` y se conserva el motivo para revisión/restauración desde `/descartados`.
+
+La sintaxis inicial es deliberadamente parecida a búsquedas tipo Google:
+
+- Palabras sin campo buscan en `descripcion + nomenclatura`.
+- Comillas indican frase literal: `"transporte de personal"`.
+- Espacios significan `AND`.
+- `OR` permite alternativas.
+- Paréntesis agrupan.
+- `-` niega una condición.
+- `campo:valor` limita a un campo; campos iniciales: `objeto`, `descripcion`, `nomenclatura`, `entidad`, `source`.
+- Comparación normalizada: minúsculas y sin tildes.
+
+Ejemplos:
+
+```text
+objeto:servicio (limpieza OR vigilancia OR seguridad)
+objeto:servicio ("transporte de personal" OR "traslado de personal" OR movilidad) -entidad:corpac
+objeto:bien (alimentos OR viveres OR raciones)
+objeto:bien (uniformes OR vestimenta OR calzado)
+objeto:servicio ("alquiler de vehiculos" OR "alquiler de camionetas" OR "alquiler de local")
+```
+
+Las reglas empaquetadas son un baseline conservador y deben poder moverse a configuración por tenant/cliente cuando exista Settings multiusuario.
+
+---
+
 ## Implicancias técnicas próximas
 
 Cambios de modelo/dominio:

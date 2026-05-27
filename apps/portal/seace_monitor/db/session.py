@@ -39,6 +39,7 @@ _PROCESS_COLUMN_ADDITIONS = (
     ("list_hash", "VARCHAR(64)"),
     ("content_hash", "VARCHAR(64)"),
     ("data_dir", "VARCHAR(512)"),
+    ("auto_reject_reason", "TEXT"),
     ("watch_unread", "BOOLEAN DEFAULT 0"),
     ("watch_checked_at", "DATETIME"),
     ("watch_cronograma_prev_json", "TEXT"),

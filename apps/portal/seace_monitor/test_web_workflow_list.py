@@ -137,6 +137,7 @@ def test_descartados_includes_autorejected_processes(tmp_path: Path):
             nid_proceso="auto-1",
             nomenclatura="AUTO-REJECTED-1",
             status=ProcessStatus.autorejected,
+            auto_reject_reason="servicio_limpieza: Servicios de limpieza fuera de foco",
         )
         db.add(proc)
         db.commit()
@@ -148,3 +149,4 @@ def test_descartados_includes_autorejected_processes(tmp_path: Path):
     assert response.status_code == 200
     assert "AUTO-REJECTED-1" in response.text
     assert "autorejected" in response.text
+    assert "servicio_limpieza" in response.text

@@ -12,6 +12,8 @@ max_pages: 1
 rows_per_page: 15
 data_dir: ./data
 tenant_id: default
+# Opcional: ruta a reglas YAML de autoreject. Si falta, usa las reglas empaquetadas.
+# auto_reject_rules_path: ./config/auto_reject_rules.yaml
 
 analysis:
   tender_procurement:

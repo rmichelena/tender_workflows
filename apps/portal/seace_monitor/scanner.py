@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from .auto_reject import AutoRejectRule, apply_auto_reject_rules, load_auto_reject_rules
 from .client import ProcessRow, SeaceClient
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus, utcnow
@@ -29,6 +30,7 @@ class MultiEntityScanner:
     def __init__(self, config: AppConfig, session: Session) -> None:
         self.config = config
         self.session = session
+        self.auto_reject_rules: list[AutoRejectRule] = load_auto_reject_rules(config)
 
     def run_once(self, options: ScanOptions | None = None) -> int:
         opts = options or ScanOptions()
@@ -226,6 +228,14 @@ class MultiEntityScanner:
         proc.content_hash = ficha.content_hash()
         proc.last_seen_at = utcnow()
         proc.updated_at = datetime.now(timezone.utc)
+        match = apply_auto_reject_rules(proc, entity, self.auto_reject_rules)
+        if match is not None:
+            logger.info(
+                "Autorechazado %s por regla %s — %s",
+                row.nid_proceso,
+                match.id,
+                row.nomenclatura,
+            )
         self.session.flush()
 
         logger.info(

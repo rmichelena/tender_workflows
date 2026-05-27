@@ -23,7 +23,12 @@
       <td>{{ p.nomenclatura }}</td>
       <td class="status-cell">{{ status_cell(p) }}</td>
       <td>{{ p.fecha_publicacion or '—' }}</td>
-      <td class="desc">{{ p.descripcion or '—' }}</td>
+      <td class="desc">
+        <div>{{ p.descripcion or '—' }}</div>
+        {% if p.auto_reject_reason %}
+        <div class="muted">Autoreject: {{ p.auto_reject_reason }}</div>
+        {% endif %}
+      </td>
       <td>
         <form method="post" action="/descartados/{{ p.id }}/restaurar">
           <button type="submit" class="btn btn-secondary btn-sm">Restaurar</button>

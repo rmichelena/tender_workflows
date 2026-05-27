@@ -1,0 +1,185 @@
+"""Tests del motor de autoreject."""
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from .auto_reject import (
+    AutoRejectRule,
+    apply_auto_reject_rules,
+    evaluate_query,
+    load_auto_reject_rules,
+)
+from .client import FichaResult, ProcessRow
+from .config import AppConfig
+from .db.models import Base, Entity, Process, ProcessStatus
+from .parser import FichaData
+from .scan_options import ScanOptions
+from .scanner import MultiEntityScanner
+
+
+def _process(*, objeto: str, descripcion: str, entidad: str = "Entidad") -> tuple[Process, Entity]:
+    entity = Entity(ruc="20123456789", nombre=entidad, activa=True)
+    process = Process(
+        entity_id=1,
+        anio=2026,
+        nid_proceso="1",
+        nomenclatura="AS-SM-1-2026",
+        objeto=objeto,
+        descripcion=descripcion,
+        status=ProcessStatus.publicada,
+    )
+    return process, entity
+
+
+def test_google_style_query_supports_field_or_phrase_and_exclusion():
+    proc, entity = _process(
+        objeto="Servicio",
+        descripcion="SERVICIO DE ALQUILER DE CAMIONETAS PARA TRASLADO DE PERSONAL",
+        entidad="MINISTERIO DE ENERGIA Y MINAS",
+    )
+
+    assert evaluate_query(
+        'objeto:servicio ("alquiler de camionetas" OR "transporte de personal") -entidad:corpac',
+        proc,
+        entity,
+    )
+
+
+def test_google_style_query_exclusion_can_keep_corpac_transport():
+    proc, entity = _process(
+        objeto="Servicio",
+        descripcion="CONTRATACION DEL SERVICIO DE TRANSPORTE DE PERSONAL CORPAC",
+        entidad="CORPORACION PERUANA DE AEROPUERTOS Y AVIACION COMERCIAL S.A.- CORPAC",
+    )
+
+    assert not evaluate_query(
+        'objeto:servicio ("transporte de personal" OR traslado OR movilidad) -entidad:corpac',
+        proc,
+        entity,
+    )
+
+
+def test_apply_auto_reject_marks_public_process_and_stores_reason():
+    proc, entity = _process(
+        objeto="Bien",
+        descripcion="ADQUISICION DE UNIFORMES Y CALZADO PARA PERSONAL",
+    )
+    rule = AutoRejectRule(
+        id="bien_uniformes",
+        query="objeto:bien (uniformes OR vestimenta OR calzado)",
+        reason="Bienes de uniformes/vestimenta fuera de foco",
+    )
+
+    match = apply_auto_reject_rules(proc, entity, [rule])
+
+    assert match == rule
+    assert proc.status == ProcessStatus.autorejected
+    assert proc.auto_reject_reason == "bien_uniformes: Bienes de uniformes/vestimenta fuera de foco"
+
+
+def test_apply_auto_reject_does_not_change_downloaded_process():
+    proc, entity = _process(
+        objeto="Servicio",
+        descripcion="SERVICIO DE LIMPIEZA DE OFICINAS",
+    )
+    proc.status = ProcessStatus.descargada
+    rule = AutoRejectRule(
+        id="servicio_limpieza",
+        query="objeto:servicio limpieza",
+        reason="Limpieza fuera de foco",
+    )
+
+    assert apply_auto_reject_rules(proc, entity, [rule]) is None
+    assert proc.status == ProcessStatus.descargada
+
+
+def test_load_default_rules_includes_alquiler_and_food_patterns():
+    rules = load_auto_reject_rules(AppConfig())
+    queries = "\n".join(rule.query for rule in rules)
+
+    assert "alquiler" in queries
+    assert "camionetas" in queries
+    assert "local" in queries
+    assert "alimentos" in queries
+
+
+def test_process_auto_reject_reason_defaults_and_backfills():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    entity = Entity(ruc="20123456789", nombre="Entidad", activa=True)
+    session.add(entity)
+    session.flush()
+    session.add(
+        Process(
+            entity_id=entity.id,
+            anio=2026,
+            nid_proceso="1",
+            nomenclatura="AS-SM-1-2026",
+        )
+    )
+    session.commit()
+
+    proc = session.query(Process).one()
+    assert proc.auto_reject_reason is None
+
+
+def test_scanner_applies_auto_reject_rules_after_upsert(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    entity = Entity(ruc="20123456789", nombre="Entidad", activa=True)
+    session.add(entity)
+    session.flush()
+    row = ProcessRow(
+        row_index=0,
+        numero="1",
+        fecha_publicacion="01/01/2026",
+        nomenclatura="AS-SM-1-2026",
+        reiniciado_desde="",
+        objeto="Servicio",
+        descripcion="SERVICIO DE LIMPIEZA DE OFICINAS",
+        cuantia="",
+        moneda="",
+        version_seace="",
+        nid_proceso="123",
+        nid_convocatoria="conv",
+        nid_sistema="",
+        link_id="link",
+        ntipo="",
+    )
+
+    class FakeClient:
+        def open_ficha(self, _row):
+            return FichaResult(ficha_id="f1", html="<html>", url="http://x")
+
+        def refresh_list_page_state(self, _page):
+            return None
+
+    monkeypatch.setattr(
+        "seace_monitor.scanner.parse_ficha",
+        lambda _html, ficha_id, nid: FichaData(
+            ficha_id=ficha_id,
+            nid_proceso=nid,
+            nomenclatura=row.nomenclatura,
+            descripcion=row.descripcion,
+            objeto=row.objeto,
+            fecha_publicacion=row.fecha_publicacion,
+        ),
+    )
+
+    scanner = MultiEntityScanner(AppConfig(), session)
+    created = scanner._upsert_from_ficha(
+        entity,
+        FakeClient(),
+        row,
+        proc=None,
+        options=ScanOptions(),
+    )
+
+    assert created is True
+    proc = session.query(Process).one()
+    assert proc.status == ProcessStatus.autorejected
+    assert proc.auto_reject_reason.startswith("servicio_limpieza:")

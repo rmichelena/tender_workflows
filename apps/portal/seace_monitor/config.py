@@ -85,6 +85,7 @@ class AppConfig:
     data_dir: Path = Path("./data")
     tenant_id: str = DEFAULT_TENANT_ID
     http_proxy: str | None = None
+    auto_reject_rules_path: Path | None = None
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
 
     @property
@@ -174,6 +175,7 @@ class AppConfig:
             data_dir=Path(raw.get("data_dir", "./data")),
             tenant_id=str(raw.get("tenant_id", DEFAULT_TENANT_ID)).strip() or DEFAULT_TENANT_ID,
             http_proxy=str(http_proxy).strip() if http_proxy else None,
+            auto_reject_rules_path=_optional_path(raw.get("auto_reject_rules_path")),
             analysis=analysis,
         )
 

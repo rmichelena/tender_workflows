@@ -124,6 +124,7 @@ class Process(Base):
     list_hash: Mapped[str | None] = mapped_column(String(64))
     content_hash: Mapped[str | None] = mapped_column(String(64))
     data_dir: Mapped[str | None] = mapped_column(String(512))
+    auto_reject_reason: Mapped[str | None] = mapped_column(Text)
 
     watch_unread: Mapped[bool] = mapped_column(default=False, index=True)
     watch_checked_at: Mapped[datetime | None] = mapped_column(
