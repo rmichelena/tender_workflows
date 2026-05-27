@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Reglas autoreject — Configuración{% endblock %}
+{% block content %}
+<div class="settings-page">
+  <header class="settings-header">
+    <div>
+      <h2>Reglas autoreject</h2>
+      <p class="muted">Edita reglas YAML para rechazar publicaciones automáticamente antes de descargar documentos.</p>
+    </div>
+    <div class="settings-header-actions">
+      {% if saved %}<span class="badge badge-interest">Guardado</span>{% endif %}
+      {% if using_override %}
+      <span class="muted">Usando override: {{ editable_path }}</span>
+      {% else %}
+      <span class="muted">Usando reglas empaquetadas; guardar crea override por tenant.</span>
+      {% endif %}
+    </div>
+  </header>
+
+  <section class="detail-box detail-box-wide">
+    <h3>Sintaxis</h3>
+    <p class="muted">Soporta comillas para frases, paréntesis, <code>OR</code>, exclusiones con <code>-</code> y campos como <code>objeto:</code>, <code>entidad:</code> o <code>source:</code>.</p>
+    <pre class="code-sample">objeto:servicio ("transporte de personal" OR "traslado de personal") -entidad:corpac</pre>
+  </section>
+
+  <form method="post" action="/settings/autoreject" class="settings-form">
+    <input type="hidden" name="action" value="save"/>
+    <textarea name="rules_yaml" class="rules-editor" spellcheck="false">{{ rules_yaml }}</textarea>
+    <div class="settings-footer-actions">
+      <button type="submit" class="btn btn-primary">Guardar reglas</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

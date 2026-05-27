@@ -69,6 +69,7 @@ from .seace_proxy import (
 )
 from .seace_view import can_open_seace
 from .analysis_chat import register_analysis_chat_routes
+from .settings_autoreject import register_autoreject_settings_routes
 from .settings_entities import bootstrap_entities, register_settings_routes
 from .sorting import (
     SORTABLE_COLUMNS,
@@ -1205,6 +1206,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         }
 
     register_settings_routes(app, _config, render, get_db)
+    register_autoreject_settings_routes(app, _config, render, get_db)
     register_analysis_chat_routes(app, _config, get_db)
 
     return app

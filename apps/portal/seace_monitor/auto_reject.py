@@ -12,8 +12,10 @@ import yaml
 
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus
+from .tenant_paths import tenant_settings_dir
 
 DEFAULT_RULES_PATH = Path(__file__).with_name("auto_reject_rules.yaml")
+EDITABLE_RULES_FILENAME = "auto_reject_rules.yaml"
 
 
 @dataclass(frozen=True)
@@ -178,20 +180,51 @@ def evaluate_query(query: str, process: Process, entity: Entity | None = None) -
     return _Parser(query).parse().evaluate(_Context(process, entity))
 
 
+def editable_auto_reject_rules_path(config: AppConfig) -> Path:
+    if config.auto_reject_rules_path is not None:
+        return config.auto_reject_rules_path
+    return tenant_settings_dir(config) / EDITABLE_RULES_FILENAME
+
+
+def active_auto_reject_rules_path(config: AppConfig) -> Path:
+    editable = editable_auto_reject_rules_path(config)
+    if editable.exists():
+        return editable
+    return DEFAULT_RULES_PATH
+
+
+def validate_rules_yaml(text: str) -> list[AutoRejectRule]:
+    raw = yaml.safe_load(text) or {}
+    if not isinstance(raw, dict) or not isinstance(raw.get("rules", []), list):
+        raise ValueError("El YAML debe contener una lista `rules`.")
+    rules = []
+    for item in raw.get("rules", []):
+        if not isinstance(item, dict):
+            raise ValueError("Cada regla debe ser un objeto YAML.")
+        if not item.get("id") or not item.get("query"):
+            raise ValueError("Cada regla requiere `id` y `query`.")
+        query = str(item["query"])
+        _Parser(query).parse()
+        rules.append(
+            AutoRejectRule(
+                id=str(item["id"]),
+                query=query,
+                reason=str(item.get("reason") or item["id"]),
+            )
+        )
+    return rules
+
+
 def load_auto_reject_rules(config: AppConfig) -> list[AutoRejectRule]:
-    path = config.auto_reject_rules_path or DEFAULT_RULES_PATH
+    path = active_auto_reject_rules_path(config)
     if not path.exists():
         return []
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return [
-        AutoRejectRule(
-            id=str(item["id"]),
-            query=str(item["query"]),
-            reason=str(item.get("reason") or item["id"]),
-        )
-        for item in raw.get("rules", [])
-        if item.get("enabled", True)
-    ]
+    enabled = {
+        **raw,
+        "rules": [item for item in raw.get("rules", []) if item.get("enabled", True)],
+    }
+    return validate_rules_yaml(yaml.safe_dump(enabled, allow_unicode=True, sort_keys=False))
 
 
 def first_matching_rule(

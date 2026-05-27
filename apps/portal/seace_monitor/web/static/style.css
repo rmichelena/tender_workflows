@@ -800,6 +800,23 @@ table.data td.col-entidad {
   gap: 0.5rem;
   margin-left: auto;
 }
+.rules-editor {
+  width: 100%;
+  min-height: 520px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+.code-sample {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #f6f8fa;
+  overflow-x: auto;
+}
 
 body.modal-open {
   overflow: hidden;
