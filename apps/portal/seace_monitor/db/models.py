@@ -33,9 +33,18 @@ class ProcessStatus(str, enum.Enum):
     descartando = "descartando"
     analizada = "analizada"
     portafolio = "portafolio"
+    autorejected = "autorejected"
     archivando = "archivando"
     descartada = "descartada"
     archivada = "archivada"
+
+
+class InterestStatus(str, enum.Enum):
+    none = "none"
+    watching = "watching"
+    candidate = "candidate"
+    opportunity = "opportunity"
+    rejected = "rejected"
 
 
 class Entity(Base):
@@ -76,6 +85,12 @@ class Process(Base):
         String(256),
         default=lambda context: context.get_current_parameters().get("nid_proceso"),
         index=True,
+    )
+    workflow_profile: Mapped[str] = mapped_column(
+        String(64), default="public_tender", index=True
+    )
+    interest_status: Mapped[InterestStatus] = mapped_column(
+        Enum(InterestStatus), default=InterestStatus.none, index=True
     )
 
     nid_proceso: Mapped[str] = mapped_column(String(32), index=True)

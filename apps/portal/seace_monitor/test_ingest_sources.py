@@ -5,8 +5,12 @@ from pathlib import Path
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from .db.models import Base, Entity, Process
-from .db.session import _backfill_process_sources, _ensure_table_columns
+from .db.models import Base, Entity, InterestStatus, Process, ProcessStatus
+from .db.session import (
+    _backfill_process_pipeline_fields,
+    _backfill_process_sources,
+    _ensure_table_columns,
+)
 
 
 def test_process_defaults_to_seace_source_ref_from_nid():
@@ -30,6 +34,12 @@ def test_process_defaults_to_seace_source_ref_from_nid():
     saved = session.query(Process).one()
     assert saved.source == "seace"
     assert saved.source_ref == "123456"
+    assert saved.workflow_profile == "public_tender"
+    assert saved.interest_status == InterestStatus.none
+
+
+def test_process_status_includes_autorejected_for_rule_filters():
+    assert ProcessStatus.autorejected.value == "autorejected"
 
 
 def test_backfills_source_columns_for_existing_process_rows(tmp_path: Path):
@@ -52,6 +62,31 @@ def test_backfills_source_columns_for_existing_process_rows(tmp_path: Path):
         ).one()
         assert row.source == "seace"
         assert row.source_ref == "987654"
+
+
+def test_backfills_pipeline_fields_for_existing_process_rows(tmp_path: Path):
+    db_path = tmp_path / "legacy_pipeline.sqlite3"
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE processes (id INTEGER PRIMARY KEY)"))
+        conn.execute(text("INSERT INTO processes (id) VALUES (1)"))
+
+    _ensure_table_columns(
+        engine,
+        "processes",
+        (
+            ("workflow_profile", "VARCHAR(64) DEFAULT 'public_tender'"),
+            ("interest_status", "VARCHAR(32) DEFAULT 'none'"),
+        ),
+    )
+    _backfill_process_pipeline_fields(engine)
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT workflow_profile, interest_status FROM processes WHERE id = 1")
+        ).one()
+        assert row.workflow_profile == "public_tender"
+        assert row.interest_status == "none"
 
 
 def test_seace_ingest_adapter_is_registered():

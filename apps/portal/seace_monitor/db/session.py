@@ -16,6 +16,8 @@ _SessionLocal = None
 _PROCESS_COLUMN_ADDITIONS = (
     ("source", "VARCHAR(32) DEFAULT 'seace'"),
     ("source_ref", "VARCHAR(256)"),
+    ("workflow_profile", "VARCHAR(64) DEFAULT 'public_tender'"),
+    ("interest_status", "VARCHAR(32) DEFAULT 'none'"),
     ("nid_convocatoria", "TEXT"),
     ("nid_sistema", "VARCHAR(8)"),
     ("link_id", "VARCHAR(128)"),
@@ -119,6 +121,31 @@ def _backfill_process_sources(engine) -> None:
         )
 
 
+def _backfill_process_pipeline_fields(engine) -> None:
+    """Completa campos conceptuales de PipelineItem en BDs existentes."""
+    insp = inspect(engine)
+    if "processes" not in insp.get_table_names():
+        return
+    existing = {col["name"] for col in insp.get_columns("processes")}
+    if not {"workflow_profile", "interest_status"}.issubset(existing):
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE processes "
+                "SET workflow_profile = 'public_tender' "
+                "WHERE workflow_profile IS NULL OR workflow_profile = ''"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE processes "
+                "SET interest_status = 'none' "
+                "WHERE interest_status IS NULL OR interest_status = ''"
+            )
+        )
+
+
 def init_db(database_url: str) -> None:
     global _engine, _SessionLocal
     connect_args: dict[str, object] = {}
@@ -141,6 +168,7 @@ def init_db(database_url: str) -> None:
     _ensure_table_columns(_engine, "processes", _PROCESS_COLUMN_ADDITIONS)
     _ensure_table_columns(_engine, "analysis_results", _ANALYSIS_COLUMN_ADDITIONS)
     _backfill_process_sources(_engine)
+    _backfill_process_pipeline_fields(_engine)
     if _SessionLocal is not None:
         from ..list_order import backfill_list_ranks
 
@@ -160,6 +188,8 @@ def _ensure_sqlite_indexes(engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_processes_status_objeto ON processes (status, objeto)",
         "CREATE INDEX IF NOT EXISTS ix_processes_source ON processes (source)",
         "CREATE INDEX IF NOT EXISTS ix_processes_source_ref ON processes (source_ref)",
+        "CREATE INDEX IF NOT EXISTS ix_processes_workflow_profile ON processes (workflow_profile)",
+        "CREATE INDEX IF NOT EXISTS ix_processes_interest_status ON processes (interest_status)",
         "CREATE INDEX IF NOT EXISTS ix_processes_watch_unread ON processes (watch_unread)",
     )
     with engine.begin() as conn:
