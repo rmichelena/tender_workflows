@@ -14,6 +14,8 @@ _engine = None
 _SessionLocal = None
 
 _PROCESS_COLUMN_ADDITIONS = (
+    ("source", "VARCHAR(32) DEFAULT 'seace'"),
+    ("source_ref", "VARCHAR(256)"),
     ("nid_convocatoria", "TEXT"),
     ("nid_sistema", "VARCHAR(8)"),
     ("link_id", "VARCHAR(128)"),
@@ -91,6 +93,32 @@ def _ensure_table_columns(engine, table: str, additions: tuple[tuple[str, str], 
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}"))
 
 
+def _backfill_process_sources(engine) -> None:
+    """Completa columnas multi-ingesta para filas SEACE existentes."""
+    insp = inspect(engine)
+    if "processes" not in insp.get_table_names():
+        return
+    existing = {col["name"] for col in insp.get_columns("processes")}
+    if not {"source", "source_ref", "nid_proceso"}.issubset(existing):
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE processes "
+                "SET source = 'seace' "
+                "WHERE source IS NULL OR source = ''"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE processes "
+                "SET source_ref = nid_proceso "
+                "WHERE (source_ref IS NULL OR source_ref = '') "
+                "AND nid_proceso IS NOT NULL"
+            )
+        )
+
+
 def init_db(database_url: str) -> None:
     global _engine, _SessionLocal
     connect_args: dict[str, object] = {}
@@ -112,6 +140,7 @@ def init_db(database_url: str) -> None:
     _ensure_table_columns(_engine, "entities", _ENTITY_COLUMN_ADDITIONS)
     _ensure_table_columns(_engine, "processes", _PROCESS_COLUMN_ADDITIONS)
     _ensure_table_columns(_engine, "analysis_results", _ANALYSIS_COLUMN_ADDITIONS)
+    _backfill_process_sources(_engine)
     if _SessionLocal is not None:
         from ..list_order import backfill_list_ranks
 
@@ -129,6 +158,8 @@ def _ensure_sqlite_indexes(engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_processes_objeto ON processes (objeto)",
         "CREATE INDEX IF NOT EXISTS ix_processes_status_entity ON processes (status, entity_id)",
         "CREATE INDEX IF NOT EXISTS ix_processes_status_objeto ON processes (status, objeto)",
+        "CREATE INDEX IF NOT EXISTS ix_processes_source ON processes (source)",
+        "CREATE INDEX IF NOT EXISTS ix_processes_source_ref ON processes (source_ref)",
         "CREATE INDEX IF NOT EXISTS ix_processes_watch_unread ON processes (watch_unread)",
     )
     with engine.begin() as conn:

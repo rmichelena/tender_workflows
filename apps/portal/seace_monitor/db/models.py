@@ -71,6 +71,13 @@ class Process(Base):
     )
     anio: Mapped[int] = mapped_column(Integer, index=True)
 
+    source: Mapped[str] = mapped_column(String(32), default="seace", index=True)
+    source_ref: Mapped[str | None] = mapped_column(
+        String(256),
+        default=lambda context: context.get_current_parameters().get("nid_proceso"),
+        index=True,
+    )
+
     nid_proceso: Mapped[str] = mapped_column(String(32), index=True)
     nid_convocatoria: Mapped[str | None] = mapped_column(Text)
     nid_sistema: Mapped[str | None] = mapped_column(String(8))

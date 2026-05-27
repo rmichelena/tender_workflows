@@ -191,11 +191,16 @@ class MultiEntityScanner:
             proc = Process(
                 entity_id=entity.id,
                 anio=self.config.anio,
+                source="seace",
+                source_ref=row.nid_proceso,
                 nid_proceso=row.nid_proceso,
                 status=ProcessStatus.publicada,
                 first_seen_at=utcnow(),
             )
             self.session.add(proc)
+        elif not proc.source_ref:
+            proc.source = proc.source or "seace"
+            proc.source_ref = proc.nid_proceso
 
         proc.ficha_id = ficha.ficha_id
         proc.nid_convocatoria = row.nid_convocatoria
