@@ -3,13 +3,13 @@
 Documento de referencia del sistema integrado: monitoreo SEACE, portal, pipeline documental y fase agentica.
 
 **Estado:** refleja el código en `main` a mayo 2026.  
-**Relacionado:** [STAGES.md](STAGES.md) (modelo canónico A→D), [ROADMAP.md](ROADMAP.md), [INTEGRATION.md](INTEGRATION.md).
+**Relacionado:** [STAGES.md](STAGES.md) (modelo canónico A→D), [INPUT_SOURCES.md](INPUT_SOURCES.md), [ROADMAP.md](ROADMAP.md), [INTEGRATION.md](INTEGRATION.md).
 
 ---
 
 ## Visión en una frase
 
-Un monorepo que **ingiere oportunidades** por múltiples canales y entrypoints (SEACE hoy; alta directa, manual y email planificados), permite **decisión humana** en el portal (etapas A–B) y conecta con **conversión documental** (etapa C) y **trabajo agentico en portafolio** (etapa D). Ver [STAGES.md](STAGES.md).
+Un monorepo que **ingiere items del pipeline** por múltiples canales y entrypoints (SEACE hoy; portales privados, email y manual planificados), permite **decisión humana** en el portal (interés, análisis, portafolio), conecta con **conversión documental** (etapa C) y habilita **trabajo agentico en portafolio** (etapa D). Ver [STAGES.md](STAGES.md) e [INPUT_SOURCES.md](INPUT_SOURCES.md).
 
 ---
 
@@ -19,23 +19,28 @@ Tres dimensiones que no deben mezclarse en el modelo de datos:
 
 | Dimensión | Qué es | Hoy | Futuro |
 |-----------|--------|-----|--------|
-| **Canal de ingesta** | De dónde llega la oportunidad | Adapter SEACE (`seace_monitor`) | Alta directa (entidad+N°), manual, email, otros portales |
-| **Perfil de workflow** | Qué pasos ejecutar | `pe_public` implícito | `market_study`, `multilateral`, … |
+| **Canal de ingesta (`source`)** | De dónde llega el item | Adapter SEACE (`seace_monitor`) | Portales privados, email, manual |
+| **Trigger** | Qué provocó revisar la fuente | Worker periódico SEACE | Change Detection webhook, mailbox poll, alta manual |
+| **Perfil de workflow** | Qué ruta ejecutar | `public_tender` implícito | `private_tender`, `market_study`, `multilateral`, … |
+| **Estado de interés** | Qué tan comercialmente interesante es | Implícito en acciones UI | `none`, `watching`, `candidate`, `opportunity`, `rejected` |
 | **Contexto de negocio** | Qué hacemos después del go/no-go | Portafolio manual | Catálogo, propuesta, flujo de caja |
 
 ```mermaid
 flowchart TB
   subgraph ingest [Capa ingesta — adapters]
     SEACE[Adapter SEACE]
+    PORTAL[Portales cliente — planificado]
     EMAIL[Adapter email — planificado]
-    MANUAL[Upload / N° proceso — planificado]
+    MANUAL[Upload manual — planificado]
+    CD[Change Detection — trigger]
     WA[WhatsApp notificaciones — planificado]
   end
 
-  subgraph core [Capa dominio — oportunidades]
+  subgraph core [Capa dominio — pipeline items]
     DB[(SQLite / Postgres)]
-    PROC[Process / Opportunity]
+    PROC[Process hoy / PipelineItem conceptual]
     STATE[Estados del workflow]
+    INTEREST[interest_status]
     RULES[Motor de reglas — planificado]
   end
 
@@ -51,10 +56,13 @@ flowchart TB
     CHAT[Chat embebido — planificado]
   end
 
+  CD -.-> PORTAL
   SEACE --> PROC
+  PORTAL -.-> PROC
   EMAIL -.-> PROC
   MANUAL -.-> PROC
   PROC --> DB
+  PROC --> INTEREST
   RULES -.-> PROC
   WEB --> PROC
   WEB --> DL --> FAST
@@ -78,7 +86,7 @@ flowchart TB
 | **Proposal** | Redacción, pricing | No implementado |
 | **Finance** | Flujo de caja vs hitos licitación | No implementado |
 
-Los contextos se acoplan por **ID de oportunidad** y paths bajo `data/tenants/{tenant_id}/procesos/`, no por un mega-schema único.
+Los contextos se acoplan por **ID de item del pipeline** y paths bajo `data/tenants/{tenant_id}/procesos/`, no por un mega-schema único. Una **oportunidad** es una decisión de interés (`interest_status=opportunity`), no el nombre del objeto base.
 
 **Multi-usuario:** ver [MULTI_TENANCY.md](MULTI_TENANCY.md) — un despliegue, subdirectorios por tenant (settings, seace, procesos, agent), sin contenedor por usuario.
 
@@ -89,8 +97,9 @@ Los contextos se acoplan por **ID de oportunidad** y paths bajo `data/tenants/{t
 ```
 tender_workflows/
   apps/portal/seace_monitor/
-    scanner.py          # Worker multi-entidad: listado + ficha JSF
+    scanner.py          # Worker multi-entidad/cliente: listado + ficha JSF
     client.py           # Cliente SEACE (ViewState, paginación)
+    ingest/             # Registry/adapters de fuentes (`seace` hoy)
     analysis/
       runner.py         # download() + analyze()
       fast_reader.py    # Multi-PDF → Gemini free reader
@@ -124,6 +133,8 @@ Secrets: `deploy/.env` (`GEMINI_API_KEY`, `SEACE_HTTP_PROXY`).
 stateDiagram-v2
   [*] --> publicada: scan detecta proceso
   publicada --> descartada: descartar / regla futura
+  publicada --> autorejected: regla automática
+  autorejected --> publicada: restaurar / revisar
   publicada --> descargando: Descargar
   descargando --> descargada: OK
   descargando --> publicada: fallo descarga
@@ -143,7 +154,7 @@ stateDiagram-v2
 | `/publicaciones` | `publicada`, `descargando` |
 | `/descargados` | `descargada` — selección multi-archivo + Analizar |
 | `/analizados` | `analizada`, `portafolio` |
-| `/descartados` | `descartada` |
+| `/descartados` | `descartada`, `autorejected` |
 
 ### Descarga
 
@@ -168,11 +179,11 @@ stateDiagram-v2
 
 | Entidad | Campos clave |
 |---------|--------------|
-| `Entity` | RUC, nombre, activa |
-| `Process` | `(entity_id, nid_proceso)`, status, objeto, descripción, cronograma_json, data_dir, documentos_json |
+| `Entity` | RUC/ID, nombre, activa; conceptualmente entidad/cliente/comprador |
+| `Process` | `source`, `source_ref`, `(entity_id, nid_proceso)` para SEACE, status, objeto, descripción, cronograma_json, data_dir, documentos_json |
 | `AnalysisResult` | status, alcance, requisitos, raw_json, timestamps |
 
-**Deuda de diseño acordada:** renombrar `Process` → `Opportunity`, añadir `source` + `source_ref` cuando haya segundo adapter. Ver [ROADMAP.md](ROADMAP.md).
+**Deuda de diseño acordada:** `Process` representa hoy el `PipelineItem` conceptual. No renombrar a `Opportunity`: oportunidad será `interest_status=opportunity`. Próximos campos: `workflow_profile`, `interest_status`, `trigger`/eventos y paquetes documentales. Ver [INPUT_SOURCES.md](INPUT_SOURCES.md) y [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -180,7 +191,7 @@ stateDiagram-v2
 
 | Uso | Implementación hoy | Plan |
 |-----|-------------------|------|
-| Fast-path análisis | `google-genai` directo, modelo en `config.yaml` | Abstracción provider (GenAI, OpenRouter, Fireworks) + UI Settings |
+| Fast-path análisis | `google-genai` directo, modelo en `config.yaml`; prompt por `source` | Prompt compuesto por entity/source/workflow/stage + UI Settings |
 | Paso 1.3b eje 0 | Gemini vía tender_bridge | Misma abstracción |
 | Agentes 1.5+ | Hermes/OpenClaw externo (Telegram/Discord) | Chat embebido en portal |
 
@@ -199,6 +210,7 @@ stateDiagram-v2
 ## Referencias
 
 - [ROADMAP.md](ROADMAP.md) — fases y prioridades
+- [INPUT_SOURCES.md](INPUT_SOURCES.md) — fuentes, entrypoints, triggers y perfiles de lectura
 - [INTEGRATION.md](INTEGRATION.md) — detalle Paso 1 ↔ portal
 - [STAGES.md](STAGES.md) — etapas A→D
 - [instrucciones/C_conversion/](../instrucciones/C_conversion/) — runbook conversión

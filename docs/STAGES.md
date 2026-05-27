@@ -1,7 +1,7 @@
 # Etapas del producto — modelo canónico A→D
 
 Documento de referencia para nomenclatura, layouts en disco y orquestadores.  
-**Relacionado:** [ARCHITECTURE.md](ARCHITECTURE.md), [INTEGRATION.md](INTEGRATION.md), [ROADMAP.md](ROADMAP.md), [instrucciones/vision/flujo_completo.md](../instrucciones/vision/flujo_completo.md).
+**Relacionado:** [ARCHITECTURE.md](ARCHITECTURE.md), [INPUT_SOURCES.md](INPUT_SOURCES.md), [INTEGRATION.md](INTEGRATION.md), [ROADMAP.md](ROADMAP.md), [instrucciones/vision/flujo_completo.md](../instrucciones/vision/flujo_completo.md).
 
 Última actualización: mayo 2026.
 
@@ -9,7 +9,7 @@ Documento de referencia para nomenclatura, layouts en disco y orquestadores.
 
 ## Visión en una frase
 
-El sistema lleva una **oportunidad de licitación** desde cualquier **canal de ingesta** hasta una **decisión de portafolio**, prepara un **expediente de portafolio**, lo **normaliza e indexa** (híbrido), y luego permite **trabajo agentico** (BOM, specs, procura, propuesta futura).
+El sistema lleva un **item del pipeline** desde cualquier **canal de ingesta** hasta decisiones de interés/análisis/portafolio, prepara un **expediente de portafolio**, lo **normaliza e indexa** (híbrido), y luego permite **trabajo agentico** (BOM, specs, procura, propuesta futura).
 
 ---
 
@@ -30,13 +30,17 @@ Cada etapa tiene **runbook propio** (o ninguno). El documento [flujo_completo.md
 
 | Dimensión | Qué es | Ejemplos |
 |-----------|--------|----------|
-| **Canal de ingesta (`source`)** | De dónde llegó la oportunidad | `seace`, `adp_portal`, `manual`, `email` (futuro) |
+| **Item base (`PipelineItem`)** | Unidad que entra al sistema | `Process` hoy; no equivale automáticamente a oportunidad |
+| **Canal de ingesta (`source`)** | De dónde llegó el item | `seace`, `adp_portal`, `manual`, `email` |
+| **Trigger** | Qué provocó revisar/crear el item | `scheduled_scan`, `change_detection_webhook`, `mailbox_poll`, `manual_create` |
+| **Entidad/cliente (`Entity`)** | Comprador público o privado | SEACE entity, Aeropuertos del Perú, Aeropuertos Andinos |
 | **Entrypoint** | Cómo entró al sistema | scan automático, alta directa por N° proceso, creación manual |
 | **Estado del workflow** | Dónde está en el portal | `publicada` … `portafolio` |
+| **Estado de interés** | Interés comercial independiente del workflow | `none`, `watching`, `candidate`, `opportunity`, `rejected` |
 | **Etapa de procesamiento** | Qué pipeline corre | A (fast reader), B (staging), C (normalización), D (agente) |
-| **Perfil de workflow** (futuro) | Qué pasos D ejecutar | `pe_public`, `market_study`, … |
+| **Perfil de workflow** | Qué ruta/prompts ejecutar | `public_tender`, `private_tender`, `market_study`, … |
 
-La BD debe evolucionar hacia `Process.source` + `Process.source_ref` además de `entity_id` / `nid_proceso` (hoy acoplado a SEACE). Ver [ROADMAP.md](ROADMAP.md) Fase 4 y deuda `Process` → `Opportunity`.
+La BD ya comenzó a evolucionar hacia `Process.source` + `Process.source_ref` además de `entity_id` / `nid_proceso` (SEACE). La siguiente deuda es modelar `workflow_profile`, `interest_status` y paquetes documentales. Ver [INPUT_SOURCES.md](INPUT_SOURCES.md).
 
 ---
 
@@ -46,17 +50,28 @@ La BD debe evolucionar hacia `Process.source` + `Process.source_ref` además de 
 flowchart TB
   subgraph adapters [Adapters de ingesta]
     SEACE[SEACE monitor]
-    PORTAL[Portales privados — futuro]
+    PORTAL[Portales cliente — futuro]
     MANUAL[Alta manual]
     EMAIL[Email — futuro]
   end
 
+  subgraph triggers [Triggers]
+    T1[Worker periódico]
+    T2[Change Detection webhook]
+    T3[Mailbox poll]
+    T4[Usuario]
+  end
+
   subgraph entry [Entrypoints]
     E1[Scan listado]
-    E2[Entidad + N° proceso]
+    E2[Entidad/cliente + referencia]
     E3[Crear proceso vacío / subir docs]
   end
 
+  T1 --> SEACE
+  T2 --> PORTAL
+  T3 --> EMAIL
+  T4 --> MANUAL
   SEACE --> E1
   SEACE --> E2
   PORTAL --> E2
@@ -71,11 +86,11 @@ flowchart TB
 
 ### Entrypoint 1 — Detección automática (SEACE hoy)
 
-Worker escanea entidades configuradas → procesos nuevos en **`publicada`**. Usuario descarga desde UI → **`descargada`**.
+Worker escanea entidades/clientes configurados → items nuevos en **`publicada`**. Usuario descarga desde UI → **`descargada`**.
 
 ### Entrypoint 2 — Alta directa en portal soportado
 
-Usuario indica **entidad + número de proceso** (p. ej. SEACE). El sistema:
+Usuario indica **entidad/cliente + referencia** (p. ej. N° proceso SEACE o referencia de portal privado). El sistema:
 
 1. Resuelve ficha vía adapter del canal.
 2. Descarga documentos (Alfresco u equivalente).
@@ -85,11 +100,20 @@ Aplica a cualquier adapter que implemente «fetch by reference» (`seace`, futur
 
 ### Entrypoint 3 — Creación manual
 
-Usuario crea un proceso **sin detección automática**: invitación privada, RFP no publicado, expediente recibido por correo, etc.
+Usuario crea un item **sin detección automática**: invitación privada, RFP no publicado, expediente recibido por correo, etc.
 
 - Metadatos mínimos (comprador, objeto, referencia interna).
 - Upload inicial de documentos → **`descargada`**.
 - `source=manual`, `source_ref` = referencia del usuario.
+
+### Entrypoint 4 — Email / estudio de mercado
+
+Mailbox dedicado recibe solicitudes preliminares, EETT o versiones nuevas.
+
+- `source=email`, `trigger=mailbox_poll`.
+- `workflow_profile=market_study` por defecto.
+- Antes de crear un item nuevo, intentar asociar el mensaje/hilo a un item existente.
+- Los adjuntos ingresan como paquete documental versionado.
 
 ---
 
@@ -101,9 +125,12 @@ Usuario crea un proceso **sin detección automática**: invitación privada, RFP
 | `descargando` | A | Job de descarga |
 | `descargada` | A | Documentos en disco; puede analizar o ir a portafolio |
 | `analizada` | A | Fast reader completado + chat seguimiento opcional |
-| `portafolio` | A→B | Interés confirmado; **B pendiente** hasta `staging_manifest` |
+| `portafolio` | A→B | Análisis profundo seleccionado; normalmente hay interés, pero no equivale obligatoriamente a oportunidad |
 | `portafolio_preparado` | B ✓ | *Planificado:* expediente copiado a `portafolio/inputs/` |
+| `autorejected` | — | Rechazado por reglas automáticas de filtro; puede revisarse/restaurarse desde UI |
 | `archivada` / `descartada` | — | Fuera del flujo activo |
+
+`interest_status` puede cambiar en cualquier estado operativo: un item puede estar `descargada` + `candidate`, `analizada` + `opportunity`, o incluso `portafolio` + `candidate` mientras se decide.
 
 ### Atajo: portafolio sin analizar
 
@@ -111,7 +138,7 @@ En **cualquier canal** (SEACE, manual, etc.) el usuario puede marcar **`portafol
 
 Comportamiento acordado:
 
-1. Disparar el **free reader de etapa A** (perfil según `source`) sobre los PDFs seleccionados o default del canal.
+1. Disparar el **free reader de etapa A** (perfil según `entity/source/workflow_profile/stage`) sobre los PDFs seleccionados o default del canal.
 2. Persistir `free_reader_summary.md` + campos en `AnalysisResult` como si hubiera corrido «Analizar».
 3. Transicionar a **`portafolio`** (o `analizada` + portafolio según implementación UI).
 
@@ -123,13 +150,14 @@ Así se reutiliza el pipeline de lectura rápida existente (perfiles en `A_pre_p
 
 El análisis rápido **no es un prompt único**. Depende del canal y, en alta manual, de la selección del usuario.
 
-| Perfil | Canal | Cronograma del proceso | Prompt / construcción |
-|--------|-------|------------------------|------------------------|
+| Perfil | Canal / ruta | Cronograma del proceso | Prompt / construcción |
+|--------|--------------|------------------------|------------------------|
 | `seace` | SEACE | **No** extraer del PDF; UI usa `cronograma_json` de ficha | [free_reader_profiles.yaml](../instrucciones/A_pre_portafolio/free_reader_profiles.yaml) |
-| `private_documents` | Privados (AdP, etc.) | **Sí** — suele estar en bases/anexos | Mismo archivo de perfiles |
+| `private_documents` | Portales cliente (AdP, Aeropuertos Andinos, etc.) | **Sí** cuando esté en documentos | Mismo archivo de perfiles |
+| `market_study` (planificado) | Email / estudio preliminar | Normalmente no existe; no forzar | Prompt compuesto por perfil de workflow |
 | `manual` | Alta manual | Según checkboxes UI | Prompt **dinámico** desde secciones elegidas |
 
-Implementación: `instrucciones/A_pre_portafolio/prompts/seace_free_reader.md` (+ perfiles en `free_reader_profiles.yaml`).
+Implementación actual: `fast_reader.py` elige prompt por `source` desde `free_reader_profiles.yaml`. Roadmap: prompt dinámico por `entity/source/workflow_profile/stage`.
 
 Registro en expediente: `pre_portafolio/fast_analysis/profile.json` con `{ "profile_id", "sections_requested", "prompt_version" }`.
 
@@ -149,6 +177,7 @@ Bajo `data/tenants/{tenant_id}/procesos/{process_key}/`:
       meta.json
     free_reader_summary.md
     seace/                     # metadatos ficha si source=seace (opcional)
+    packages/                  # paquetes documentales versionados (planificado)
 
   portafolio/                  # Etapas B–D — expediente de trabajo
     staging_manifest.json      # B: docs elegidos, aclaraciones, uploads
@@ -225,7 +254,7 @@ Orquestador: [D_portafolio/00_orquestador.md](../instrucciones/D_portafolio/00_o
 2. **Etapa B** — UI staging + `staging_manifest.json` + layout `portafolio/`.
 3. **Puente C** — botón conversión + paths + volumen compartido Hermes.
 4. **Puente D** — orquestador D + chat embebido.
-5. **Multi-ingesta** — `source`, entrypoint 2/3, perfiles free reader completos.
+5. **Multi-ingesta** — `source`, entrypoints, `workflow_profile`, `interest_status`, paquetes y perfiles free reader completos.
 6. **Migración física** — mover prompts/schemas; deprecar runbook monolítico.
 
 Ver [ROADMAP.md](ROADMAP.md) para prioridades de producto.
