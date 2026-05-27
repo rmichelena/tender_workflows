@@ -111,6 +111,9 @@ class Process(Base):
     watch_documentos_prev_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     watch_changelog_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    list_rank_descargados: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    list_rank_analizados: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(

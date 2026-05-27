@@ -11,6 +11,13 @@ from sqlalchemy.orm import Session
 
 from .config import AppConfig
 from .db.models import Process, ProcessStatus, utcnow
+from .list_order import (
+    clear_list_ranks,
+    enter_analizados_list,
+    enter_descargados_list,
+    leave_analizados_list,
+    leave_descargados_list,
+)
 from .tenant_paths import procesos_root, remap_process_data_dir, trash_root
 
 logger = logging.getLogger(__name__)
@@ -169,16 +176,21 @@ def discard_process_downloads(
 
         cleanup_gemini_session(config, path)
     delete_process_analysis(session, process)
+    leave_descargados_list(session, process)
+    clear_list_ranks(process)
     clear_process_download_metadata(process)
     session.flush()
     if path is not None and _delete_resolved_path(path):
         logger.info("Eliminada carpeta proceso id=%s path=%s", process.id, path)
 
 
-def archive_analyzed_process(config: AppConfig, process: Process) -> None:
+def archive_analyzed_process(
+    config: AppConfig, process: Process, session: Session
+) -> None:
     """Archiva analizado/portafolio: mueve carpeta a trash/, conserva análisis."""
     if process.status == ProcessStatus.archivada:
         return
+    leave_analizados_list(session, process)
     src = resolve_process_data_dir(config, process.data_dir)
     trash = trash_root(config)
     trash.mkdir(parents=True, exist_ok=True)
@@ -190,7 +202,9 @@ def archive_analyzed_process(config: AppConfig, process: Process) -> None:
     process.status = ProcessStatus.archivada
 
 
-def restore_archived_process(config: AppConfig, process: Process) -> None:
+def restore_archived_process(
+    config: AppConfig, process: Process, session: Session
+) -> None:
     """Restaura desde archivados: devuelve carpeta a procesos/ y estado analizada."""
     src = resolve_process_data_dir(config, process.data_dir)
     if src is None or not src.is_dir():
@@ -208,8 +222,10 @@ def restore_archived_process(config: AppConfig, process: Process) -> None:
     process.data_dir = str(dest.resolve())
     if process.analysis and process.analysis.status == "done":
         process.status = ProcessStatus.analizada
+        enter_analizados_list(session, process)
     else:
         process.status = ProcessStatus.descargada
+        enter_descargados_list(session, process)
 
 
 def recover_stale_workflow_transitions(
@@ -234,7 +250,7 @@ def recover_stale_workflow_transitions(
             trash = trash_root(config)
             if src is not None and src.is_dir():
                 try:
-                    archive_analyzed_process(config, proc)
+                    archive_analyzed_process(config, proc, session)
                 except Exception:
                     logger.exception(
                         "Archivo obsoleto falló id=%s; revierte a analizada",
@@ -310,6 +326,7 @@ def repair_processes_missing_data(config: AppConfig, session: Session) -> int:
         if process_data_dir_exists(config, proc):
             continue
         clear_process_download_metadata(proc)
+        clear_list_ranks(proc)
         delete_process_analysis(session, proc)
         proc.status = ProcessStatus.publicada
         repaired += 1

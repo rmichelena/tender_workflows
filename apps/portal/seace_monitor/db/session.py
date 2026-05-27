@@ -40,6 +40,8 @@ _PROCESS_COLUMN_ADDITIONS = (
     ("watch_cronograma_prev_json", "TEXT"),
     ("watch_documentos_prev_json", "TEXT"),
     ("watch_changelog_json", "TEXT"),
+    ("list_rank_descargados", "INTEGER"),
+    ("list_rank_analizados", "INTEGER"),
 )
 
 _ANALYSIS_COLUMN_ADDITIONS = (("run_id", "VARCHAR(36)"),)
@@ -110,6 +112,12 @@ def init_db(database_url: str) -> None:
     _ensure_table_columns(_engine, "entities", _ENTITY_COLUMN_ADDITIONS)
     _ensure_table_columns(_engine, "processes", _PROCESS_COLUMN_ADDITIONS)
     _ensure_table_columns(_engine, "analysis_results", _ANALYSIS_COLUMN_ADDITIONS)
+    if _SessionLocal is not None:
+        from ..list_order import backfill_list_ranks
+
+        with _SessionLocal() as session:
+            if backfill_list_ranks(session):
+                session.commit()
     if _engine.dialect.name == "sqlite":
         _ensure_sqlite_indexes(_engine)
 

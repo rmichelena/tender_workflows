@@ -1,6 +1,7 @@
 """Tests para borrado de carpetas de procesos."""
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from .config import AppConfig
 from .db.models import AnalysisResult, Process, ProcessStatus
@@ -98,7 +99,7 @@ def test_archive_moves_to_trash_and_keeps_analysis(tmp_path: Path):
     proc.documentos_json = '[{"uuid":"x","nombre":"a.pdf"}]'
     _with_analysis(proc)
 
-    archive_analyzed_process(cfg, proc)
+    archive_analyzed_process(cfg, proc, MagicMock())
 
     assert proc.status == ProcessStatus.archivada
     assert proc.documentos_json is not None
@@ -119,9 +120,12 @@ def test_restore_archived_moves_back_to_procesos(tmp_path: Path):
     proc = _proc(str(trash_dir), ProcessStatus.archivada)
     _with_analysis(proc)
 
-    restore_archived_process(cfg, proc)
+    session = MagicMock()
+    session.query.return_value.filter.return_value.scalar.return_value = None
+    restore_archived_process(cfg, proc, session)
 
     assert proc.status == ProcessStatus.analizada
+    assert proc.list_rank_analizados == 1
     assert proc_dir.is_dir()
     assert not trash_dir.exists()
     assert proc.data_dir == str(proc_dir.resolve())
@@ -170,7 +174,7 @@ def test_archive_collision_uses_unique_suffix(tmp_path: Path):
     (trash / f"1_{proc_dir.name}").mkdir()
     proc = _proc(str(proc_dir), ProcessStatus.analizada)
 
-    archive_analyzed_process(cfg, proc)
+    archive_analyzed_process(cfg, proc, MagicMock())
 
     dest = Path(proc.data_dir)
     assert dest.is_dir()

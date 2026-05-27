@@ -59,7 +59,7 @@ from .detail_data import (
     save_analysis_selection,
 )
 from .markdown_render import render_free_reader_summary
-from .filters import publicaciones_query
+from .filters import publicaciones_query, workflow_list_query
 from .seace_proxy import (
     new_session_id,
     periodic_session_cleanup,
@@ -72,6 +72,8 @@ from .analysis_chat import register_analysis_chat_routes
 from .settings_entities import bootstrap_entities, register_settings_routes
 from .sorting import (
     SORTABLE_COLUMNS,
+    WORKFLOW_LIST_DEFAULT_SORT,
+    WORKFLOW_LIST_SORT_COLUMNS,
     build_sort_query,
     normalize_dir,
     normalize_sort,
@@ -485,7 +487,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             raise HTTPException(404)
         if proc.status != ProcessStatus.archivada:
             raise HTTPException(400, "Solo procesos archivados")
-        restore_archived_process(_config, proc)
+        restore_archived_process(_config, proc, db)
         return RedirectResponse("/archivados", status_code=303)
 
     @app.get("/archivados/{process_id}", response_class=HTMLResponse)
@@ -572,7 +574,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
 
     @app.get("/descargados", response_class=HTMLResponse)
-    def descargados(request: Request, db: Session = Depends(get_db)):
+    def descargados(
+        request: Request,
+        db: Session = Depends(get_db),
+        sort: str | None = None,
+        dir: str | None = None,
+    ):
+        sort_col = normalize_sort(sort, default=WORKFLOW_LIST_DEFAULT_SORT)
+        sort_dir = normalize_dir(dir, sort_col)
         rows = (
             db.query(Process)
             .options(joinedload(Process.entity), joinedload(Process.analysis))
@@ -581,16 +590,28 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     [ProcessStatus.descargada, ProcessStatus.descartando]
                 )
             )
-            .order_by(Process.updated_at.desc())
             .all()
         )
-        processes = build_process_list_views(rows)
+        processes = sort_process_list_views(
+            build_process_list_views(rows, rank_attr="list_rank_descargados"),
+            sort_col,
+            sort_dir,
+            default_sort=WORKFLOW_LIST_DEFAULT_SORT,
+        )
+
+        def sort_href(column: str) -> str:
+            return build_sort_query(column, sort=sort_col, direction=sort_dir)
+
         return render(
             request,
             "descargados.html",
             db=db,
             active_page="descargados",
             processes=processes,
+            sort=sort_col,
+            sort_dir=sort_dir,
+            sort_columns=WORKFLOW_LIST_SORT_COLUMNS,
+            sort_href=sort_href,
         )
 
     @app.get("/descargados/{process_id}", response_class=HTMLResponse)
@@ -816,7 +837,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 p = session.get(Process, process_id)
                 if p is None or p.status != ProcessStatus.archivando:
                     return
-                archive_analyzed_process(_config, p)
+                archive_analyzed_process(_config, p, session)
                 session.commit()
             except Exception:
                 session.rollback()
@@ -963,15 +984,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
         scroll: str = Form(""),
+        sort: str = Form(""),
+        dir: str = Form(""),
     ):
         """Compat: redirige al flujo de archivar."""
-        return archivar_analizado(process_id, background_tasks, db, scroll=scroll)
+        return archivar_analizado(
+            process_id, background_tasks, db, scroll=scroll, sort=sort, dir=dir
+        )
 
     @app.post("/analizados/{process_id}/estado")
     def cambiar_estado_analizados(
         process_id: int,
         estado: str = Form(...),
         db: Session = Depends(get_db),
+        scroll: str = Form(""),
+        sort: str = Form(""),
+        dir: str = Form(""),
     ):
         proc = db.get(Process, process_id)
         if proc is None:
@@ -982,10 +1010,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             raise HTTPException(400, "Solo procesos analizados o en portafolio")
         proc.status = ProcessStatus(estado)
         db.commit()
-        return RedirectResponse("/analizados", status_code=303)
+        return _workflow_list_redirect(
+            "/analizados",
+            sort=sort,
+            dir=dir,
+            scroll=scroll.strip() if scroll.strip().isdigit() else "",
+        )
 
     @app.get("/analizados", response_class=HTMLResponse)
-    def analizados(request: Request, db: Session = Depends(get_db)):
+    def analizados(
+        request: Request,
+        db: Session = Depends(get_db),
+        sort: str | None = None,
+        dir: str | None = None,
+    ):
+        sort_col = normalize_sort(sort, default=WORKFLOW_LIST_DEFAULT_SORT)
+        sort_dir = normalize_dir(dir, sort_col)
         rows = (
             db.query(Process)
             .options(joinedload(Process.entity), joinedload(Process.analysis))
@@ -998,10 +1038,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     ]
                 )
             )
-            .order_by(Process.updated_at.desc())
             .all()
         )
-        processes = build_process_list_views(rows)
+        processes = sort_process_list_views(
+            build_process_list_views(rows, rank_attr="list_rank_analizados"),
+            sort_col,
+            sort_dir,
+            default_sort=WORKFLOW_LIST_DEFAULT_SORT,
+        )
+
+        def sort_href(column: str) -> str:
+            return build_sort_query(column, sort=sort_col, direction=sort_dir)
+
         return render(
             request,
             "analizados.html",
@@ -1009,6 +1057,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             active_page="analizados",
             processes=processes,
             ProcessStatus=ProcessStatus,
+            sort=sort_col,
+            sort_dir=sort_dir,
+            sort_columns=WORKFLOW_LIST_SORT_COLUMNS,
+            sort_href=sort_href,
         )
 
     @app.get("/analizados/{process_id}", response_class=HTMLResponse)

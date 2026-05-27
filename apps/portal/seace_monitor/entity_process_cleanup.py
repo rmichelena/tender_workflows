@@ -107,7 +107,7 @@ def apply_removed_entity_policy(
             if proc.status == ProcessStatus.archivada:
                 continue
             if proc.status in _ANALYZED_STATUSES:
-                archive_analyzed_process(config, proc)
+                archive_analyzed_process(config, proc, session)
                 affected += 1
             elif proc.status in _DOWNLOADED_STATUSES:
                 proc.status = ProcessStatus.descartada

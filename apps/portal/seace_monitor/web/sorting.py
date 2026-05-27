@@ -15,6 +15,7 @@ _DATE_TIME_RE = re.compile(
 )
 
 SORTABLE_COLUMNS: dict[str, str] = {
+    "correlativo": "Correl.",
     "numero": "N°",
     "entidad": "Entidad",
     "fecha_publicacion": "Fecha pub.",
@@ -28,17 +29,33 @@ SORTABLE_COLUMNS: dict[str, str] = {
     "estado": "Estado",
 }
 
+WORKFLOW_LIST_SORT_COLUMNS: dict[str, str] = {
+    key: SORTABLE_COLUMNS[key]
+    for key in (
+        "correlativo",
+        "fecha_publicacion",
+        "entidad",
+        "nomenclatura",
+        "objeto",
+        "descripcion",
+        "fecha_consultas",
+        "fecha_presentacion",
+        "estado",
+    )
+}
+
 DEFAULT_SORT = "fecha_publicacion"
+WORKFLOW_LIST_DEFAULT_SORT = "correlativo"
 DEFAULT_DIR = "desc"
 DATE_COLUMNS = frozenset(
     {"fecha_publicacion", "fecha_consultas", "fecha_presentacion"}
 )
 
 
-def normalize_sort(sort: str | None) -> str:
+def normalize_sort(sort: str | None, *, default: str = DEFAULT_SORT) -> str:
     if sort and sort in SORTABLE_COLUMNS:
         return sort
-    return DEFAULT_SORT
+    return default
 
 
 def normalize_dir(direction: str | None, sort: str | None = None) -> str:
@@ -136,6 +153,11 @@ def sort_processes(
 def list_view_sort_key(
     column: str, *, descending: bool = False
 ) -> Callable[[ProcessListView], tuple[Any, ...]]:
+    if column == "correlativo":
+        return lambda v: (
+            1 if v.correlativo is None else 0,
+            -(v.correlativo or 0) if descending else (v.correlativo or 0),
+        )
     if column == "numero":
         return lambda v: (_int_or_zero(v.process.numero), _text(v.process.numero))
     if column == "entidad":
@@ -160,11 +182,15 @@ def list_view_sort_key(
 
 
 def sort_process_list_views(
-    views: list[ProcessListView], sort: str | None, direction: str | None
+    views: list[ProcessListView],
+    sort: str | None,
+    direction: str | None,
+    *,
+    default_sort: str = DEFAULT_SORT,
 ) -> list[ProcessListView]:
-    col = normalize_sort(sort)
+    col = normalize_sort(sort, default=default_sort)
     desc = normalize_dir(direction, col) == "desc"
-    if col in DATE_COLUMNS:
+    if col in DATE_COLUMNS or col == "correlativo":
         key_fn = list_view_sort_key(col, descending=desc)
         return sorted(views, key=key_fn)
     key_fn = list_view_sort_key(col)
@@ -179,6 +205,7 @@ def build_sort_query(
     estado: str = "",
     entidad: str = "",
     objeto: str = "",
+    scroll: str = "",
 ) -> str:
     params: dict[str, str] = {
         "sort": column,
@@ -190,4 +217,6 @@ def build_sort_query(
         params["entidad"] = entidad
     if objeto:
         params["objeto"] = objeto
+    if scroll:
+        params["scroll"] = scroll
     return "?" + urlencode(params)

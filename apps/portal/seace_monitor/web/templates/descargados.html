@@ -8,13 +8,11 @@
 <table class="data">
   <thead>
     <tr>
-      <th class="col-entidad">Entidad</th>
-      <th>Nomenclatura</th>
-      <th>Estado</th>
-      <th>Objeto</th>
-      <th>Descripción</th>
-      <th>Fin consultas</th>
-      <th>Fin presentación</th>
+      {% for col, label in sort_columns.items() %}
+      <th class="sortable{% if col == 'entidad' %} col-entidad{% endif %}{% if sort == col %} sorted sorted-{{ sort_dir }}{% endif %}">
+        <a href="{{ sort_href(col) }}">{{ label }}</a>
+      </th>
+      {% endfor %}
       <th>Acciones</th>
     </tr>
   </thead>
@@ -22,6 +20,8 @@
     {% for item in processes %}
     {% set p = item.process %}
     <tr data-process-id="{{ p.id }}" class="{% if item.watch_unread %}row-unread{% endif %}"{% if p.status.value == 'descartando' %} data-discarding="1"{% endif %}>
+      <td>{{ item.correlativo or '—' }}</td>
+      <td>{{ p.fecha_publicacion or '—' }}</td>
       <td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
       <td>{{ p.nomenclatura }}</td>
       <td class="status-cell">{{ status_cell(p) }}</td>
@@ -40,6 +40,8 @@
         {% endif %}
         <form method="post" action="/descargados/{{ p.id }}/descartar" class="js-keep-scroll js-descartar-form">
           <input type="hidden" name="scroll" value=""/>
+          <input type="hidden" name="sort" value="{{ sort }}"/>
+          <input type="hidden" name="dir" value="{{ sort_dir }}"/>
           {% if p.status.value == 'descartando' %}
           <button type="button" class="btn btn-danger btn-sm" disabled>Descartando…</button>
           {% else %}
@@ -50,7 +52,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="8" class="muted">Aún no hay procesos descargados.</td></tr>
+    <tr><td colspan="10" class="muted">Aún no hay procesos descargados.</td></tr>
     {% endfor %}
   </tbody>
 </table>

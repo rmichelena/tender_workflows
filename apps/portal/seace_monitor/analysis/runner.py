@@ -13,6 +13,12 @@ from sqlalchemy.orm import Session
 from ..client import ProcessRow, SeaceClient
 from ..config import AppConfig
 from ..db.models import AnalysisResult, Process, ProcessStatus, utcnow
+from ..list_order import (
+    enter_analizados_list,
+    enter_descargados_list,
+    leave_analizados_list,
+    leave_descargados_list,
+)
 from ..process_storage import delete_process_data_dir, clear_process_download_metadata
 from ..tenant_paths import procesos_root
 from ..document_storage import (
@@ -109,6 +115,7 @@ class AnalysisRunner:
         process.status = ProcessStatus.descargada
         process.data_dir = str(proc_dir)
         process.watch_checked_at = utcnow()
+        enter_descargados_list(self.session, process)
         self.session.commit()
         logger.info("Descarga completada para proceso %s → %s", process_id, proc_dir)
         return process
@@ -149,6 +156,7 @@ class AnalysisRunner:
 
         if process.status == ProcessStatus.analizada:
             process.status = ProcessStatus.descargada
+            enter_descargados_list(self.session, process)
         self.session.commit()
 
         try:
@@ -174,6 +182,9 @@ class AnalysisRunner:
                         f"Sin registro de análisis para proceso {process_id}"
                     )
                 self._apply_result(analysis, result_data)
+                leave_descargados_list(self.session, process)
+                if process.list_rank_analizados is None:
+                    enter_analizados_list(self.session, process)
                 process.status = ProcessStatus.analizada
                 analysis.status = "done"
                 analysis.finished_at = utcnow()
@@ -187,6 +198,7 @@ class AnalysisRunner:
                     if analysis is not None:
                         if prior is not None:
                             self._restore_analysis_snapshot(analysis, prior)
+                            leave_descargados_list(self.session, process)
                             process.status = ProcessStatus.analizada
                             err_path = proc_dir / "fast_analysis" / "last_rerun_error.txt"
                             err_path.parent.mkdir(parents=True, exist_ok=True)

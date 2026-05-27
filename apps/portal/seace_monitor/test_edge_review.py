@@ -102,7 +102,7 @@ def test_archive_analyzed_process_idempotent_for_archivada(tmp_path: Path):
     proc_dir.mkdir(parents=True)
     proc = _proc(ProcessStatus.archivada, data_dir=str(proc_dir))
 
-    archive_analyzed_process(cfg, proc)
+    archive_analyzed_process(cfg, proc, MagicMock())
 
     assert proc.status == ProcessStatus.archivada
     assert proc_dir.is_dir()

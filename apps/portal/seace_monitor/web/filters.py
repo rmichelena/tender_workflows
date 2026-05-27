@@ -30,3 +30,22 @@ def publicaciones_query(
     if not params:
         return "/publicaciones"
     return "/publicaciones?" + urlencode(params)
+
+
+def workflow_list_query(
+    path: str,
+    *,
+    sort: str = "",
+    dir: str = "",
+    scroll: str = "",
+) -> str:
+    params: dict[str, str] = {}
+    if sort:
+        params["sort"] = sort
+    if dir:
+        params["dir"] = dir
+    if scroll:
+        params["scroll"] = scroll
+    if not params:
+        return path
+    return path + "?" + urlencode(params)

@@ -14,9 +14,12 @@ class ProcessListView:
     fin_consultas: str
     fin_presentacion: str
     watch_unread: bool = False
+    correlativo: int | None = None
 
 
-def build_process_list_views(processes: list[Process]) -> list[ProcessListView]:
+def build_process_list_views(
+    processes: list[Process], *, rank_attr: str | None = None
+) -> list[ProcessListView]:
     views: list[ProcessListView] = []
     for proc in processes:
         fechas = fechas_listado_from_cronograma_json(
@@ -24,12 +27,14 @@ def build_process_list_views(processes: list[Process]) -> list[ProcessListView]:
             fallback_consultas=proc.fecha_consultas or "",
             fallback_presentacion=proc.fecha_presentacion or "",
         )
+        correlativo = getattr(proc, rank_attr) if rank_attr else None
         views.append(
             ProcessListView(
                 process=proc,
                 fin_consultas=fechas.fecha_consultas or "—",
                 fin_presentacion=fechas.fecha_presentacion or "—",
                 watch_unread=bool(proc.watch_unread),
+                correlativo=correlativo,
             )
         )
     return views
