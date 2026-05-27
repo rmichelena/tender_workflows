@@ -26,7 +26,7 @@ from ..db.maintenance import (
     is_stale_running_analysis,
     recover_stale_analyses,
 )
-from ..db.models import AnalysisResult, Entity, Process, ProcessStatus, utcnow
+from ..db.models import AnalysisResult, Entity, InterestStatus, Process, ProcessStatus, utcnow
 from ..db.session import init_db, session_factory
 from ..process_storage import (
     clear_process_download_metadata,
@@ -232,6 +232,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.globals["can_open_seace"] = can_open_seace
     templates.env.globals["seace_view_path"] = seace_view_path
+    templates.env.globals["InterestStatus"] = InterestStatus
     templates.env.filters["urlquote_path"] = lambda value: quote(str(value), safe="/")
 
     def render(request: Request, name: str, *, db: Session | None = None, **ctx):
@@ -408,6 +409,31 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             status_code=303,
         )
 
+    def _safe_workflow_path(path: str) -> str:
+        allowed = {"/publicaciones", "/descargados", "/analizados", "/descartados", "/archivados"}
+        return path if path in allowed else "/analizados"
+
+    @app.post("/processes/{process_id}/interest")
+    def cambiar_interes(
+        process_id: int,
+        db: Session = Depends(get_db),
+        interest_status: str = Form(...),
+        return_to: str = Form("/analizados"),
+        sort: str = Form(""),
+        dir: str = Form(""),
+        scroll: str = Form(""),
+    ):
+        proc = db.get(Process, process_id)
+        if proc is None:
+            raise HTTPException(404)
+        try:
+            proc.interest_status = InterestStatus(interest_status)
+        except ValueError as exc:
+            raise HTTPException(400, "Estado de interés inválido") from exc
+        return _workflow_list_redirect(
+            _safe_workflow_path(return_to), sort=sort, dir=dir, scroll=scroll
+        )
+
     @app.post("/publicaciones/{process_id}/descartar")
     def descartar(
         process_id: int,
@@ -441,7 +467,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         rows = (
             db.query(Process)
             .options(joinedload(Process.entity), joinedload(Process.analysis))
-            .filter(Process.status == ProcessStatus.descartada)
+            .filter(Process.status.in_([ProcessStatus.descartada, ProcessStatus.autorejected]))
             .order_by(Process.updated_at.desc())
             .all()
         )

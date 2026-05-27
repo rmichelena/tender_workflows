@@ -35,6 +35,18 @@
         <button type="button" class="btn btn-secondary btn-sm" disabled>Archivando…</button>
         {% else %}
         <a href="/analizados/{{ p.id }}" class="btn btn-secondary btn-sm">Ver</a>
+        <form method="post" action="/processes/{{ p.id }}/interest" class="js-keep-scroll interest-form">
+          <input type="hidden" name="return_to" value="/analizados"/>
+          <input type="hidden" name="scroll" value=""/>
+          <input type="hidden" name="sort" value="{{ sort }}"/>
+          <input type="hidden" name="dir" value="{{ sort_dir }}"/>
+          <select name="interest_status" class="input-sm">
+            {% for status in InterestStatus %}
+            <option value="{{ status.value }}"{% if p.interest_status == status %} selected{% endif %}>{{ status.value }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn btn-secondary btn-sm">Interés</button>
+        </form>
         {% if p.status.value == 'analizada' %}
         <form method="post" action="/analizados/{{ p.id }}/estado" class="js-keep-scroll">
           <input type="hidden" name="estado" value="portafolio"/>
