@@ -41,7 +41,6 @@
     {% for item in processes %}
     {% set p = item.process %}
     <tr data-process-id="{{ p.id }}"{% if p.status.value == 'descargando' %} data-downloading="1"{% endif %}>
-      <td>{{ p.numero or '—' }}</td>
       <td class="muted col-entidad">{{ entidad_nombre(p.entity) }}</td>
       <td>{{ p.fecha_publicacion or '—' }}</td>
       <td>{{ p.nomenclatura }}</td>
@@ -78,7 +77,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="12" class="muted">No hay publicaciones. Ejecuta el worker de escaneo.</td></tr>
+    <tr><td colspan="11" class="muted">No hay publicaciones. Ejecuta el worker de escaneo.</td></tr>
     {% endfor %}
   </tbody>
 </table>

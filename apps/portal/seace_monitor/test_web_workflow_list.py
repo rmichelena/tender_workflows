@@ -40,6 +40,14 @@ def _first_table_row_cells(html: str) -> list[str]:
     return [" ".join(cell.get_text(" ", strip=True).split()) for cell in row.find_all("td")]
 
 
+def _table_headers(html: str) -> list[str]:
+    soup = BeautifulSoup(html, "lxml")
+    return [
+        " ".join(cell.get_text(" ", strip=True).split())
+        for cell in soup.select("table.data thead th")
+    ]
+
+
 def _seed_workflow_list_process(status: ProcessStatus, *, rank_attr: str) -> int:
     db: Session = session_factory()
     try:
@@ -76,6 +84,80 @@ def _seed_workflow_list_process(status: ProcessStatus, *, rank_attr: str) -> int
         return proc.id
     finally:
         db.close()
+
+
+def test_publicaciones_list_has_no_correlativo_or_numero_column(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'pubs.db'}")
+    app = create_app(cfg)
+    db: Session = session_factory()
+    try:
+        entity = Entity(ruc="20123456789", nombre="ENTIDAD TEST", activa=True)
+        db.add(entity)
+        db.flush()
+        db.add(
+            Process(
+                entity_id=entity.id,
+                anio=2026,
+                nid_proceso="pub-1",
+                numero="17",
+                nomenclatura="NOM-PUB",
+                status=ProcessStatus.publicada,
+                fecha_publicacion="01/06/2026 10:00",
+                objeto="Bien",
+                descripcion="Compra de radios",
+                cuantia="100.00",
+                moneda="Soles",
+                cronograma_json=json.dumps(
+                    [
+                        {
+                            "etapa": "Presentación de consultas",
+                            "fecha_inicio": "02/06/2026 00:00",
+                            "fecha_fin": "03/06/2026 23:59",
+                        },
+                        {
+                            "etapa": "Presentación de ofertas",
+                            "fecha_inicio": "04/06/2026 00:00",
+                            "fecha_fin": "05/06/2026 23:59",
+                        },
+                    ]
+                ),
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = TestClient(app).get("/publicaciones?sort=correlativo")
+
+    assert response.status_code == 200
+    headers = _table_headers(response.text)
+    assert headers == [
+        "Entidad",
+        "Fecha pub.",
+        "Nomenclatura",
+        "Objeto",
+        "Descripción",
+        "Cuantía",
+        "Moneda",
+        "Fin consultas",
+        "Fin presentación",
+        "Estado",
+        "Acciones",
+    ]
+    cells = _first_table_row_cells(response.text)
+    assert cells[:10] == [
+        "ENTIDAD TEST",
+        "01/06/2026 10:00",
+        "NOM-PUB",
+        "Bien",
+        "Compra de radios",
+        "100.00",
+        "Soles",
+        "03/06/2026 23:59",
+        "05/06/2026 23:59",
+        "publicada",
+    ]
+    assert "17" not in cells[:10]
 
 
 def test_descargados_list_cells_match_headers(tmp_path: Path):

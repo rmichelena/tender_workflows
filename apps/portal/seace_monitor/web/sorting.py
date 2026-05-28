@@ -44,6 +44,22 @@ WORKFLOW_LIST_SORT_COLUMNS: dict[str, str] = {
     )
 }
 
+PUBLICACIONES_SORT_COLUMNS: dict[str, str] = {
+    key: SORTABLE_COLUMNS[key]
+    for key in (
+        "entidad",
+        "fecha_publicacion",
+        "nomenclatura",
+        "objeto",
+        "descripcion",
+        "cuantia",
+        "moneda",
+        "fecha_consultas",
+        "fecha_presentacion",
+        "estado",
+    )
+}
+
 DEFAULT_SORT = "fecha_publicacion"
 WORKFLOW_LIST_DEFAULT_SORT = "correlativo"
 DEFAULT_DIR = "desc"
@@ -54,6 +70,14 @@ DATE_COLUMNS = frozenset(
 
 def normalize_sort(sort: str | None, *, default: str = DEFAULT_SORT) -> str:
     if sort and sort in SORTABLE_COLUMNS:
+        return sort
+    return default
+
+
+def normalize_sort_for_columns(
+    sort: str | None, columns: dict[str, str], *, default: str = DEFAULT_SORT
+) -> str:
+    if sort and sort in columns:
         return sort
     return default
 

@@ -72,12 +72,14 @@ from .analysis_chat import register_analysis_chat_routes
 from .settings_autoreject import register_autoreject_settings_routes
 from .settings_entities import bootstrap_entities, register_settings_routes
 from .sorting import (
+    PUBLICACIONES_SORT_COLUMNS,
     SORTABLE_COLUMNS,
     WORKFLOW_LIST_DEFAULT_SORT,
     WORKFLOW_LIST_SORT_COLUMNS,
     build_sort_query,
     normalize_dir,
     normalize_sort,
+    normalize_sort_for_columns,
     sort_process_list_views,
 )
 
@@ -311,7 +313,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
         if objeto:
             q = q.filter(Process.objeto == objeto)
-        sort_col = normalize_sort(sort)
+        sort_col = normalize_sort_for_columns(sort, PUBLICACIONES_SORT_COLUMNS)
         sort_dir = normalize_dir(dir, sort_col)
         rows = q.all()
         processes = sort_process_list_views(
@@ -372,7 +374,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             filtro_objeto=filtro_objeto,
             sort=sort_col,
             sort_dir=sort_dir,
-            sort_columns=SORTABLE_COLUMNS,
+            sort_columns=PUBLICACIONES_SORT_COLUMNS,
             sort_href=sort_href,
             ProcessStatus=ProcessStatus,
             statuses=workflow_statuses,
