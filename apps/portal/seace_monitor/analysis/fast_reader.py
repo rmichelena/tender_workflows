@@ -89,11 +89,6 @@ def _profiles_for_process(
     return repo / PROMPT_REL, raw, {}, False
 
 
-def _prompt_path_for_process(config: AppConfig, process: Process) -> Path:
-    path, _, _, _ = _profiles_for_process(config, process)
-    return path
-
-
 def _load_system_prompt(config: AppConfig, process: Process) -> str:
     path, profiles_raw, profile, _matched = _profiles_for_process(config, process)
     if path.exists():

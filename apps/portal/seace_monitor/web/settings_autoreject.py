@@ -46,7 +46,11 @@ def register_autoreject_settings_routes(app, config: AppConfig, render, _get_db)
         except (ValueError, yaml.YAMLError) as exc:
             raise HTTPException(400, f"YAML inválido: {exc}") from exc
         if not validated_rules:
-            raise HTTPException(400, "YAML inválido: al menos una regla es requerida")
+            raise HTTPException(
+                400,
+                "Se requiere al menos una regla. Para deshabilitar reglas, "
+                "márquelas con `enabled: false`.",
+            )
         path = editable_auto_reject_rules_path(config)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(rules_yaml.strip() + "\n", encoding="utf-8")

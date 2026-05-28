@@ -37,10 +37,12 @@
       </td>
       <td>
         <form method="post" action="/descartados/{{ p.id }}/restaurar">
+          {% if estado %}<input type="hidden" name="estado" value="{{ estado }}">{% endif %}
           <button type="submit" class="btn btn-secondary btn-sm">Restaurar</button>
         </form>
         {% if p.status.value == 'autorejected' %}
         <form method="post" action="/descartados/{{ p.id }}/descartar" style="margin-top:.25rem">
+          {% if estado %}<input type="hidden" name="estado" value="{{ estado }}">{% endif %}
           <button type="submit" class="btn btn-danger btn-sm">Descartar definitivo</button>
         </form>
         {% endif %}

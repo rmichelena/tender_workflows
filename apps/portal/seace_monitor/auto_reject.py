@@ -58,6 +58,7 @@ class _Context:
         }
         self.default = " ".join(
             [
+                self.fields["objeto"],
                 self.fields["descripcion"],
                 self.fields["nomenclatura"],
             ]
@@ -174,6 +175,8 @@ class _Parser:
         token = self._peek()
         if token == "-":
             self._pop()
+            if self._peek() is None:
+                raise ValueError("Expresión incompleta")
             return _Not(self._parse_factor())
         node = self._parse_primary()
         if self._peek() == ":" and isinstance(node, _Term):

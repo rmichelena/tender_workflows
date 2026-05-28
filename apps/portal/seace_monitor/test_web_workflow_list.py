@@ -391,10 +391,12 @@ def test_restaurar_autorejected_sets_auto_reject_exempt(tmp_path: Path):
 
     response = TestClient(app).post(
         f"/descartados/{process_id}/restaurar",
+        data={"estado": "autorejected"},
         follow_redirects=False,
     )
 
     assert response.status_code == 303
+    assert response.headers["location"] == "/descartados?estado=autorejected"
     db = session_factory()
     try:
         proc = db.get(Process, process_id)
@@ -427,10 +429,12 @@ def test_descartar_autorejected_marks_process_as_discarded(tmp_path: Path):
 
     response = TestClient(app).post(
         f"/descartados/{process_id}/descartar",
+        data={"estado": "autorejected"},
         follow_redirects=False,
     )
 
     assert response.status_code == 303
+    assert response.headers["location"] == "/descartados?estado=autorejected"
     db = session_factory()
     try:
         proc = db.get(Process, process_id)

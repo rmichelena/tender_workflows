@@ -185,6 +185,7 @@ def test_validate_rules_rejects_malformed_queries():
         "rules:\n- id: missing_value\n  query: 'objeto:'\n",
         "rules:\n- id: unknown_field\n  query: 'cuantia:50000'\n",
         "rules:\n- id: nested_field\n  query: 'objeto:descripcion:limpieza'\n",
+        "rules:\n- id: bare_not\n  query: '-'\n",
     ]
 
     for text in malformed:
@@ -194,6 +195,24 @@ def test_validate_rules_rejects_malformed_queries():
             pass
         else:
             raise AssertionError(f"Expected invalid rules YAML: {text}")
+
+
+def test_bare_term_matches_objeto_in_default_context():
+    proc, entity = _process(
+        objeto="Servicio de limpieza de oficinas",
+        descripcion="Contratación menor",
+    )
+
+    assert evaluate_query("limpieza", proc, entity)
+
+
+def test_bare_term_still_requires_word_boundary_in_objeto():
+    proc, entity = _process(
+        objeto="Servicio de limpieza de oficinas",
+        descripcion="Contratación menor",
+    )
+
+    assert not evaluate_query("limp", proc, entity)
 
 
 def test_scanner_applies_auto_reject_rules_after_upsert(monkeypatch):

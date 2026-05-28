@@ -404,7 +404,6 @@ def init_db(database_url: str) -> None:
     _ensure_table_columns(_engine, "entities", _ENTITY_COLUMN_ADDITIONS)
     _ensure_table_columns(_engine, "processes", _PROCESS_COLUMN_ADDITIONS)
     _ensure_table_columns(_engine, "analysis_results", _ANALYSIS_COLUMN_ADDITIONS)
-    _backfill_process_sources(_engine)
     _backfill_process_pipeline_fields(_engine)
     _migrate_process_identity_schema(_engine)
     if _SessionLocal is not None:

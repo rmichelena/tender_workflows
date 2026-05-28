@@ -412,6 +412,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             status_code=303,
         )
 
+    def _descartados_redirect(estado: str = "") -> RedirectResponse:
+        if estado in ("descartada", "autorejected"):
+            return RedirectResponse(f"/descartados?estado={estado}", status_code=303)
+        return RedirectResponse("/descartados", status_code=303)
+
     def _safe_workflow_path(path: str) -> str:
         allowed = {"/publicaciones", "/descargados", "/analizados", "/descartados", "/archivados"}
         return path if path in allowed else "/analizados"
@@ -492,7 +497,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
 
     @app.post("/descartados/{process_id}/restaurar")
-    def restaurar(process_id: int, db: Session = Depends(get_db)):
+    def restaurar(
+        process_id: int,
+        db: Session = Depends(get_db),
+        estado: str = Form(""),
+    ):
         proc = (
             db.query(Process)
             .options(joinedload(Process.analysis))
@@ -510,20 +519,24 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             proc.auto_reject_exempt = True
             proc.auto_reject_reason = None
         proc.status = new_status
-        return RedirectResponse("/descartados", status_code=303)
+        return _descartados_redirect(estado)
 
     @app.post("/descartados/{process_id}/descartar")
-    def descartar_autorejected(process_id: int, db: Session = Depends(get_db)):
+    def descartar_autorejected(
+        process_id: int,
+        db: Session = Depends(get_db),
+        estado: str = Form(""),
+    ):
         proc = db.get(Process, process_id)
         if proc is None:
             raise HTTPException(404)
         if proc.status == ProcessStatus.descartada:
-            return RedirectResponse("/descartados", status_code=303)
+            return _descartados_redirect(estado)
         if proc.status != ProcessStatus.autorejected:
             raise HTTPException(400, "Solo autorejected puede descartarse desde Descartados")
         proc.status = ProcessStatus.descartada
         proc.auto_reject_reason = None
-        return RedirectResponse("/descartados", status_code=303)
+        return _descartados_redirect(estado)
 
     @app.get("/archivados", response_class=HTMLResponse)
     def archivados(request: Request, db: Session = Depends(get_db)):
