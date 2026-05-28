@@ -150,3 +150,39 @@ def test_descartados_includes_autorejected_processes(tmp_path: Path):
     assert "AUTO-REJECTED-1" in response.text
     assert "autorejected" in response.text
     assert "servicio_limpieza" in response.text
+
+
+def test_restaurar_autorejected_sets_auto_reject_exempt(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'web6.db'}")
+    app = create_app(cfg)
+    db: Session = session_factory()
+    try:
+        proc = Process(
+            entity_id=1,
+            anio=2026,
+            nid_proceso="auto-2",
+            nomenclatura="AUTO-REJECTED-2",
+            status=ProcessStatus.autorejected,
+            auto_reject_reason="servicio_limpieza: Servicios de limpieza fuera de foco",
+        )
+        db.add(proc)
+        db.commit()
+        process_id = proc.id
+    finally:
+        db.close()
+
+    response = TestClient(app).post(
+        f"/descartados/{process_id}/restaurar",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    db = session_factory()
+    try:
+        proc = db.get(Process, process_id)
+        assert proc is not None
+        assert proc.status == ProcessStatus.publicada
+        assert proc.auto_reject_exempt is True
+        assert proc.auto_reject_reason is None
+    finally:
+        db.close()

@@ -16,6 +16,10 @@ from .tenant_paths import tenant_settings_dir
 
 DEFAULT_RULES_PATH = Path(__file__).with_name("auto_reject_rules.yaml")
 EDITABLE_RULES_FILENAME = "auto_reject_rules.yaml"
+ALLOWED_FIELDS = frozenset({"objeto", "descripcion", "nomenclatura", "entidad", "source"})
+MAX_RULES_YAML_BYTES = 64 * 1024
+MAX_RULE_COUNT = 100
+MAX_QUERY_LENGTH = 1000
 
 
 @dataclass(frozen=True)
@@ -54,7 +58,7 @@ class _Context:
     def text_for(self, field: str | None) -> str:
         if field is None:
             return self.default
-        return self.fields.get(field, "")
+        return self.fields[field]
 
 
 @dataclass(frozen=True)
@@ -109,7 +113,7 @@ def _with_field(node: _Node, field: str) -> _Node:
     if isinstance(node, _Not):
         return _Not(_with_field(node.node, field))
     if isinstance(node, _Field):
-        return node
+        raise ValueError("No se admite anidar campos en una consulta")
     return node
 
 
@@ -123,8 +127,11 @@ class _Parser:
 
     def parse(self) -> _Node:
         if not self.tokens:
-            return _And([])
-        return self._parse_or()
+            raise ValueError("Consulta vacía")
+        node = self._parse_or()
+        if self._peek() is not None:
+            raise ValueError(f"Token inesperado: {self._peek()}")
+        return node
 
     def _peek(self) -> str | None:
         if self.index >= len(self.tokens):
@@ -149,6 +156,8 @@ class _Parser:
         nodes: list[_Node] = []
         while self._peek() is not None and self._peek() != ")" and self._peek().upper() != "OR":
             nodes.append(self._parse_factor())
+        if not nodes:
+            raise ValueError("Expresión incompleta")
         if len(nodes) == 1:
             return nodes[0]
         return _And(nodes)
@@ -161,16 +170,27 @@ class _Parser:
         node = self._parse_primary()
         if self._peek() == ":" and isinstance(node, _Term):
             self._pop()
-            return _Field(node.value, self._parse_factor())
+            field = _normalize(node.value)
+            if field not in ALLOWED_FIELDS:
+                raise ValueError(f"Campo desconocido: {node.value}")
+            child = self._parse_factor()
+            if isinstance(child, _Field):
+                raise ValueError("No se admite anidar campos en una consulta")
+            return _Field(field, child)
         return node
 
     def _parse_primary(self) -> _Node:
+        if self.index >= len(self.tokens):
+            raise ValueError("Fin inesperado de consulta")
         token = self._pop()
         if token == "(":
             node = self._parse_or()
-            if self._peek() == ")":
-                self._pop()
+            if self._peek() != ")":
+                raise ValueError("Paréntesis sin cerrar")
+            self._pop()
             return node
+        if token == ")":
+            raise ValueError("Paréntesis de cierre inesperado")
         if token.startswith('"') and token.endswith('"'):
             return _Term(token[1:-1])
         return _Term(token)
@@ -194,9 +214,17 @@ def active_auto_reject_rules_path(config: AppConfig) -> Path:
 
 
 def validate_rules_yaml(text: str) -> list[AutoRejectRule]:
+    if len(text.encode("utf-8")) > MAX_RULES_YAML_BYTES:
+        raise ValueError("El YAML de reglas excede 64KB.")
     raw = yaml.safe_load(text) or {}
+    return _rules_from_raw(raw)
+
+
+def _rules_from_raw(raw: dict[str, Any]) -> list[AutoRejectRule]:
     if not isinstance(raw, dict) or not isinstance(raw.get("rules", []), list):
         raise ValueError("El YAML debe contener una lista `rules`.")
+    if len(raw.get("rules", [])) > MAX_RULE_COUNT:
+        raise ValueError(f"No se admiten más de {MAX_RULE_COUNT} reglas.")
     rules = []
     for item in raw.get("rules", []):
         if not isinstance(item, dict):
@@ -204,6 +232,10 @@ def validate_rules_yaml(text: str) -> list[AutoRejectRule]:
         if not item.get("id") or not item.get("query"):
             raise ValueError("Cada regla requiere `id` y `query`.")
         query = str(item["query"])
+        if not query.strip():
+            raise ValueError("La consulta de una regla no puede estar vacía.")
+        if len(query) > MAX_QUERY_LENGTH:
+            raise ValueError(f"Las consultas no pueden exceder {MAX_QUERY_LENGTH} caracteres.")
         _Parser(query).parse()
         rules.append(
             AutoRejectRule(
@@ -220,11 +252,8 @@ def load_auto_reject_rules(config: AppConfig) -> list[AutoRejectRule]:
     if not path.exists():
         return []
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    enabled = {
-        **raw,
-        "rules": [item for item in raw.get("rules", []) if item.get("enabled", True)],
-    }
-    return validate_rules_yaml(yaml.safe_dump(enabled, allow_unicode=True, sort_keys=False))
+    enabled_rules = [item for item in raw.get("rules", []) if item.get("enabled", True)]
+    return _rules_from_raw({"rules": enabled_rules})
 
 
 def first_matching_rule(
@@ -240,6 +269,8 @@ def apply_auto_reject_rules(
     process: Process, entity: Entity | None, rules: list[AutoRejectRule]
 ) -> AutoRejectRule | None:
     if process.status != ProcessStatus.publicada:
+        return None
+    if process.auto_reject_exempt:
         return None
     rule = first_matching_rule(process, entity, rules)
     if rule is None:

@@ -90,7 +90,7 @@ class Process(Base):
         String(64), default="public_tender", index=True
     )
     interest_status: Mapped[InterestStatus] = mapped_column(
-        Enum(InterestStatus), default=InterestStatus.none, index=True
+        Enum(InterestStatus, native_enum=False), default=InterestStatus.none, index=True
     )
 
     nid_proceso: Mapped[str] = mapped_column(String(32), index=True)
@@ -100,7 +100,7 @@ class Process(Base):
     ntipo: Mapped[str | None] = mapped_column(String(8))
     ficha_id: Mapped[str | None] = mapped_column(String(36))
     status: Mapped[ProcessStatus] = mapped_column(
-        Enum(ProcessStatus), default=ProcessStatus.publicada, index=True
+        Enum(ProcessStatus, native_enum=False), default=ProcessStatus.publicada, index=True
     )
 
     # Columnas del listado SEACE
@@ -125,6 +125,7 @@ class Process(Base):
     content_hash: Mapped[str | None] = mapped_column(String(64))
     data_dir: Mapped[str | None] = mapped_column(String(512))
     auto_reject_reason: Mapped[str | None] = mapped_column(Text)
+    auto_reject_exempt: Mapped[bool] = mapped_column(default=False, index=True)
 
     watch_unread: Mapped[bool] = mapped_column(default=False, index=True)
     watch_checked_at: Mapped[datetime | None] = mapped_column(

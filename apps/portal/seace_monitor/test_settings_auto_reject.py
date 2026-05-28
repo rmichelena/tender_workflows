@@ -32,6 +32,37 @@ def test_settings_autoreject_rejects_invalid_yaml(tmp_path):
     assert "YAML inválido" in response.text
 
 
+def test_settings_autoreject_rejects_oversized_yaml(tmp_path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'settings_big.db'}")
+    app = create_app(cfg)
+
+    response = TestClient(app).post(
+        "/settings/autoreject",
+        data={"rules_yaml": "x" * (70 * 1024), "action": "save"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "YAML inválido" in response.text
+
+
+def test_settings_autoreject_rejects_too_many_rules(tmp_path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'settings_many.db'}")
+    app = create_app(cfg)
+    rules = "\n".join(
+        f"  - id: r{i}\n    query: 'objeto:servicio limpieza'\n" for i in range(101)
+    )
+
+    response = TestClient(app).post(
+        "/settings/autoreject",
+        data={"rules_yaml": f"rules:\n{rules}", "action": "save"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "YAML inválido" in response.text
+
+
 def test_settings_autoreject_saves_tenant_override(tmp_path):
     cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'settings3.db'}")
     app = create_app(cfg)

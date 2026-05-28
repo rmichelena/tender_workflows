@@ -490,10 +490,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if proc is None:
             raise HTTPException(404)
+        was_autorejected = proc.status == ProcessStatus.autorejected
         new_status = resolve_restore_status(_config, proc)
         if new_status == ProcessStatus.publicada:
             clear_process_download_metadata(proc)
             delete_process_analysis(db, proc)
+        if was_autorejected:
+            proc.auto_reject_exempt = True
+            proc.auto_reject_reason = None
         proc.status = new_status
         return RedirectResponse("/descartados", status_code=303)
 

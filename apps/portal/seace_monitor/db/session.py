@@ -40,6 +40,7 @@ _PROCESS_COLUMN_ADDITIONS = (
     ("content_hash", "VARCHAR(64)"),
     ("data_dir", "VARCHAR(512)"),
     ("auto_reject_reason", "TEXT"),
+    ("auto_reject_exempt", "BOOLEAN DEFAULT 0"),
     ("watch_unread", "BOOLEAN DEFAULT 0"),
     ("watch_checked_at", "DATETIME"),
     ("watch_cronograma_prev_json", "TEXT"),
@@ -96,6 +97,13 @@ def _ensure_table_columns(engine, table: str, additions: tuple[tuple[str, str], 
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}"))
 
 
+def _has_missing_values(engine, table: str, columns: tuple[str, ...]) -> bool:
+    predicate = " OR ".join(f"{column} IS NULL OR {column} = ''" for column in columns)
+    with engine.connect() as conn:
+        row = conn.execute(text(f"SELECT 1 FROM {table} WHERE {predicate} LIMIT 1")).first()
+    return row is not None
+
+
 def _backfill_process_sources(engine) -> None:
     """Completa columnas multi-ingesta para filas SEACE existentes."""
     insp = inspect(engine)
@@ -103,6 +111,17 @@ def _backfill_process_sources(engine) -> None:
         return
     existing = {col["name"] for col in insp.get_columns("processes")}
     if not {"source", "source_ref", "nid_proceso"}.issubset(existing):
+        return
+    with engine.connect() as conn:
+        needs_backfill = conn.execute(
+            text(
+                "SELECT 1 FROM processes "
+                "WHERE source IS NULL OR source = '' "
+                "OR ((source_ref IS NULL OR source_ref = '') AND nid_proceso IS NOT NULL) "
+                "LIMIT 1"
+            )
+        ).first()
+    if needs_backfill is None:
         return
     with engine.begin() as conn:
         conn.execute(
@@ -129,6 +148,8 @@ def _backfill_process_pipeline_fields(engine) -> None:
         return
     existing = {col["name"] for col in insp.get_columns("processes")}
     if not {"workflow_profile", "interest_status"}.issubset(existing):
+        return
+    if not _has_missing_values(engine, "processes", ("workflow_profile", "interest_status")):
         return
     with engine.begin() as conn:
         conn.execute(
@@ -191,6 +212,7 @@ def _ensure_sqlite_indexes(engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_processes_source_ref ON processes (source_ref)",
         "CREATE INDEX IF NOT EXISTS ix_processes_workflow_profile ON processes (workflow_profile)",
         "CREATE INDEX IF NOT EXISTS ix_processes_interest_status ON processes (interest_status)",
+        "CREATE INDEX IF NOT EXISTS ix_processes_auto_reject_exempt ON processes (auto_reject_exempt)",
         "CREATE INDEX IF NOT EXISTS ix_processes_watch_unread ON processes (watch_unread)",
     )
     with engine.begin() as conn:

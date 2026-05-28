@@ -8,6 +8,7 @@ from .auto_reject import (
     apply_auto_reject_rules,
     evaluate_query,
     load_auto_reject_rules,
+    validate_rules_yaml,
 )
 from .client import FichaResult, ProcessRow
 from .config import AppConfig
@@ -93,6 +94,22 @@ def test_apply_auto_reject_does_not_change_downloaded_process():
     assert proc.status == ProcessStatus.descargada
 
 
+def test_apply_auto_reject_skips_human_exempt_process():
+    proc, entity = _process(
+        objeto="Servicio",
+        descripcion="SERVICIO DE LIMPIEZA DE OFICINAS",
+    )
+    proc.auto_reject_exempt = True
+    rule = AutoRejectRule(
+        id="servicio_limpieza",
+        query="objeto:servicio limpieza",
+        reason="Limpieza fuera de foco",
+    )
+
+    assert apply_auto_reject_rules(proc, entity, [rule]) is None
+    assert proc.status == ProcessStatus.publicada
+
+
 def test_load_default_rules_includes_alquiler_and_food_patterns():
     rules = load_auto_reject_rules(AppConfig())
     queries = "\n".join(rule.query for rule in rules)
@@ -123,6 +140,27 @@ def test_process_auto_reject_reason_defaults_and_backfills():
 
     proc = session.query(Process).one()
     assert proc.auto_reject_reason is None
+    assert proc.auto_reject_exempt is False
+
+
+def test_validate_rules_rejects_malformed_queries():
+    malformed = [
+        "rules:\n- id: empty\n  query: ''\n",
+        "rules:\n- id: trailing_or\n  query: 'objeto:servicio OR'\n",
+        "rules:\n- id: empty_group\n  query: 'objeto:servicio ()'\n",
+        "rules:\n- id: open_paren\n  query: '(objeto:servicio'\n",
+        "rules:\n- id: missing_value\n  query: 'objeto:'\n",
+        "rules:\n- id: unknown_field\n  query: 'cuantia:50000'\n",
+        "rules:\n- id: nested_field\n  query: 'objeto:descripcion:limpieza'\n",
+    ]
+
+    for text in malformed:
+        try:
+            validate_rules_yaml(text)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"Expected invalid rules YAML: {text}")
 
 
 def test_scanner_applies_auto_reject_rules_after_upsert(monkeypatch):

@@ -42,10 +42,10 @@ def register_autoreject_settings_routes(app, config: AppConfig, render, _get_db)
         if action != "save":
             return RedirectResponse("/settings/autoreject", status_code=303)
         try:
-            rules = validate_rules_yaml(rules_yaml)
+            validated_rules = validate_rules_yaml(rules_yaml)
         except (ValueError, yaml.YAMLError) as exc:
             raise HTTPException(400, f"YAML inválido: {exc}") from exc
-        if not rules:
+        if not validated_rules:
             raise HTTPException(400, "YAML inválido: al menos una regla es requerida")
         path = editable_auto_reject_rules_path(config)
         path.parent.mkdir(parents=True, exist_ok=True)
