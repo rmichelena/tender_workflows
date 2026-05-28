@@ -10,7 +10,6 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from ..client import SeaceClient
 from ..config import AppConfig
 from ..db.models import AnalysisResult, Process, ProcessStatus, utcnow
 from ..list_order import (
@@ -29,7 +28,10 @@ from ..document_storage import (
     write_manifest,
 )
 from ..parser import extract_cronograma_fechas, parse_ficha
-from ..watchlist import _resolve_current_row
+from ..seace_search import (
+    apply_list_row_to_process,
+    open_ficha_for_process,
+)
 from .analysis_lock import AnalysisBusyError, analysis_lock
 from .document_prep import extract_archives, resolve_selected_documents
 from .fast_reader import run_fast_analysis
@@ -286,22 +288,12 @@ class AnalysisRunner:
     def _fetch_documentos_from_seace(self, process: Process, ruc: str) -> list[dict]:
         from dataclasses import asdict
 
-        client = SeaceClient(
-            ruc,
-            process.anio,
-            self.config.rows_per_page,
-            http_proxy=self.config.http_proxy,
-        )
-        row = _resolve_current_row(self.config, client, process)
-        ficha = client.open_ficha(row)
+        row, ficha, _client = open_ficha_for_process(self.config, process)
         parsed = parse_ficha(ficha.html, ficha.ficha_id, row.nid_proceso)
         fechas = extract_cronograma_fechas(parsed.cronograma)
-        process.nid_proceso = row.nid_proceso
-        process.link_id = row.link_id
-        process.nid_convocatoria = row.nid_convocatoria
-        process.nid_sistema = row.nid_sistema
-        process.ntipo = row.ntipo
-        process.fecha_publicacion = row.fecha_publicacion or parsed.fecha_publicacion
+        apply_list_row_to_process(process, row)
+        if not process.fecha_publicacion and parsed.fecha_publicacion:
+            process.fecha_publicacion = parsed.fecha_publicacion
         process.fecha_consultas = fechas.fecha_consultas
         process.fecha_presentacion = fechas.fecha_presentacion
         process.cronograma_json = json.dumps(

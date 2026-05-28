@@ -236,7 +236,7 @@ def test_download_fetches_documents_with_current_row_from_later_page(
 
     runner = AnalysisRunner(cfg, analysis_session)
     with (
-        patch("seace_monitor.analysis.runner.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.seace_search.SeaceClient", return_value=mock_client),
         patch("seace_monitor.analysis.runner.parse_ficha", return_value=ficha),
     ):
         docs = runner._fetch_documentos_from_seace(proc, entity.ruc)
@@ -311,7 +311,7 @@ def test_download_persists_cronograma_from_ficha(
 
     runner = AnalysisRunner(cfg, analysis_session)
     with (
-        patch("seace_monitor.analysis.runner.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.seace_search.SeaceClient", return_value=mock_client),
         patch("seace_monitor.analysis.runner.parse_ficha", return_value=ficha),
     ):
         docs = runner._fetch_documentos_from_seace(proc, entity.ruc)
@@ -379,7 +379,7 @@ def test_download_uses_continued_process_row_matched_by_nomenclatura(
 
     runner = AnalysisRunner(cfg, analysis_session)
     with (
-        patch("seace_monitor.analysis.runner.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.seace_search.SeaceClient", return_value=mock_client),
         patch("seace_monitor.analysis.runner.parse_ficha", return_value=ficha),
     ):
         docs = runner._fetch_documentos_from_seace(proc, entity.ruc)

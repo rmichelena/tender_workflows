@@ -20,11 +20,10 @@ from fastapi.responses import RedirectResponse
 
 from bs4 import BeautifulSoup
 
-from ..client import SeaceClient
 from ..config import AppConfig
 from ..db.models import Process
 from ..http_util import requests_proxies
-from ..watchlist import _resolve_current_row
+from ..seace_search import log_resolved_row_change, open_ficha_for_process
 
 logger = logging.getLogger(__name__)
 
@@ -209,18 +208,13 @@ def _try_server_open_ficha(
     list_url: str,
     config: AppConfig,
 ) -> str | None:
-    del list_html, list_url  # resolución y apertura usan SeaceClient con ViewState paginado
+    del list_html, list_url
     if not process.entity:
         return None
-    client = SeaceClient(
-        process.entity.ruc,
-        process.anio,
-        config.rows_per_page,
-        http_proxy=config.http_proxy,
-    )
-    client.session = session
     try:
-        row = _resolve_current_row(config, client, process)
+        row, ficha_result, _client = open_ficha_for_process(
+            config, process, http_session=session
+        )
     except Exception:
         logger.exception(
             "SEACE proxy: fila no encontrada por nomenclatura (id=%s nomenclatura=%s)",
@@ -230,22 +224,7 @@ def _try_server_open_ficha(
         return None
     if not row.link_id:
         return None
-    if row.link_id != (process.link_id or "") or row.nid_proceso != process.nid_proceso:
-        logger.info(
-            "SEACE proxy: fila resuelta id=%s nid %s → %s link_id %s → %s",
-            process.id,
-            process.nid_proceso,
-            row.nid_proceso,
-            process.link_id,
-            row.link_id,
-        )
-    try:
-        ficha_result = client.open_ficha(row)
-    except (requests.RequestException, RuntimeError):
-        logger.exception(
-            "SEACE proxy: falló apertura ficha nid=%s", process.nid_proceso
-        )
-        return None
+    log_resolved_row_change(process, row, context="SEACE proxy")
     if "fichaSeleccion" not in ficha_result.url:
         logger.warning(
             "SEACE proxy: apertura ficha no redirigió (nid=%s url=%s)",

@@ -10,7 +10,7 @@ from .db.models import Entity, Process
 from .web.seace_proxy import _try_server_open_ficha
 
 
-def test_seace_open_uses_client_open_ficha_after_pagination():
+def test_seace_open_uses_open_ficha_for_process_after_pagination():
     entity = Entity(ruc="20122476309", nombre="BCR", activa=True)
     process = Process(
         id=29,
@@ -39,18 +39,17 @@ def test_seace_open_uses_client_open_ficha_after_pagination():
         link_id="fresh-link",
         ntipo="0",
     )
-    mock_client = MagicMock()
-    mock_client.open_ficha.return_value = FichaResult(
+    ficha_result = FichaResult(
         ficha_id="abc",
         html="<html></html>",
         url="https://prod2.seace.gob.pe/seacebus-uiwd-pub/fichaSeleccion/fichaSeleccion.xhtml?id=abc",
     )
     session = MagicMock()
 
-    with (
-        patch("seace_monitor.web.seace_proxy.SeaceClient", return_value=mock_client),
-        patch("seace_monitor.web.seace_proxy._resolve_current_row", return_value=current_row),
-    ):
+    with patch(
+        "seace_monitor.web.seace_proxy.open_ficha_for_process",
+        return_value=(current_row, ficha_result, MagicMock()),
+    ) as open_ficha:
         location = _try_server_open_ficha(
             session,
             process,
@@ -60,6 +59,5 @@ def test_seace_open_uses_client_open_ficha_after_pagination():
         )
 
     assert location == "/seace/p/fichaSeleccion/fichaSeleccion.xhtml?id=abc"
-    assert mock_client.session is session
-    mock_client.open_ficha.assert_called_once_with(current_row)
+    open_ficha.assert_called_once_with(AppConfig(), process, http_session=session)
     session.post.assert_not_called()

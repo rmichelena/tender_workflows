@@ -145,7 +145,7 @@ def test_publicaciones_list_has_no_correlativo_or_numero_column(tmp_path: Path):
         "Acciones",
     ]
     cells = _first_table_row_cells(response.text)
-    assert cells[:10] == [
+    assert cells[:9] == [
         "ENTIDAD TEST",
         "01/06/2026 10:00",
         "NOM-PUB",
@@ -155,8 +155,9 @@ def test_publicaciones_list_has_no_correlativo_or_numero_column(tmp_path: Path):
         "Soles",
         "03/06/2026 23:59",
         "05/06/2026 23:59",
-        "publicada",
     ]
+    assert cells[9].startswith("publicada")
+    assert "Ver en SEACE" in cells[9]
     assert "17" not in cells[:10]
 
 
@@ -172,7 +173,7 @@ def test_descargados_list_cells_match_headers(tmp_path: Path):
 
     assert response.status_code == 200
     cells = _first_table_row_cells(response.text)
-    assert cells[:9] == [
+    assert cells[:8] == [
         "1",
         "01/06/2026 10:00",
         "ENTIDAD TEST",
@@ -181,8 +182,9 @@ def test_descargados_list_cells_match_headers(tmp_path: Path):
         "Compra de radios",
         "03/06/2026 23:59",
         "05/06/2026 23:59",
-        "descargada",
     ]
+    assert cells[8].startswith("descargada")
+    assert "Ver en SEACE" in cells[8]
 
 
 def test_analizados_list_cells_match_headers(tmp_path: Path):
@@ -197,7 +199,7 @@ def test_analizados_list_cells_match_headers(tmp_path: Path):
 
     assert response.status_code == 200
     cells = _first_table_row_cells(response.text)
-    assert cells[:9] == [
+    assert cells[:8] == [
         "1",
         "01/06/2026 10:00",
         "ENTIDAD TEST",
@@ -206,8 +208,9 @@ def test_analizados_list_cells_match_headers(tmp_path: Path):
         "Compra de radios",
         "03/06/2026 23:59",
         "05/06/2026 23:59",
-        "analizada",
     ]
+    assert cells[8].startswith("analizada")
+    assert "Ver en SEACE" in cells[8]
 
 
 def test_cambiar_estado_preserves_sort_and_scroll(tmp_path: Path):

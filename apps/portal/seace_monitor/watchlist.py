@@ -12,7 +12,6 @@ from pathlib import Path
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
-from .client import ProcessRow, SeaceClient
 from .config import AppConfig
 from .db.models import Process, ProcessStatus, utcnow
 from .document_storage import (
@@ -25,6 +24,11 @@ from .document_storage import (
     write_manifest,
 )
 from .parser import extract_cronograma_fechas, parse_ficha
+from .seace_search import (
+    apply_list_row_to_process,
+    normalize_nomenclatura,
+    open_ficha_for_process,
+)
 from .watchlist_changelog import append_watchlist_changelog, build_watchlist_changelog_entry
 from .watchlist_compare import watchlist_content_changed
 
@@ -37,37 +41,6 @@ WATCHLIST_STATUSES = frozenset(
         ProcessStatus.portafolio,
     }
 )
-WATCHLIST_PAGE_SEARCH_CAP = 200
-
-
-def _normalize_nomenclatura(value: str | None) -> str:
-    return " ".join((value or "").strip().upper().split())
-
-
-def _resolve_current_row(
-    config: AppConfig, client: SeaceClient, process: Process
-) -> ProcessRow:
-    """Busca la fila vigente por nomenclatura para abrir ficha con ViewState actual."""
-    target_nomenclatura = _normalize_nomenclatura(process.nomenclatura)
-    if not target_nomenclatura:
-        raise RuntimeError(
-            f"Watchlist: proceso {process.id} no tiene nomenclatura para buscar en SEACE"
-        )
-    _, first_soup = client.fetch_list_page(0)
-    total_pages = min(client.total_pages(first_soup), WATCHLIST_PAGE_SEARCH_CAP)
-    for page in range(total_pages):
-        if page == 0:
-            soup = first_soup
-        else:
-            _, soup = client.fetch_list_page(page)
-        rows = client.parse_rows(soup)
-        for row in rows:
-            if _normalize_nomenclatura(row.nomenclatura) == target_nomenclatura:
-                return row
-    raise RuntimeError(
-        f"Watchlist: proceso {process.nomenclatura} no aparece en las "
-        f"{total_pages} página(s) actuales de entidad {process.entity_id}"
-    )
 
 
 def watchlist_fingerprint(
@@ -280,7 +253,7 @@ def _refresh_watchlist_process(
 ) -> bool:
     if not process.entity:
         return False
-    if not _normalize_nomenclatura(process.nomenclatura):
+    if not normalize_nomenclatura(process.nomenclatura):
         logger.warning(
             "Watchlist: sin nomenclatura id=%s nid=%s",
             process.id,
@@ -290,14 +263,8 @@ def _refresh_watchlist_process(
 
     _repair_document_metadata(process)
 
-    client = SeaceClient(
-        process.entity.ruc,
-        process.anio,
-        config.rows_per_page,
-        http_proxy=config.http_proxy,
-    )
     try:
-        row = _resolve_current_row(config, client, process)
+        row, ficha_result, _client = open_ficha_for_process(config, process)
     except RuntimeError:
         logger.warning(
             "Watchlist: fila no encontrada id=%s nomenclatura=%s",
@@ -305,7 +272,6 @@ def _refresh_watchlist_process(
             process.nomenclatura,
         )
         return False
-    ficha_result = client.open_ficha(row)
     ficha = parse_ficha(ficha_result.html, ficha_result.ficha_id, row.nid_proceso)
     _validate_watchlist_ficha(process, ficha)
 
@@ -378,11 +344,7 @@ def _refresh_watchlist_process(
     process.content_hash = ficha.content_hash()
     process.ficha_id = ficha.ficha_id
     process.ficha_url = ficha_result.url
-    process.nid_proceso = row.nid_proceso
-    process.link_id = row.link_id
-    process.nid_convocatoria = row.nid_convocatoria
-    process.nid_sistema = row.nid_sistema
-    process.ntipo = row.ntipo
+    apply_list_row_to_process(process, row)
     process.documentos_json = new_docs_json
     process.updated_at = datetime.now(timezone.utc)
     process.watch_unread = True
