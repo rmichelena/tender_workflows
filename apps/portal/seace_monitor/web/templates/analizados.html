@@ -1,36 +1,11 @@
 {% extends "base.html" %}
-{% from "_macros.html" import entidad_nombre, status_cell %}
+{% from "_macros.html" import workflow_table %}
 {% block title %}Analizados — SEACE Monitor{% endblock %}
 {% block content %}
 <h2>Procesos analizados</h2>
 <p class="muted">Información extraída por el pipeline de análisis (etapa 1).</p>
 
-<table class="data">
-  <thead>
-    <tr>
-      {% for col, label in sort_columns.items() %}
-      <th class="sortable{% if col == 'entidad' %} col-entidad{% endif %}{% if sort == col %} sorted sorted-{{ sort_dir }}{% endif %}">
-        <a href="{{ sort_href(col) }}">{{ label }}</a>
-      </th>
-      {% endfor %}
-      <th>Acciones</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for item in processes %}
-    {% set p = item.process %}
-    <tr data-process-id="{{ p.id }}" class="{% if item.watch_unread %}row-unread{% endif %}"{% if p.status.value == 'archivando' %} data-archiving="1"{% endif %}>
-      <td>{{ item.correlativo or '—' }}</td>
-      <td>{{ p.fecha_publicacion or '—' }}</td>
-      <td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
-      <td>{{ p.nomenclatura }}</td>
-      <td>{{ p.objeto or '—' }}</td>
-      <td class="desc">{{ p.descripcion or '—' }}</td>
-      <td>{{ item.fin_consultas }}</td>
-      <td>{{ item.fin_presentacion }}</td>
-      <td class="status-cell">{{ status_cell(p) }}</td>
-      <td class="actions-cell">
-        <div class="actions-stack js-action-row">
+{% call(item, p) workflow_table(processes, sort_columns, sort, sort_dir, sort_href, "Aún no hay procesos analizados.", pending_status='archivando', pending_data_attr='archiving') %}
         {% if p.status.value == 'archivando' %}
         <button type="button" class="btn btn-secondary btn-sm" disabled>Archivando…</button>
         {% else %}
@@ -71,86 +46,19 @@
           <button type="submit" class="btn btn-danger btn-sm js-archivar-btn">Archivar</button>
         </form>
         {% endif %}
-        </div>
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="10" class="muted">Aún no hay procesos analizados.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+{% endcall %}
 {% endblock %}
 {% block scripts %}
+<script src="/static/workflow_list.js"></script>
 <script>
-(function () {
-  function lockArchiveRow(row) {
-    if (!row) return;
-    row.dataset.archiving = "1";
-    row.querySelectorAll(".js-action-row button").forEach(function (btn) {
-      btn.disabled = true;
-    });
-    var archive = row.querySelector(".js-archivar-btn");
-    if (archive) archive.textContent = "Archivando…";
-  }
-
-  document.querySelectorAll("form.js-archivar-form").forEach(function (form) {
-    form.addEventListener("submit", function () {
-      var field = form.querySelector('input[name="scroll"]');
-      if (field) field.value = String(Math.round(window.scrollY));
-      lockArchiveRow(form.closest("tr"));
-    });
-  });
-
-  document.querySelectorAll("form.js-keep-scroll").forEach(function (form) {
-    if (form.classList.contains("js-archivar-form")) return;
-    form.addEventListener("submit", function () {
-      var field = form.querySelector('input[name="scroll"]');
-      if (field) field.value = String(Math.round(window.scrollY));
-    });
-  });
-
-  var params = new URLSearchParams(window.location.search);
-  var scroll = params.get("scroll");
-  if (scroll) {
-    var y = parseInt(scroll, 10);
-    if (Number.isFinite(y) && y >= 0) {
-      function restore() { window.scrollTo(0, y); }
-      restore();
-      requestAnimationFrame(restore);
-      window.addEventListener("load", restore);
-    }
-    params.delete("scroll");
-    var query = params.toString();
-    var next = window.location.pathname + (query ? "?" + query : "") + window.location.hash;
-    history.replaceState(null, "", next);
-  }
-
-  var archivingRows = document.querySelectorAll('tr[data-archiving="1"]');
-  if (!archivingRows.length) return;
-
-  var ids = Array.from(archivingRows).map(function (row) {
-    return row.getAttribute("data-process-id");
-  }).filter(Boolean);
-
-  function stillInAnalizados(status) {
-    return status === "analizada" || status === "portafolio" || status === "archivando";
-  }
-
-  function pollArchiving() {
-    Promise.all(ids.map(function (id) {
-      return fetch("/api/processes/" + id + "/workflow")
-        .then(function (r) { return r.json(); });
-    })).then(function (rows) {
-      var pending = rows.some(function (row) {
-        return stillInAnalizados(row.status);
-      });
-      if (!pending) {
-        window.location.reload();
-      }
-    }).catch(function () {});
-  }
-
-  window.setInterval(pollArchiving, 3000);
-})();
+WorkflowList.init({
+  pendingAttr: "archiving",
+  stillInList: ["analizada", "portafolio", "archivando"],
+  keepScrollForms: ".js-keep-scroll:not(.js-archivar-form)",
+  lockFormSelector: ".js-archivar-form",
+  lockBtnSelector: ".js-archivar-btn",
+  lockAttr: "archiving",
+  lockLabel: "Archivando…"
+});
 </script>
 {% endblock %}

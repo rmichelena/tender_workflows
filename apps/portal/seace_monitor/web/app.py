@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
@@ -26,14 +26,11 @@ from ..db.maintenance import (
     is_stale_running_analysis,
     recover_stale_analyses,
 )
-from ..db.models import AnalysisResult, Entity, InterestStatus, Process, ProcessStatus, utcnow
-from ..db.session import commit_session_with_retry, init_db, session_factory
+from ..db.models import AnalysisResult, Entity, InterestStatus, Process, ProcessStatus
+from ..db.session import init_db, session_factory
 from ..process_storage import (
     clear_process_download_metadata,
     delete_process_analysis,
-    delete_process_data_dir,
-    archive_analyzed_process,
-    discard_process_downloads,
     purge_all_stale_process_data,
     recover_stale_downloads,
     recover_stale_workflow_transitions,
@@ -48,14 +45,11 @@ from ..tenant_paths import migrate_legacy_layout, migrate_process_data_dir_refs
 from .detail_data import (
     build_document_tree,
     count_document_nodes,
-    download_filename_for_path,
     filter_new_document_nodes,
     flatten_selectable_leaves,
     load_analysis_selection,
-    media_type_for_path,
     parse_cronograma,
     parse_watch_changelog,
-    resolve_document_path,
     save_analysis_selection,
 )
 from .markdown_render import render_free_reader_summary
@@ -69,13 +63,23 @@ from .seace_proxy import (
 )
 from .seace_view import can_open_seace
 from .analysis_chat import register_analysis_chat_routes
+from .document_routes import register_process_document_routes
+from .list_pages import render_workflow_list
+from .process_queries import get_process_or_404
 from .settings_autoreject import register_autoreject_settings_routes
 from .settings_entities import bootstrap_entities, register_settings_routes
+from .workflow_transitions import (
+    archive_work,
+    begin_archive_transition,
+    begin_discard_transition,
+    begin_download_transition,
+    discard_work,
+    schedule_download,
+    schedule_status_transition,
+)
 from .sorting import (
     PUBLICACIONES_SORT_COLUMNS,
     SORTABLE_COLUMNS,
-    WORKFLOW_LIST_DEFAULT_SORT,
-    WORKFLOW_LIST_SORT_COLUMNS,
     build_sort_query,
     normalize_dir,
     normalize_sort,
@@ -431,9 +435,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         dir: str = Form(""),
         scroll: str = Form(""),
     ):
-        proc = db.get(Process, process_id)
-        if proc is None:
-            raise HTTPException(404)
+        proc = get_process_or_404(db, process_id)
         try:
             proc.interest_status = InterestStatus(interest_status)
         except ValueError as exc:
@@ -452,9 +454,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         dir: str = Form(""),
         scroll: str = Form(""),
     ):
-        proc = db.get(Process, process_id)
-        if proc is None:
-            raise HTTPException(404)
+        proc = get_process_or_404(db, process_id)
         if proc.status == ProcessStatus.descartada:
             return _filter_redirect(
                 entidad=entidad, objeto=objeto, sort=sort, dir=dir, scroll=scroll
@@ -502,14 +502,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         db: Session = Depends(get_db),
         estado: str = Form(""),
     ):
-        proc = (
-            db.query(Process)
-            .options(joinedload(Process.analysis))
-            .filter(Process.id == process_id)
-            .one_or_none()
-        )
-        if proc is None:
-            raise HTTPException(404)
+        proc = get_process_or_404(db, process_id, with_analysis=True)
         was_autorejected = proc.status == ProcessStatus.autorejected
         new_status = resolve_restore_status(_config, proc)
         if new_status == ProcessStatus.publicada:
@@ -557,14 +550,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.post("/archivados/{process_id}/restaurar")
     def restaurar_archivado(process_id: int, db: Session = Depends(get_db)):
-        proc = (
-            db.query(Process)
-            .options(joinedload(Process.analysis))
-            .filter(Process.id == process_id)
-            .one_or_none()
-        )
-        if proc is None:
-            raise HTTPException(404)
+        proc = get_process_or_404(db, process_id, with_analysis=True)
         if proc.status != ProcessStatus.archivada:
             raise HTTPException(400, "Solo procesos archivados")
         restore_archived_process(_config, proc, db)
@@ -572,14 +558,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.get("/archivados/{process_id}", response_class=HTMLResponse)
     def archivado_detalle(request: Request, process_id: int, db: Session = Depends(get_db)):
-        proc = (
-            db.query(Process)
-            .options(joinedload(Process.entity), joinedload(Process.analysis))
-            .filter(Process.id == process_id)
-            .one_or_none()
+        proc = get_process_or_404(
+            db, process_id, with_entity=True, with_analysis=True
         )
-        if proc is None:
-            raise HTTPException(404)
         if proc.status != ProcessStatus.archivada:
             raise HTTPException(404)
         ctx = _build_analisis_detail_context(proc, mark_read=False)
@@ -606,9 +587,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         dir: str = Form(""),
         scroll: str = Form(""),
     ):
-        proc = db.get(Process, process_id)
-        if proc is None:
-            raise HTTPException(404, "Proceso no encontrado")
+        proc = get_process_or_404(db, process_id)
         if proc.status == ProcessStatus.descargada:
             return RedirectResponse(f"/descargados/{process_id}", status_code=303)
         if proc.status == ProcessStatus.descargando:
@@ -624,27 +603,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 return RedirectResponse(f"/analizados/{process_id}", status_code=303)
             raise HTTPException(400, "Estado no válido para descarga")
 
-        proc.status = ProcessStatus.descargando
-        commit_session_with_retry(db)
-        db.expunge(proc)
-
-        def _job():
-            session = session_factory()
-            try:
-                runner = AnalysisRunner(_config, session)
-                runner.download(process_id)
-            except Exception:
-                proc_fail = session.get(Process, process_id)
-                if proc_fail is not None:
-                    proc_fail.status = ProcessStatus.publicada
-                    delete_process_data_dir(_config, proc_fail)
-                    clear_process_download_metadata(proc_fail)
-                    session.commit()
-                logger.exception("Background download failed")
-            finally:
-                session.close()
-
-        background_tasks.add_task(_job)
+        process_id = begin_download_transition(db, proc)
+        schedule_download(background_tasks, _config, process_id)
         return _filter_redirect(
             entidad=entidad,
             objeto=objeto,
@@ -660,50 +620,23 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         sort: str | None = None,
         dir: str | None = None,
     ):
-        sort_col = normalize_sort(sort, default=WORKFLOW_LIST_DEFAULT_SORT)
-        sort_dir = normalize_dir(dir, sort_col)
-        rows = (
-            db.query(Process)
-            .options(joinedload(Process.entity), joinedload(Process.analysis))
-            .filter(
-                Process.status.in_(
-                    [ProcessStatus.descargada, ProcessStatus.descartando]
-                )
-            )
-            .all()
-        )
-        processes = sort_process_list_views(
-            build_process_list_views(rows, rank_attr="list_rank_descargados"),
-            sort_col,
-            sort_dir,
-            default_sort=WORKFLOW_LIST_DEFAULT_SORT,
-        )
-
-        def sort_href(column: str) -> str:
-            return build_sort_query(column, sort=sort_col, direction=sort_dir)
-
-        return render(
+        return render_workflow_list(
             request,
-            "descargados.html",
-            db=db,
+            db,
+            render,
+            template="descargados.html",
             active_page="descargados",
-            processes=processes,
-            sort=sort_col,
-            sort_dir=sort_dir,
-            sort_columns=WORKFLOW_LIST_SORT_COLUMNS,
-            sort_href=sort_href,
+            statuses=[ProcessStatus.descargada, ProcessStatus.descartando],
+            rank_attr="list_rank_descargados",
+            sort=sort,
+            dir=dir,
         )
 
     @app.get("/descargados/{process_id}", response_class=HTMLResponse)
     def descargado_detalle(request: Request, process_id: int, db: Session = Depends(get_db)):
-        proc = (
-            db.query(Process)
-            .options(joinedload(Process.entity), joinedload(Process.analysis))
-            .filter(Process.id == process_id)
-            .one_or_none()
+        proc = get_process_or_404(
+            db, process_id, with_entity=True, with_analysis=True
         )
-        if proc is None:
-            raise HTTPException(404)
         if proc.status == ProcessStatus.descartando:
             return RedirectResponse("/descargados", status_code=303)
         if proc.status == ProcessStatus.descartada:
@@ -755,14 +688,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
     ):
-        proc = (
-            db.query(Process)
-            .options(joinedload(Process.analysis))
-            .filter(Process.id == process_id)
-            .one_or_none()
-        )
-        if proc is None:
-            raise HTTPException(404)
+        proc = get_process_or_404(db, process_id, with_analysis=True)
         if proc.status not in (ProcessStatus.descargada, ProcessStatus.analizada):
             raise HTTPException(400, "Solo procesos descargados pueden analizarse")
         if proc.analysis and proc.analysis.status == "running":
@@ -862,31 +788,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 proc.analysis, _config.stale_analysis_seconds
             ):
                 raise HTTPException(409, "Análisis en curso")
-        proc.status = ProcessStatus.descartando
-        proc.updated_at = utcnow()
-        process_id = proc.id
-        db.commit()
-
-        def _job() -> None:
-            session = session_factory()
-            try:
-                p = session.get(Process, process_id)
-                if p is None or p.status != ProcessStatus.descartando:
-                    return
-                discard_process_downloads(_config, p, session)
-                p.status = ProcessStatus.descartada
-                session.commit()
-            except Exception:
-                session.rollback()
-                p = session.get(Process, process_id)
-                if p is not None and p.status == ProcessStatus.descartando:
-                    p.status = ProcessStatus.descargada
-                    session.commit()
-                logger.exception("Background discard failed for process %s", process_id)
-            finally:
-                session.close()
-
-        background_tasks.add_task(_job)
+        process_id, _ = begin_discard_transition(db, proc)
+        schedule_status_transition(
+            background_tasks,
+            _config,
+            process_id,
+            expected_status=ProcessStatus.descartando,
+            work=lambda session, p: discard_work(_config, session, p),
+            rollback_status=ProcessStatus.descargada,
+            log_label="Background discard",
+        )
         return RedirectResponse(redirect, status_code=303)
 
     def _archive_analyzed(
@@ -905,31 +816,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 proc.analysis, _config.stale_analysis_seconds
             ):
                 raise HTTPException(409, "Análisis en curso")
-        restore_status = proc.status
-        proc.status = ProcessStatus.archivando
-        proc.updated_at = utcnow()
-        process_id = proc.id
-        db.commit()
-
-        def _job() -> None:
-            session = session_factory()
-            try:
-                p = session.get(Process, process_id)
-                if p is None or p.status != ProcessStatus.archivando:
-                    return
-                archive_analyzed_process(_config, p, session)
-                session.commit()
-            except Exception:
-                session.rollback()
-                p = session.get(Process, process_id)
-                if p is not None and p.status == ProcessStatus.archivando:
-                    p.status = restore_status
-                    session.commit()
-                logger.exception("Background archive failed for process %s", process_id)
-            finally:
-                session.close()
-
-        background_tasks.add_task(_job)
+        process_id, restore_status = begin_archive_transition(db, proc)
+        schedule_status_transition(
+            background_tasks,
+            _config,
+            process_id,
+            expected_status=ProcessStatus.archivando,
+            work=lambda session, p: archive_work(_config, session, p),
+            rollback_status=restore_status,
+            log_label="Background archive",
+        )
         return RedirectResponse(redirect, status_code=303)
 
     @app.post("/descargados/{process_id}/descartar")
@@ -941,14 +837,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         sort: str = Form(""),
         dir: str = Form(""),
     ):
-        proc = (
-            db.query(Process)
-            .options(joinedload(Process.analysis))
-            .filter(Process.id == process_id)
-            .one_or_none()
-        )
-        if proc is None:
-            raise HTTPException(404)
+        proc = get_process_or_404(db, process_id, with_analysis=True)
         redirect = workflow_list_query(
             "/descargados",
             sort=sort,
@@ -968,14 +857,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         sort: str = Form(""),
         dir: str = Form(""),
     ):
-        proc = (
-            db.query(Process)
-            .options(joinedload(Process.analysis))
-            .filter(Process.id == process_id)
-            .one_or_none()
-        )
-        if proc is None:
-            raise HTTPException(404)
+        proc = get_process_or_404(db, process_id, with_analysis=True)
         redirect = workflow_list_query(
             "/analizados",
             sort=sort,
@@ -986,52 +868,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             db, proc, background_tasks, redirect=redirect
         )
 
-    @app.get("/descargados/{process_id}/preview/{filename:path}")
-    def preview_documento_descargado(
-        process_id: int, filename: str, db: Session = Depends(get_db)
-    ):
-        proc = db.get(Process, process_id)
-        if proc is None:
-            raise HTTPException(404)
-        path = resolve_document_path(proc, filename)
-        if path is None:
-            raise HTTPException(404, "Documento no encontrado")
-        if path.suffix.lower() != ".pdf":
-            raise HTTPException(400, "Preview solo disponible para PDF")
-        display_name = download_filename_for_path(proc, path)
-        return FileResponse(
-            path,
-            media_type="application/pdf",
-            filename=display_name,
-            headers={"Content-Disposition": f'inline; filename="{display_name}"'},
-        )
-
-    @app.get("/descargados/{process_id}/documentos/{filename:path}")
-    def descargar_documento_descargado(
-        process_id: int, filename: str, db: Session = Depends(get_db)
-    ):
-        proc = db.get(Process, process_id)
-        if proc is None:
-            raise HTTPException(404)
-        path = resolve_document_path(proc, filename)
-        if path is None:
-            raise HTTPException(404, "Documento no encontrado")
-        return FileResponse(
-            path,
-            media_type=media_type_for_path(path),
-            filename=download_filename_for_path(proc, path),
-        )
-
     @app.get("/seace/open/{process_id}")
     def seace_open(process_id: int, request: Request, db: Session = Depends(get_db)):
-        proc = (
-            db.query(Process)
-            .options(joinedload(Process.entity))
-            .filter(Process.id == process_id)
-            .one_or_none()
-        )
-        if proc is None:
-            raise HTTPException(404)
+        proc = get_process_or_404(db, process_id, with_entity=True)
         if not can_open_seace(proc):
             raise HTTPException(
                 400,
@@ -1091,9 +930,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         sort: str = Form(""),
         dir: str = Form(""),
     ):
-        proc = db.get(Process, process_id)
-        if proc is None:
-            raise HTTPException(404)
+        proc = get_process_or_404(db, process_id)
         if estado not in (ProcessStatus.analizada.value, ProcessStatus.portafolio.value):
             raise HTTPException(400, "Estado inválido")
         if proc.status not in (ProcessStatus.analizada, ProcessStatus.portafolio):
@@ -1114,55 +951,28 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         sort: str | None = None,
         dir: str | None = None,
     ):
-        sort_col = normalize_sort(sort, default=WORKFLOW_LIST_DEFAULT_SORT)
-        sort_dir = normalize_dir(dir, sort_col)
-        rows = (
-            db.query(Process)
-            .options(joinedload(Process.entity), joinedload(Process.analysis))
-            .filter(
-                Process.status.in_(
-                    [
-                        ProcessStatus.analizada,
-                        ProcessStatus.portafolio,
-                        ProcessStatus.archivando,
-                    ]
-                )
-            )
-            .all()
-        )
-        processes = sort_process_list_views(
-            build_process_list_views(rows, rank_attr="list_rank_analizados"),
-            sort_col,
-            sort_dir,
-            default_sort=WORKFLOW_LIST_DEFAULT_SORT,
-        )
-
-        def sort_href(column: str) -> str:
-            return build_sort_query(column, sort=sort_col, direction=sort_dir)
-
-        return render(
+        return render_workflow_list(
             request,
-            "analizados.html",
-            db=db,
+            db,
+            render,
+            template="analizados.html",
             active_page="analizados",
-            processes=processes,
-            ProcessStatus=ProcessStatus,
-            sort=sort_col,
-            sort_dir=sort_dir,
-            sort_columns=WORKFLOW_LIST_SORT_COLUMNS,
-            sort_href=sort_href,
+            statuses=[
+                ProcessStatus.analizada,
+                ProcessStatus.portafolio,
+                ProcessStatus.archivando,
+            ],
+            rank_attr="list_rank_analizados",
+            sort=sort,
+            dir=dir,
+            extra_context={"ProcessStatus": ProcessStatus},
         )
 
     @app.get("/analizados/{process_id}", response_class=HTMLResponse)
     def analizado_detalle(request: Request, process_id: int, db: Session = Depends(get_db)):
-        proc = (
-            db.query(Process)
-            .options(joinedload(Process.entity), joinedload(Process.analysis))
-            .filter(Process.id == process_id)
-            .one_or_none()
+        proc = get_process_or_404(
+            db, process_id, with_entity=True, with_analysis=True
         )
-        if proc is None:
-            raise HTTPException(404)
         if proc.status == ProcessStatus.archivando:
             return RedirectResponse("/analizados", status_code=303)
         if proc.status == ProcessStatus.archivada:
@@ -1185,48 +995,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             **ctx,
         )
 
-    @app.get("/analizados/{process_id}/preview/{filename:path}")
-    def preview_documento(process_id: int, filename: str, db: Session = Depends(get_db)):
-        proc = db.get(Process, process_id)
-        if proc is None:
-            raise HTTPException(404)
-        path = resolve_document_path(proc, filename)
-        if path is None:
-            raise HTTPException(404, "Documento no encontrado")
-        if path.suffix.lower() != ".pdf":
-            raise HTTPException(400, "Preview solo disponible para PDF")
-        display_name = download_filename_for_path(proc, path)
-        return FileResponse(
-            path,
-            media_type="application/pdf",
-            filename=display_name,
-            headers={"Content-Disposition": f'inline; filename="{display_name}"'},
-        )
-
-    @app.get("/analizados/{process_id}/documentos/{filename:path}")
-    def descargar_documento(process_id: int, filename: str, db: Session = Depends(get_db)):
-        proc = db.get(Process, process_id)
-        if proc is None:
-            raise HTTPException(404)
-        path = resolve_document_path(proc, filename)
-        if path is None:
-            raise HTTPException(404, "Documento no encontrado")
-        return FileResponse(
-            path,
-            media_type=media_type_for_path(path),
-            filename=download_filename_for_path(proc, path),
-        )
-
     @app.get("/api/processes/{process_id}/workflow")
     def api_process_workflow(process_id: int, db: Session = Depends(get_db)):
-        proc = (
-            db.query(Process)
-            .options(joinedload(Process.analysis))
-            .filter(Process.id == process_id)
-            .one_or_none()
-        )
-        if proc is None:
-            raise HTTPException(404)
+        proc = get_process_or_404(db, process_id, with_analysis=True)
         return {
             "id": proc.id,
             "status": proc.status.value,
@@ -1246,6 +1017,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             "total": db.query(Process).count(),
         }
 
+    register_process_document_routes(app, "descargados", get_db)
+    register_process_document_routes(app, "analizados", get_db)
     register_settings_routes(app, _config, render, get_db)
     register_autoreject_settings_routes(app, _config, render, get_db)
     register_analysis_chat_routes(app, _config, get_db)

@@ -14,6 +14,48 @@
 </div>
 {% endmacro %}
 
+{% macro workflow_list_cells(item, p) %}
+<td>{{ item.correlativo or '—' }}</td>
+<td>{{ p.fecha_publicacion or '—' }}</td>
+<td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
+<td>{{ p.nomenclatura }}</td>
+<td>{{ p.objeto or '—' }}</td>
+<td class="desc">{{ p.descripcion or '—' }}</td>
+<td>{{ item.fin_consultas }}</td>
+<td>{{ item.fin_presentacion }}</td>
+<td class="status-cell">{{ status_cell(p) }}</td>
+{% endmacro %}
+
+{% macro workflow_table(processes, sort_columns, sort, sort_dir, sort_href, empty_message, pending_status='', pending_data_attr='') %}
+<table class="data">
+  <thead>
+    <tr>
+      {% for col, label in sort_columns.items() %}
+      <th class="sortable{% if col == 'entidad' %} col-entidad{% endif %}{% if sort == col %} sorted sorted-{{ sort_dir }}{% endif %}">
+        <a href="{{ sort_href(col) }}">{{ label }}</a>
+      </th>
+      {% endfor %}
+      <th>Acciones</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in processes %}
+    {% set p = item.process %}
+    <tr data-process-id="{{ p.id }}" class="{% if item.watch_unread %}row-unread{% endif %}"{% if pending_status and pending_data_attr and p.status.value == pending_status %} data-{{ pending_data_attr }}="1"{% endif %}>
+      {{ workflow_list_cells(item, p) }}
+      <td class="actions-cell">
+        <div class="actions-stack js-action-row">
+          {{ caller(item, p) }}
+        </div>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="10" class="muted">{{ empty_message }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
 {% macro file_icon(doc) %}
 {% if doc.is_folder or doc.icon == 'folder' %}
 <span class="file-badge file-badge-folder" title="Carpeta">carpeta</span>

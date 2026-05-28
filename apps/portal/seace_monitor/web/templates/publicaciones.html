@@ -83,74 +83,16 @@
 </table>
 {% endblock %}
 {% block scripts %}
+<script src="/static/workflow_list.js"></script>
 <script>
-(function () {
-  function lockDownloadRow(row) {
-    if (!row) return;
-    row.dataset.downloading = "1";
-    row.querySelectorAll(".js-action-row button").forEach(function (btn) {
-      btn.disabled = true;
-    });
-    var dl = row.querySelector(".js-descargar-btn");
-    if (dl) {
-      dl.textContent = "Descargando…";
-    }
-  }
-
-  document.querySelectorAll("form.js-descargar-form").forEach(function (form) {
-    form.addEventListener("submit", function () {
-      var field = form.querySelector('input[name="scroll"]');
-      if (field) field.value = String(Math.round(window.scrollY));
-      lockDownloadRow(form.closest("tr"));
-    });
-  });
-
-  document.querySelectorAll("form.js-keep-scroll").forEach(function (form) {
-    if (form.classList.contains("js-descargar-form")) return;
-    form.addEventListener("submit", function () {
-      var field = form.querySelector('input[name="scroll"]');
-      if (field) field.value = String(Math.round(window.scrollY));
-    });
-  });
-
-  var params = new URLSearchParams(window.location.search);
-  var scroll = params.get("scroll");
-  if (scroll) {
-    var y = parseInt(scroll, 10);
-    if (Number.isFinite(y) && y >= 0) {
-      function restore() { window.scrollTo(0, y); }
-      restore();
-      requestAnimationFrame(restore);
-      window.addEventListener("load", restore);
-    }
-    params.delete("scroll");
-    var query = params.toString();
-    var next = window.location.pathname + (query ? "?" + query : "") + window.location.hash;
-    history.replaceState(null, "", next);
-  }
-
-  var downloadingRows = document.querySelectorAll('tr[data-downloading="1"]');
-  if (!downloadingRows.length) return;
-
-  var ids = Array.from(downloadingRows).map(function (row) {
-    return row.getAttribute("data-process-id");
-  }).filter(Boolean);
-
-  function pollDownloads() {
-    Promise.all(ids.map(function (id) {
-      return fetch("/api/processes/" + id + "/workflow")
-        .then(function (r) { return r.json(); });
-    })).then(function (rows) {
-      var pending = rows.some(function (row) {
-        return row.status === "descargando";
-      });
-      if (!pending) {
-        window.location.reload();
-      }
-    }).catch(function () {});
-  }
-
-  window.setInterval(pollDownloads, 3000);
-})();
+WorkflowList.init({
+  pendingAttr: "downloading",
+  stillInList: ["descargando"],
+  keepScrollForms: ".js-keep-scroll:not(.js-descargar-form)",
+  lockFormSelector: ".js-descargar-form",
+  lockBtnSelector: ".js-descargar-btn",
+  lockAttr: "downloading",
+  lockLabel: "Descargando…"
+});
 </script>
 {% endblock %}
