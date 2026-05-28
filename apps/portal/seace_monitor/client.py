@@ -95,6 +95,23 @@ class SeaceClient:
         self._list_form_action = self._form_action(soup)
         self._list_view_state = self._view_state(soup)
 
+    def _partial_response_soup(self, html: str) -> BeautifulSoup | None:
+        xml = BeautifulSoup(html, "xml")
+        table_update = xml.find("update", {"id": "formBuscador:dtProcesos"})
+        if not table_update:
+            return None
+        view_state_update = xml.find("update", id=re.compile("ViewState"))
+        if view_state_update:
+            self._list_view_state = view_state_update.get_text(strip=True)
+
+        rows_html = table_update.string or table_update.get_text()
+        return BeautifulSoup(
+            '<html><body><table><tbody id="formBuscador:dtProcesos_data">'
+            f"{rows_html}"
+            "</tbody></table></body></html>",
+            "lxml",
+        )
+
     def _view_state(self, soup: BeautifulSoup) -> str:
         el = soup.find("input", {"name": "javax.faces.ViewState"})
         if not el or not el.get("value"):
@@ -124,19 +141,26 @@ class SeaceClient:
             if not action or not vs:
                 raise RuntimeError("Estado JSF del listado no disponible para paginar")
             data: dict[str, str] = {
+                "javax.faces.partial.ajax": "true",
+                "javax.faces.source": "formBuscador:dtProcesos",
+                "javax.faces.partial.execute": "formBuscador:dtProcesos",
+                "javax.faces.partial.render": "formBuscador:dtProcesos",
+                "javax.faces.behavior.event": "page",
+                "javax.faces.partial.event": "page",
                 "formBuscador": "formBuscador",
+                "formBuscador:hddIniciaBusqueda": "",
                 "javax.faces.ViewState": vs,
-                "formBuscador:dtProcesos": "formBuscador:dtProcesos",
                 "formBuscador:dtProcesos_pagination": "true",
                 "formBuscador:dtProcesos_first": str(page_index * self.rows_per_page),
                 "formBuscador:dtProcesos_rows": str(self.rows_per_page),
-                "formBuscador:dtProcesos_page": str(page_index),
-                "formBuscador:dtProcesos_skipChildren": "true",
+                "formBuscador:dtProcesos_encodeFeature": "true",
             }
             r = self.session.post(action, data=data, timeout=60)
             r.raise_for_status()
-            soup = BeautifulSoup(r.text, "lxml")
-            self._capture_list_form_state(soup)
+            soup = self._partial_response_soup(r.text)
+            if soup is None:
+                soup = BeautifulSoup(r.text, "lxml")
+                self._capture_list_form_state(soup)
             self._last_list_soup = soup
 
         return r.text, soup
