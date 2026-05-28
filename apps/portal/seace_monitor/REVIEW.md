@@ -6,105 +6,188 @@ Base: `main` at `b9dd8ee455d73a6a4a2391d2bf8a2595ebc4e665`
 Scope: full branch diff, 34 files, +1621/-107
 
 Reviewers:
-- GPT-5.5 — completed (5 findings)
-- DeepSeek V4 Pro — unavailable (provider error, 0 tokens)
-- GLM-5.1 — unavailable (provider error, 0 tokens)
-- Qwen 3.6 Plus — unavailable (provider error, 0 tokens)
-
-Note: All three Fireworks models failed to produce output for this review round (0 tokens, immediate return). This is a provider-level issue, not a diff/snapshot problem. Only GPT-5.5 delivered usable analysis.
+- GPT-5.5 (via OpenAI) — completed
+- GLM-5.1 (via zai) — completed
+- DeepSeek V4 Pro (via OpenRouter) — completed
+- Qwen 3.6 Plus — unavailable (Fireworks provider error)
 
 ## Executive summary
 
-The branch adds solid infrastructure: auto-reject rule engine, multi-source ingest adapters, workflow profiles, and a settings editor. The code is well-structured with good test coverage.
+The branch introduces auto-reject rules, multi-source ingest adapters, workflow profiles, and a settings editor. The architecture is clean with good test coverage.
 
-The main actionable issue is a **restore loop for autorejected items** — user restore gets silently undone on the next scan cycle. Other findings are code quality and edge-case hardening.
+Key risks: auto-reject restore loop, query parser edge cases, YAML settings editor without input limits, and backfill running on every boot.
 
 Recommended fix order:
-1. Add exemption mechanism for restored autorejected processes.
-2. Harden `_And([])` empty-node evaluation in the query parser.
-3. Eliminate YAML round-trip in `load_auto_reject_rules`.
-4. Avoid double YAML parse in free reader profile resolution.
-5. Add warning for unregistered source profiles.
+1. Fix restore loop for autorejected processes.
+2. Harden query parser: reject empty `_And([])`, unmatched parens, trailing `OR`, unknown fields.
+3. Add size/rate limits to YAML settings editor.
+4. Run backfill only once (migration marker).
+5. Add Postgres adaptation for `interest_status` column.
+6. Validate field names in queries.
 
 ## Findings
 
-### 1. High — Restoring autorejected process creates immediate re-reject loop
+### 1. Critical — Restored autorejected processes get silently re-rejected
 
-- File: `apps/portal/seace_monitor/web/app.py`
-- Line: `483-498`
-- Reviewer: GPT-5.5; verified against code
+- File: `apps/portal/seace_monitor/web/app.py` line `483-498`
+- Reviewers: GPT-5.5, GLM, DeepSeek (all three agree)
 
-The `restaurar` route restores autorejected processes to `publicada` (via `resolve_restore_status`), but does NOT clear `auto_reject_reason`. On the next scanner run, `_upsert_from_ficha` calls `apply_auto_reject_rules` on the restored `publicada` process, which matches the same rule and sets status back to `autorejected`. The user's restore action is silently undone every scan cycle with no way to exempt a specific process.
+When a user restores an autorejected process via "Restaurar", the route sets status to `publicada` but does NOT clear `auto_reject_reason`. On the next scanner cycle, the same rule matches and the process is silently re-rejected. The user's restore is undone every scan cycle with no exemption mechanism.
 
-Trace:
-1. Scanner upserts process → `apply_auto_reject_rules` sets `status=autorejected` and `auto_reject_reason`.
-2. User clicks "Restaurar" in `/descartados`.
-3. Route calls `resolve_restore_status` → `publicada` (no data_dir).
-4. Route calls `clear_process_download_metadata` (unnecessary for autorejected).
-5. Route sets `proc.status = publicada`.
-6. Next scan cycle: `_upsert_from_ficha` → `apply_auto_reject_rules` → match → `autorejected` again.
+Trace: Restaurar → `publicada` → scanner runs → `apply_auto_reject_rules` → match → `autorejected` again.
 
-Fix: When restoring from `autorejected`, either:
-- (a) set a sentinel like `auto_reject_exempt=True` column that `apply_auto_reject_rules` checks, or
-- (b) restore to a status like `descargada` that won't be re-processed by auto-reject, or
-- (c) clear `auto_reject_reason` and add the process to an exemption list.
-
-Also: the `restaurar` handler should not call `clear_process_download_metadata(proc)` for autorejected items that were never downloaded.
+Fix: Clear `proc.auto_reject_reason = None` when restoring, and/or add an `auto_reject_exempt` flag.
 
 ---
 
-### 2. Medium — `_And([])` evaluates to `True` for empty/malformed queries
+### 2. Critical — `_And([])` evaluates to `True` — malformed queries match everything
 
-- File: `apps/portal/seace_monitor/auto_reject.py`
-- Line: `73-74`
-- Reviewer: GPT-5.5; verified against code
+- File: `apps/portal/seace_monitor/auto_reject.py` line `73-74`
+- Reviewers: GPT-5.5, DeepSeek
 
-`_And([]).evaluate(ctx)` returns `all([])` which is `True` in Python. While `validate_rules_yaml` requires non-empty `query`, if a rule author writes a query that tokenizes to nothing (e.g., only parentheses `()`), the parser returns `_And([])` which always matches, creating a "reject everything" rule with no error.
+`_And([]).evaluate()` returns `all([])` which is `True`. A trailing `OR` (e.g., `objeto:servicio OR `) or bare `()` produces `_And([])`, matching every process. A typo in the rules editor could silently auto-reject the entire pipeline.
 
-Trace: Query `()` → tokens `['(', ')']` → `_parse_primary` pops `(` → `_parse_or` → `_parse_and` → peek `)`, loop doesn't enter → `_And([])` → `True`.
-
-Fix: Make `_And.evaluate` return `False` for empty node lists (safer default for a filter engine), or add validation that rejects trivially-True parsed trees.
+Fix: Return `False` for empty `_And([])`, or raise `ValueError` in validation when a query parses to an empty node tree.
 
 ---
 
-### 3. Medium — `load_auto_reject_rules` re-serializes then re-parses YAML
+### 3. High — Unmatched opening parenthesis silently accepted
 
-- File: `apps/portal/seace_monitor/auto_reject.py`
-- Line: `~234`
-- Reviewer: GPT-5.5; verified against code
+- File: `apps/portal/seace_monitor/auto_reject.py` line `155-162`
+- Reviewer: DeepSeek
 
-To strip `enabled: false` rules, the function filters the parsed dict, calls `yaml.safe_dump` to re-serialize, then passes the result to `validate_rules_yaml` which re-parses. This YAML round-trip can alter query string representation in edge cases (quoting style changes). Any bug in validation would be masked by the different serialization.
+`_parse_primary` pops `(` but if the closing `)` is missing, the parser silently returns without error. `(objeto:servicio` passes validation.
 
-Fix: Validate directly from the parsed list instead of re-serializing. Filter enabled rules, then validate each rule's `id`/`query` from the already-parsed data without the `safe_dump` → `safe_load` round-trip.
-
----
-
-### 4. Medium — `_load_system_prompt` reads and parses profiles YAML twice
-
-- File: `apps/portal/seace_monitor/analysis/fast_reader.py`
-- Line: `~53, 68, 85`
-- Reviewer: GPT-5.5; verified against code
-
-`_prompt_path_for_process` reads and `yaml.safe_load`s `free_reader_profiles.yaml` to resolve the prompt path. Then `_load_system_prompt` may read and parse the same YAML file again to resolve `{{SECTIONS_BLOCK}}`. Both reads do full file I/O + YAML parse per invocation.
-
-Fix: Read and parse the profiles YAML once, then use the result for both path resolution and section block expansion.
+Fix: After parsing inside `()`, if `_peek()` is not `)`, raise `ValueError("Unmatched parenthesis")`.
 
 ---
 
-### 5. Low — Unregistered sources silently fall back to SEACE-specific prompt
+### 4. High — Unknown query field names silently return empty string
 
-- File: `apps/portal/seace_monitor/analysis/fast_reader.py`
-- Line: `~53`
-- Reviewer: GPT-5.5; verified against code
+- File: `apps/portal/seace_monitor/auto_reject.py` line `47-58`
+- Reviewer: DeepSeek
 
-`_prompt_path_for_process` returns the default SEACE prompt when no profile matches the process source. If a new source is added without a corresponding profile, the free reader uses a contextually wrong prompt with no warning.
+`_Context.fields` only defines `objeto`, `descripcion`, `nomenclatura`, `entidad`, `source`. Writing `cuantia:50000` silently returns `""` — the condition never matches but no error is raised.
 
-Fix: When no profile matches and `source != "seace"`, log a warning. Consider a generic fallback prompt.
+Fix: Validate field names against `ALLOWED_FIELDS` at parse time and raise `ValueError` on unknown fields.
 
 ---
 
-## Notes
+### 5. High — Query ending with `:` causes `IndexError`
 
-- **Fireworks provider issue:** All three Fireworks models (DeepSeek, GLM, Qwen) produced 0 tokens in both the original and retry runs for this review. This is a transient provider-level problem — all three worked correctly in the previous `main` review ~30 minutes earlier. The findings above come exclusively from GPT-5.5.
-- **DB migrations:** The new columns (`source`, `source_ref`, `workflow_profile`, `interest_status`, `auto_reject_reason`) include backfill logic in `_backfill_process_sources` and appropriate indexes. The PostgreSQL adaptation from the previous review (`_adapt_column_type`) is used for the new columns. Looks correct.
-- **Ingest abstraction:** The `ingest/` module is clean and minimal — protocol-based adapter with SEACE as the first implementation. Good extensibility pattern.
+- File: `apps/portal/seace_monitor/auto_reject.py` line `156`
+- Reviewer: DeepSeek
+
+`objeto:` → `_parse_factor` consumes `:` → recursive call → `_parse_primary()` with empty token list → `IndexError`.
+
+Fix: Add bounds check at top of `_parse_primary`: `if self.index >= len(self.tokens): raise ValueError("Unexpected end of query")`.
+
+---
+
+### 6. High — YAML settings editor has no input size/rate limits
+
+- File: `apps/portal/seace_monitor/web/settings_autoreject.py` line `41-52`
+- Reviewers: GLM, DeepSeek
+
+POST handler reads `rules_yaml` with no max size. A large payload causes excessive memory/CPU in the regex tokenizer and recursive parser.
+
+Fix: Add max YAML size (e.g., 64KB), max rule count (e.g., 50-100 rules), max query length per rule.
+
+---
+
+### 7. High — Backfill runs on every `init_db()` call
+
+- File: `apps/portal/seace_monitor/db/session.py` line `99`
+- Reviewer: GLM
+
+`_backfill_process_sources` and `_backfill_process_pipeline_fields` execute `UPDATE ... WHERE ... IS NULL` on every app startup. For large tables this is two full-table scans per boot.
+
+Fix: Add a migration marker to run backfills only once, or check `SELECT COUNT(*) WHERE ... IS NULL` first.
+
+---
+
+### 8. Medium — `_Field` nesting drops outer field silently (`a:b:term`)
+
+- File: `apps/portal/seace_monitor/auto_reject.py` line `97`
+- Reviewer: GLM
+
+`_with_field` has `if isinstance(node, _Field): return node` which ignores the incoming field. Nested field syntax silently drops the outer field.
+
+Fix: Propagate the field or raise `ValueError` for nested field syntax.
+
+---
+
+### 9. Medium — `load_auto_reject_rules` re-serializes YAML just to filter `enabled`
+
+- File: `apps/portal/seace_monitor/auto_reject.py` line `~195-218`
+- Reviewers: GPT-5.5, GLM, DeepSeek (all three agree)
+
+`yaml.safe_load` → filter → `yaml.safe_dump` → `validate_rules_yaml` → `yaml.safe_load` again. Wasteful double-parse that can alter quoting and loses comments.
+
+Fix: Validate directly from the parsed dict without re-serializing.
+
+---
+
+### 10. Medium — `interest_status` column: Enum vs VARCHAR mismatch on PostgreSQL
+
+- File: `apps/portal/seace_monitor/db/models.py` line `92`; `db/session.py` line `20`
+- Reviewer: GLM
+
+`interest_status` is mapped as `Enum(InterestStatus)` but the migration adds `VARCHAR(32) DEFAULT 'none'`. On PostgreSQL, `create_all` creates a native ENUM while `_ensure_table_columns` adds VARCHAR — type mismatch.
+
+Fix: Add Postgres adaptation for this column type in `_adapt_column_type`.
+
+---
+
+### 11. Medium — `source_ref` default lambda may return `None` in bulk/raw contexts
+
+- File: `apps/portal/seace_monitor/db/models.py` line `83-87`
+- Reviewers: GLM, DeepSeek
+
+The default lambda `context.get_current_parameters().get("nid_proceso")` returns `None` if `nid_proceso` is absent from insert parameters (possible in bulk inserts or non-SEACE sources).
+
+Fix: Verify `nid_proceso` presence; for non-SEACE sources, make the default source-aware.
+
+---
+
+### 12. Medium — `descartar` routes don't handle `autorejected` status
+
+- File: `apps/portal/seace_monitor/web/app.py` line `459`
+- Reviewer: GLM
+
+Autorejected processes appear in `/descartados` but can only be "restaurar"ed, not "descartar"ed (fully deleted). Attempting to descartar from another list gives an opaque 400.
+
+Fix: Explicitly handle `autorejected` in descartar routes or document the state transitions.
+
+---
+
+### 13. Medium — `_load_system_prompt` reads profiles YAML twice per invocation
+
+- File: `apps/portal/seace_monitor/analysis/fast_reader.py` line `~53, 85`
+- Reviewer: GPT-5.5
+
+`_prompt_path_for_process` parses `free_reader_profiles.yaml` once for path resolution, then `_load_system_prompt` parses it again for section block expansion.
+
+Fix: Parse once and reuse the result.
+
+---
+
+### 14. Low — Unregistered sources silently fall back to SEACE prompt
+
+- File: `apps/portal/seace_monitor/analysis/fast_reader.py` line `~53`
+- Reviewer: GPT-5.5
+
+If a new source is added without a corresponding profile, the SEACE-specific prompt is used with no warning.
+
+Fix: Log a warning when no profile matches and `source != "seace"`.
+
+---
+
+### 15. Low — `validate_rules_yaml` return value unused by settings editor
+
+- File: `apps/portal/seace_monitor/web/settings_autoreject.py` line `46-48`
+- Reviewer: DeepSeek
+
+The save handler validates but then writes raw user text to disk, discarding the validated representation. The return value of `validate_rules_yaml` is unused.
+
+Fix: Intentional for preserving formatting, but worth documenting with an explicit assignment.
