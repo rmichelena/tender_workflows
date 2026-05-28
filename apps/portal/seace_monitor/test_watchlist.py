@@ -298,6 +298,37 @@ def test_refresh_uses_current_row_when_process_moved_to_later_page(
     assert proc.nid_proceso == "continued-nid"
 
 
+def test_refresh_resolves_row_when_ficha_metadata_missing(
+    watch_session: Session, tmp_path: Path
+):
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[{"uuid": "u1", "nombre": "a.pdf"}],
+    )
+    proc.link_id = None
+    proc.nid_convocatoria = None
+    current_row = _row("fresh-nid", link_id="fresh-link")
+    current_row.nomenclatura = proc.nomenclatura
+    ficha = _ficha_with_docs([Documento("u1", "a.pdf", "", "", "", "", "3")])
+    mock_client = MagicMock()
+    mock_client.open_ficha.return_value = MagicMock(html="<html>", url="http://x", ficha_id="f1")
+
+    with (
+        patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist._resolve_current_row", return_value=current_row) as resolve,
+        patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
+        patch("seace_monitor.watchlist.download_and_store_document"),
+    ):
+        _refresh_watchlist_process(cfg, watch_session, proc)
+
+    resolve.assert_called_once()
+    mock_client.open_ficha.assert_called_once_with(current_row)
+    assert proc.link_id == "fresh-link"
+    assert proc.nid_convocatoria == "conv-fresh"
+
+
 def test_refresh_rejects_empty_ficha_when_existing_content_would_be_wiped(
     watch_session: Session, tmp_path: Path
 ):

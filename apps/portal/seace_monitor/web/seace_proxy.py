@@ -20,7 +20,7 @@ from fastapi.responses import RedirectResponse
 
 from bs4 import BeautifulSoup
 
-from ..client import ProcessRow, SeaceClient
+from ..client import SeaceClient
 from ..config import AppConfig
 from ..db.models import Process
 from ..http_util import requests_proxies
@@ -188,16 +188,6 @@ def _buscador_list_url(process: Process) -> str:
     )
 
 
-def _buscador_form_action(soup: BeautifulSoup, list_url: str) -> str:
-    form = soup.find("form", id="formBuscador")
-    if not form:
-        raise RuntimeError("No se encontró formBuscador")
-    action = form.get("action", "")
-    if not action or action == ".":
-        return list_url
-    return urljoin(list_url, action)
-
-
 def _proxy_location_from_absolute(absolute_url: str) -> str | None:
     if not absolute_url:
         return None
@@ -212,9 +202,16 @@ def _proxy_location_from_absolute(absolute_url: str) -> str | None:
     return location
 
 
-def _row_for_open(
-    process: Process, session: requests.Session, config: AppConfig
-) -> ProcessRow | None:
+def _try_server_open_ficha(
+    session: requests.Session,
+    process: Process,
+    list_html: str,
+    list_url: str,
+    config: AppConfig,
+) -> str | None:
+    del list_html, list_url  # resolución y apertura usan SeaceClient con ViewState paginado
+    if not process.entity:
+        return None
     client = SeaceClient(
         process.entity.ruc,
         process.anio,
@@ -231,7 +228,8 @@ def _row_for_open(
             process.nomenclatura,
         )
         return None
-
+    if not row.link_id:
+        return None
     if row.link_id != (process.link_id or "") or row.nid_proceso != process.nid_proceso:
         logger.info(
             "SEACE proxy: fila resuelta id=%s nid %s → %s link_id %s → %s",
@@ -241,58 +239,21 @@ def _row_for_open(
             process.link_id,
             row.link_id,
         )
-    return row
-
-
-def _try_server_open_ficha(
-    session: requests.Session,
-    process: Process,
-    list_html: str,
-    list_url: str,
-    config: AppConfig,
-) -> str | None:
-    soup = BeautifulSoup(list_html, "lxml")
-    vs_el = soup.find("input", {"name": "javax.faces.ViewState"})
-    if not vs_el or not vs_el.get("value"):
-        return None
-    row = _row_for_open(process, session, config)
-    if row is None or not row.link_id:
-        return None
     try:
-        action = _buscador_form_action(soup, list_url)
-    except RuntimeError:
-        return None
-    post_data = {
-        "formBuscador": "formBuscador",
-        "javax.faces.ViewState": vs_el["value"],
-        "ntipo": row.ntipo,
-        row.link_id: row.link_id,
-        "nidConvocatoria": row.nid_convocatoria,
-        "nidProceso": row.nid_proceso,
-        "nidSistema": row.nid_sistema,
-        "ptoRetorno": "LOCAL_ONGEI",
-    }
-    try:
-        resp = session.post(
-            action,
-            data=post_data,
-            headers={"User-Agent": USER_AGENT},
-            timeout=60,
-            allow_redirects=True,
-        )
-    except requests.RequestException:
+        ficha_result = client.open_ficha(row)
+    except (requests.RequestException, RuntimeError):
         logger.exception(
-            "SEACE proxy: falló POST apertura ficha nid=%s", process.nid_proceso
+            "SEACE proxy: falló apertura ficha nid=%s", process.nid_proceso
         )
         return None
-    if "fichaSeleccion" not in resp.url:
+    if "fichaSeleccion" not in ficha_result.url:
         logger.warning(
-            "SEACE proxy: POST ficha no redirigió (nid=%s url=%s)",
+            "SEACE proxy: apertura ficha no redirigió (nid=%s url=%s)",
             process.nid_proceso,
-            resp.url[:120],
+            ficha_result.url[:120],
         )
         return None
-    return _proxy_location_from_absolute(resp.url)
+    return _proxy_location_from_absolute(ficha_result.url)
 
 
 def _open_failure_notice(process: Process) -> str:

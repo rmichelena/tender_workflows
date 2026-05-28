@@ -168,6 +168,105 @@ def _backfill_process_pipeline_fields(engine) -> None:
         )
 
 
+def _process_identity_index_names(engine) -> set[str]:
+    insp = inspect(engine)
+    names: set[str] = set()
+    for idx in insp.get_indexes("processes"):
+        if idx.get("name"):
+            names.add(idx["name"])
+    for uc in insp.get_unique_constraints("processes"):
+        if uc.get("name"):
+            names.add(uc["name"])
+    return names
+
+
+def _sqlite_rebuild_processes_table(engine) -> None:
+    """Recrea `processes` con el esquema actual (nid_proceso nullable, identidad por source)."""
+    from .models import Process
+
+    _ensure_table_columns(engine, "processes", _PROCESS_COLUMN_ADDITIONS)
+    _backfill_process_pipeline_fields(engine)
+
+    insp = inspect(engine)
+    old_cols = {col["name"] for col in insp.get_columns("processes")}
+    copy_defaults = {
+        "source": "'seace'",
+        "workflow_profile": "'public_tender'",
+        "interest_status": "'none'",
+        "status": "'publicada'",
+        "auto_reject_exempt": "0",
+        "watch_unread": "0",
+        "first_seen_at": "CURRENT_TIMESTAMP",
+        "last_seen_at": "CURRENT_TIMESTAMP",
+        "updated_at": "CURRENT_TIMESTAMP",
+    }
+    insert_cols: list[str] = []
+    select_exprs: list[str] = []
+    for col in Process.__table__.columns:
+        name = col.name
+        insert_cols.append(name)
+        if name in old_cols:
+            select_exprs.append(name)
+        elif name in copy_defaults:
+            select_exprs.append(copy_defaults[name])
+        elif col.nullable:
+            select_exprs.append("NULL")
+        else:
+            raise RuntimeError(
+                f"Migración SQLite: falta valor por defecto para columna {name!r}"
+            )
+    cols_sql = ", ".join(insert_cols)
+    select_sql = ", ".join(select_exprs)
+    with engine.begin() as conn:
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(text("ALTER TABLE processes RENAME TO processes_old"))
+    Process.__table__.create(engine, checkfirst=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(f"INSERT INTO processes ({cols_sql}) SELECT {select_sql} FROM processes_old")
+        )
+        conn.execute(text("DROP TABLE processes_old"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+
+
+def _has_process_source_identity_unique(engine) -> bool:
+    insp = inspect(engine)
+    target = {"source", "entity_id", "source_ref"}
+    for uc in insp.get_unique_constraints("processes"):
+        if set(uc.get("column_names") or ()) == target:
+            return True
+    return "uq_process_source_identity" in _process_identity_index_names(engine)
+
+
+def _migrate_process_identity_schema(engine) -> None:
+    """Alinea identidad multi-ingesta en BDs existentes."""
+    insp = inspect(engine)
+    if "processes" not in insp.get_table_names():
+        return
+
+    _backfill_process_sources(engine)
+
+    dialect = engine.dialect.name
+    cols = {col["name"]: col for col in insp.get_columns("processes")}
+    nid_col = cols.get("nid_proceso")
+    if nid_col and nid_col.get("nullable") is False:
+        if dialect == "postgresql":
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE processes ALTER COLUMN nid_proceso DROP NOT NULL"))
+        elif dialect == "sqlite":
+            _sqlite_rebuild_processes_table(engine)
+            insp = inspect(engine)
+
+    if not _has_process_source_identity_unique(engine):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_process_source_identity "
+                    "ON processes (source, entity_id, source_ref)"
+                )
+            )
+
+
 def init_db(database_url: str) -> None:
     global _engine, _SessionLocal
     connect_args: dict[str, object] = {}
@@ -191,6 +290,7 @@ def init_db(database_url: str) -> None:
     _ensure_table_columns(_engine, "analysis_results", _ANALYSIS_COLUMN_ADDITIONS)
     _backfill_process_sources(_engine)
     _backfill_process_pipeline_fields(_engine)
+    _migrate_process_identity_schema(_engine)
     if _SessionLocal is not None:
         from ..list_order import backfill_list_ranks
 

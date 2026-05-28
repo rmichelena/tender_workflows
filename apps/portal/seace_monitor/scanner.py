@@ -109,8 +109,9 @@ class MultiEntityScanner:
                 proc = (
                     self.session.query(Process)
                     .filter(
+                        Process.source == "seace",
                         Process.entity_id == entity.id,
-                        Process.nid_proceso == row.nid_proceso,
+                        Process.source_ref == row.nid_proceso,
                     )
                     .one_or_none()
                 )

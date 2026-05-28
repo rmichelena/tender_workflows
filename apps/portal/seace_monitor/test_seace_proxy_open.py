@@ -4,26 +4,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from .client import ProcessRow
+from .client import FichaResult, ProcessRow
 from .config import AppConfig
 from .db.models import Entity, Process
 from .web.seace_proxy import _try_server_open_ficha
 
 
-class _Response:
-    url = "https://prod2.seace.gob.pe/seacebus-uiwd-pub/fichaSeleccion/fichaSeleccion.xhtml?id=abc"
-
-
-class _Session:
-    def __init__(self) -> None:
-        self.post_data: dict[str, str] | None = None
-
-    def post(self, _url, data, headers, timeout, allow_redirects):
-        self.post_data = data
-        return _Response()
-
-
-def test_seace_open_resolves_row_by_nomenclatura_across_pages():
+def test_seace_open_uses_client_open_ficha_after_pagination():
     entity = Entity(ruc="20122476309", nombre="BCR", activa=True)
     process = Process(
         id=29,
@@ -52,30 +39,27 @@ def test_seace_open_resolves_row_by_nomenclatura_across_pages():
         link_id="fresh-link",
         ntipo="0",
     )
-    list_html = """
-    <html><body>
-      <form id="formBuscador" action="/buscadorPublico.xhtml">
-        <input type="hidden" name="javax.faces.ViewState" value="vs1" />
-      </form>
-      <table><tbody id="formBuscador:dtProcesos_data"></tbody></table>
-    </body></html>
-    """
-    session = _Session()
+    mock_client = MagicMock()
+    mock_client.open_ficha.return_value = FichaResult(
+        ficha_id="abc",
+        html="<html></html>",
+        url="https://prod2.seace.gob.pe/seacebus-uiwd-pub/fichaSeleccion/fichaSeleccion.xhtml?id=abc",
+    )
+    session = MagicMock()
 
     with (
-        patch("seace_monitor.web.seace_proxy.SeaceClient", return_value=MagicMock()),
+        patch("seace_monitor.web.seace_proxy.SeaceClient", return_value=mock_client),
         patch("seace_monitor.web.seace_proxy._resolve_current_row", return_value=current_row),
     ):
         location = _try_server_open_ficha(
             session,
             process,
-            list_html,
-            "https://prod2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico/ongei/buscadorPublico.xhtml?ruc_entidad=20122476309&anio=2026",
+            "<html></html>",
+            "https://prod2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico/ongei/buscadorPublico.xhtml",
             AppConfig(),
         )
 
     assert location == "/seace/p/fichaSeleccion/fichaSeleccion.xhtml?id=abc"
-    assert session.post_data is not None
-    assert session.post_data["fresh-link"] == "fresh-link"
-    assert session.post_data["nidProceso"] == "fresh-nid"
-    assert session.post_data["nidConvocatoria"] == "fresh-conv"
+    assert mock_client.session is session
+    mock_client.open_ficha.assert_called_once_with(current_row)
+    session.post.assert_not_called()

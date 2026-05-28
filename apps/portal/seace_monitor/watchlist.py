@@ -280,9 +280,9 @@ def _refresh_watchlist_process(
 ) -> bool:
     if not process.entity:
         return False
-    if not process.nid_convocatoria or not process.link_id:
+    if not _normalize_nomenclatura(process.nomenclatura):
         logger.warning(
-            "Watchlist: sin metadatos ficha id=%s nid=%s",
+            "Watchlist: sin nomenclatura id=%s nid=%s",
             process.id,
             process.nid_proceso,
         )
@@ -296,7 +296,15 @@ def _refresh_watchlist_process(
         config.rows_per_page,
         http_proxy=config.http_proxy,
     )
-    row = _resolve_current_row(config, client, process)
+    try:
+        row = _resolve_current_row(config, client, process)
+    except RuntimeError:
+        logger.warning(
+            "Watchlist: fila no encontrada id=%s nomenclatura=%s",
+            process.id,
+            process.nomenclatura,
+        )
+        return False
     ficha_result = client.open_ficha(row)
     ficha = parse_ficha(ficha_result.html, ficha_result.ficha_id, row.nid_proceso)
     _validate_watchlist_ficha(process, ficha)

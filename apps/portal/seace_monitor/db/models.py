@@ -74,7 +74,12 @@ class Entity(Base):
 class Process(Base):
     __tablename__ = "processes"
     __table_args__ = (
-        UniqueConstraint("entity_id", "nid_proceso", name="uq_entity_nid_proceso"),
+        UniqueConstraint(
+            "source",
+            "entity_id",
+            "source_ref",
+            name="uq_process_source_identity",
+        ),
         Index("ix_processes_status_entity", "status", "entity_id"),
         Index("ix_processes_status_objeto", "status", "objeto"),
     )
@@ -98,7 +103,7 @@ class Process(Base):
         Enum(InterestStatus, native_enum=False), default=InterestStatus.none, index=True
     )
 
-    nid_proceso: Mapped[str] = mapped_column(String(32), index=True)
+    nid_proceso: Mapped[str | None] = mapped_column(String(32), index=True)
     nid_convocatoria: Mapped[str | None] = mapped_column(Text)
     nid_sistema: Mapped[str | None] = mapped_column(String(8))
     link_id: Mapped[str | None] = mapped_column(String(128))
