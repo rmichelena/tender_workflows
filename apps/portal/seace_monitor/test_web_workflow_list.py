@@ -186,3 +186,38 @@ def test_restaurar_autorejected_sets_auto_reject_exempt(tmp_path: Path):
         assert proc.auto_reject_reason is None
     finally:
         db.close()
+
+
+def test_descartar_autorejected_marks_process_as_discarded(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'web7.db'}")
+    app = create_app(cfg)
+    db: Session = session_factory()
+    try:
+        proc = Process(
+            entity_id=1,
+            anio=2026,
+            nid_proceso="auto-3",
+            nomenclatura="AUTO-REJECTED-3",
+            status=ProcessStatus.autorejected,
+            auto_reject_reason="servicio_limpieza: Servicios de limpieza fuera de foco",
+        )
+        db.add(proc)
+        db.commit()
+        process_id = proc.id
+    finally:
+        db.close()
+
+    response = TestClient(app).post(
+        f"/descartados/{process_id}/descartar",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    db = session_factory()
+    try:
+        proc = db.get(Process, process_id)
+        assert proc is not None
+        assert proc.status == ProcessStatus.descartada
+        assert proc.auto_reject_reason is None
+    finally:
+        db.close()

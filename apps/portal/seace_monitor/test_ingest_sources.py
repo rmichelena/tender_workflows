@@ -5,7 +5,14 @@ from pathlib import Path
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from .db.models import Base, Entity, InterestStatus, Process, ProcessStatus
+from .db.models import (
+    Base,
+    Entity,
+    InterestStatus,
+    Process,
+    ProcessStatus,
+    _default_source_ref,
+)
 from .db.session import (
     _backfill_process_pipeline_fields,
     _backfill_process_sources,
@@ -36,6 +43,14 @@ def test_process_defaults_to_seace_source_ref_from_nid():
     assert saved.source_ref == "123456"
     assert saved.workflow_profile == "public_tender"
     assert saved.interest_status == InterestStatus.none
+
+
+def test_source_ref_default_never_returns_none_when_nid_is_absent():
+    class FakeContext:
+        def get_current_parameters(self):
+            return {"source": "email"}
+
+    assert _default_source_ref(FakeContext()) == ""
 
 
 def test_process_status_includes_autorejected_for_rule_filters():

@@ -1,5 +1,7 @@
 """Tests de perfiles source-aware para fast reader."""
 
+import logging
+
 from pathlib import Path
 
 from seace_monitor.analysis.fast_reader import (
@@ -51,6 +53,68 @@ profiles:
     assert "- Cronograma del proceso" in prompt
     assert "- Requisitos del postor" in prompt
     assert "{{SECTIONS_BLOCK}}" not in prompt
+
+
+def test_load_system_prompt_reads_profiles_once(tmp_path: Path, monkeypatch):
+    profiles = tmp_path / "instrucciones" / "A_pre_portafolio"
+    prompts = profiles / "prompts"
+    prompts.mkdir(parents=True)
+    profiles_path = profiles / "free_reader_profiles.yaml"
+    profiles_path.write_text(
+        """
+version: 0.1
+sections:
+  cronograma_proceso:
+    label: Cronograma del proceso
+profiles:
+  private_documents:
+    source_types: [private_portal]
+    prompt_template: prompts/private_documents.template.md
+    include_sections: [cronograma_proceso]
+""",
+        encoding="utf-8",
+    )
+    (prompts / "private_documents.template.md").write_text(
+        "Prompt privado\n{{SECTIONS_BLOCK}}\n",
+        encoding="utf-8",
+    )
+    original_read_text = Path.read_text
+    profile_reads = 0
+
+    def count_profile_reads(path: Path, *args, **kwargs):
+        nonlocal profile_reads
+        if path == profiles_path:
+            profile_reads += 1
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", count_profile_reads)
+    proc = Process(source="private_portal", source_ref="ABC-123", nid_proceso="ABC-123")
+
+    _load_system_prompt(_config(tmp_path), proc)
+
+    assert profile_reads == 1
+
+
+def test_load_system_prompt_warns_when_non_seace_source_falls_back(
+    tmp_path: Path, caplog
+):
+    profiles = tmp_path / "instrucciones" / "A_pre_portafolio"
+    prompts = profiles / "prompts"
+    prompts.mkdir(parents=True)
+    (profiles / "free_reader_profiles.yaml").write_text(
+        """
+version: 0.1
+profiles: {}
+""",
+        encoding="utf-8",
+    )
+    (prompts / "seace_free_reader.md").write_text("Prompt SEACE", encoding="utf-8")
+    proc = Process(source="unknown_portal", source_ref="ABC-123", nid_proceso="ABC-123")
+
+    with caplog.at_level(logging.WARNING):
+        _load_system_prompt(_config(tmp_path), proc)
+
+    assert "sin perfil free-reader" in caplog.text
 
 
 def test_build_user_context_is_not_seace_specific_for_private_sources():

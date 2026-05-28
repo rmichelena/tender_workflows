@@ -65,11 +65,13 @@ def _section_block(profile: dict[str, Any], sections: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _prompt_path_for_process(config: AppConfig, process: Process) -> Path:
+def _profiles_for_process(
+    config: AppConfig, process: Process
+) -> tuple[Path, dict[str, Any], dict[str, Any], bool]:
     repo = _repo_root(config)
     profiles_path = repo / PROFILES_REL
     if not profiles_path.exists():
-        return repo / PROMPT_REL
+        return repo / PROMPT_REL, {}, {}, False
     raw = yaml.safe_load(profiles_path.read_text(encoding="utf-8")) or {}
     source = (process.source or "seace").strip().lower()
     profiles = raw.get("profiles", {}) or {}
@@ -78,12 +80,22 @@ def _prompt_path_for_process(config: AppConfig, process: Process) -> Path:
         if source in source_types:
             template = profile.get("prompt_template")
             if template:
-                return profiles_path.parent / str(template)
-    return repo / PROMPT_REL
+                return profiles_path.parent / str(template), raw, profile, True
+    if source != "seace":
+        logger.warning(
+            "Fuente %s sin perfil free-reader; usando prompt SEACE por defecto",
+            source,
+        )
+    return repo / PROMPT_REL, raw, {}, False
+
+
+def _prompt_path_for_process(config: AppConfig, process: Process) -> Path:
+    path, _, _, _ = _profiles_for_process(config, process)
+    return path
 
 
 def _load_system_prompt(config: AppConfig, process: Process) -> str:
-    path = _prompt_path_for_process(config, process)
+    path, profiles_raw, profile, _matched = _profiles_for_process(config, process)
     if path.exists():
         base = path.read_text(encoding="utf-8")
     else:
@@ -92,19 +104,7 @@ def _load_system_prompt(config: AppConfig, process: Process) -> str:
             "No extraigas cronograma del documento."
         )
     if "{{SECTIONS_BLOCK}}" in base:
-        profiles_path = _repo_root(config) / PROFILES_REL
-        raw = yaml.safe_load(profiles_path.read_text(encoding="utf-8")) or {}
-        source = (process.source or "seace").strip().lower()
-        profile = next(
-            (
-                item
-                for item in (raw.get("profiles", {}) or {}).values()
-                if source
-                in [str(source_type).lower() for source_type in item.get("source_types", [])]
-            ),
-            {},
-        )
-        sections = raw.get("sections", {}) or {}
+        sections = profiles_raw.get("sections", {}) or {}
         base = base.replace("{{SECTIONS_BLOCK}}", _section_block(profile, sections))
     today, year, iso = today_anchor_peru()
     return (

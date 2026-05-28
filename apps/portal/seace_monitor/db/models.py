@@ -47,6 +47,11 @@ class InterestStatus(str, enum.Enum):
     rejected = "rejected"
 
 
+def _default_source_ref(context) -> str:
+    params = context.get_current_parameters()
+    return str(params.get("source_ref") or params.get("nid_proceso") or "")
+
+
 class Entity(Base):
     __tablename__ = "entities"
 
@@ -83,7 +88,7 @@ class Process(Base):
     source: Mapped[str] = mapped_column(String(32), default="seace", index=True)
     source_ref: Mapped[str | None] = mapped_column(
         String(256),
-        default=lambda context: context.get_current_parameters().get("nid_proceso"),
+        default=_default_source_ref,
         index=True,
     )
     workflow_profile: Mapped[str] = mapped_column(

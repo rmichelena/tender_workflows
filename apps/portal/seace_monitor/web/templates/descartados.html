@@ -33,6 +33,11 @@
         <form method="post" action="/descartados/{{ p.id }}/restaurar">
           <button type="submit" class="btn btn-secondary btn-sm">Restaurar</button>
         </form>
+        {% if p.status.value == 'autorejected' %}
+        <form method="post" action="/descartados/{{ p.id }}/descartar" style="margin-top:.25rem">
+          <button type="submit" class="btn btn-danger btn-sm">Descartar definitivo</button>
+        </form>
+        {% endif %}
       </td>
     </tr>
     {% else %}

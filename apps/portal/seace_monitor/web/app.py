@@ -501,6 +501,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         proc.status = new_status
         return RedirectResponse("/descartados", status_code=303)
 
+    @app.post("/descartados/{process_id}/descartar")
+    def descartar_autorejected(process_id: int, db: Session = Depends(get_db)):
+        proc = db.get(Process, process_id)
+        if proc is None:
+            raise HTTPException(404)
+        if proc.status == ProcessStatus.descartada:
+            return RedirectResponse("/descartados", status_code=303)
+        if proc.status != ProcessStatus.autorejected:
+            raise HTTPException(400, "Solo autorejected puede descartarse desde Descartados")
+        proc.status = ProcessStatus.descartada
+        proc.auto_reject_reason = None
+        return RedirectResponse("/descartados", status_code=303)
+
     @app.get("/archivados", response_class=HTMLResponse)
     def archivados(request: Request, db: Session = Depends(get_db)):
         rows = (
