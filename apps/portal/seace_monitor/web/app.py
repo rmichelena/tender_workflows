@@ -464,11 +464,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
 
     @app.get("/descartados", response_class=HTMLResponse)
-    def descartados(request: Request, db: Session = Depends(get_db)):
+    def descartados(
+        request: Request,
+        db: Session = Depends(get_db),
+        estado: str = "",
+    ):
+        status_filter = {
+            "descartada": [ProcessStatus.descartada],
+            "autorejected": [ProcessStatus.autorejected],
+        }.get(estado, [ProcessStatus.descartada, ProcessStatus.autorejected])
         rows = (
             db.query(Process)
             .options(joinedload(Process.entity), joinedload(Process.analysis))
-            .filter(Process.status.in_([ProcessStatus.descartada, ProcessStatus.autorejected]))
+            .filter(Process.status.in_(status_filter))
             .order_by(Process.updated_at.desc())
             .all()
         )
@@ -478,6 +486,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             db=db,
             active_page="descartados",
             processes=rows,
+            estado=estado if estado in ("descartada", "autorejected") else "",
         )
 
     @app.post("/descartados/{process_id}/restaurar")

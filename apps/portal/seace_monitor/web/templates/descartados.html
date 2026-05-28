@@ -5,6 +5,12 @@
 <h2>Descartados</h2>
 <p class="muted">Procesos ocultos del listado de publicaciones, sin PDFs ni análisis guardados.</p>
 
+<div class="filter-row">
+  <a class="btn btn-secondary btn-sm{% if not estado %} active{% endif %}" href="/descartados">Todos</a>
+  <a class="btn btn-secondary btn-sm{% if estado == 'descartada' %} active{% endif %}" href="/descartados?estado=descartada">Descartados manuales</a>
+  <a class="btn btn-secondary btn-sm{% if estado == 'autorejected' %} active{% endif %}" href="/descartados?estado=autorejected">Autoreject</a>
+</div>
+
 <table class="data">
   <thead>
     <tr>

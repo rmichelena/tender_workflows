@@ -153,6 +153,32 @@ def test_discard_clears_metadata(tmp_path: Path):
     assert not proc_dir.exists()
 
 
+def test_discard_clears_watchlist_change_history(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    proc_dir = _proc_dir(tmp_path)
+    proc_dir.mkdir(parents=True)
+    proc = _proc(str(proc_dir), ProcessStatus.descargada)
+    proc.documentos_json = '[{"uuid":"x","nombre":"a.pdf"}]'
+    proc.watch_unread = True
+    proc.watch_cronograma_prev_json = '[{"etapa":"A"}]'
+    proc.watch_documentos_prev_json = '[{"uuid":"x"}]'
+    proc.watch_changelog_json = '[{"changes":[]}]'
+
+    class FakeSession:
+        def delete(self, _obj):
+            pass
+
+        def flush(self):
+            pass
+
+    discard_process_downloads(cfg, proc, FakeSession())
+
+    assert proc.watch_unread is False
+    assert proc.watch_cronograma_prev_json is None
+    assert proc.watch_documentos_prev_json is None
+    assert proc.watch_changelog_json is None
+
+
 def test_archive_moves_to_trash_and_keeps_analysis(tmp_path: Path):
     cfg = _cfg(tmp_path)
     proc_dir = _proc_dir(tmp_path)

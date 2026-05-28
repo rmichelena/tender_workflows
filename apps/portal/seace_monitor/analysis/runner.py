@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from ..client import ProcessRow, SeaceClient
+from ..client import SeaceClient
 from ..config import AppConfig
 from ..db.models import AnalysisResult, Process, ProcessStatus, utcnow
 from ..list_order import (
@@ -29,6 +29,7 @@ from ..document_storage import (
     write_manifest,
 )
 from ..parser import parse_ficha
+from ..watchlist import _resolve_current_row
 from .analysis_lock import AnalysisBusyError, analysis_lock
 from .document_prep import extract_archives, resolve_selected_documents
 from .fast_reader import run_fast_analysis
@@ -291,25 +292,13 @@ class AnalysisRunner:
             self.config.rows_per_page,
             http_proxy=self.config.http_proxy,
         )
-        row = ProcessRow(
-            row_index=0,
-            numero=process.numero or "",
-            fecha_publicacion=process.fecha_publicacion or "",
-            nomenclatura=process.nomenclatura,
-            reiniciado_desde=process.reiniciado_desde or "",
-            objeto=process.objeto or "",
-            descripcion=process.descripcion or "",
-            cuantia=process.cuantia or "",
-            moneda=process.moneda or "",
-            version_seace=process.version_seace or "",
-            nid_proceso=process.nid_proceso,
-            nid_convocatoria=process.nid_convocatoria or "",
-            nid_sistema=process.nid_sistema or "3",
-            link_id=process.link_id or "",
-            ntipo=process.ntipo or "0",
-        )
+        row = _resolve_current_row(self.config, client, process)
         ficha = client.open_ficha(row)
         parsed = parse_ficha(ficha.html, ficha.ficha_id, process.nid_proceso)
+        process.link_id = row.link_id
+        process.nid_convocatoria = row.nid_convocatoria
+        process.nid_sistema = row.nid_sistema
+        process.ntipo = row.ntipo
         return [asdict(d) for d in parsed.documentos]
 
     def _refresh_documentos(self, process: Process, ruc: str) -> list[dict]:

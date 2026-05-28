@@ -249,6 +249,42 @@ def test_descartados_includes_autorejected_processes(tmp_path: Path):
     assert "servicio_limpieza" in response.text
 
 
+def test_descartados_can_filter_autorejected_only(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'web_filter.db'}")
+    app = create_app(cfg)
+    db: Session = session_factory()
+    try:
+        db.add_all(
+            [
+                Process(
+                    entity_id=1,
+                    anio=2026,
+                    nid_proceso="auto-filter",
+                    nomenclatura="AUTO-FILTER",
+                    status=ProcessStatus.autorejected,
+                    auto_reject_reason="servicio_limpieza: Servicios de limpieza fuera de foco",
+                ),
+                Process(
+                    entity_id=1,
+                    anio=2026,
+                    nid_proceso="discarded-filter",
+                    nomenclatura="DISCARDED-FILTER",
+                    status=ProcessStatus.descartada,
+                ),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = TestClient(app).get("/descartados?estado=autorejected")
+
+    assert response.status_code == 200
+    assert "AUTO-FILTER" in response.text
+    assert "DISCARDED-FILTER" not in response.text
+    assert 'href="/descartados?estado=autorejected"' in response.text
+
+
 def test_restaurar_autorejected_sets_auto_reject_exempt(tmp_path: Path):
     cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'web6.db'}")
     app = create_app(cfg)

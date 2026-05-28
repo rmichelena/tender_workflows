@@ -106,6 +106,14 @@ def clear_process_download_metadata(process: Process) -> None:
     process.data_dir = None
 
 
+def clear_process_watch_metadata(process: Process) -> None:
+    """Quita flags/historial SEACE asociados a una descarga local."""
+    process.watch_unread = False
+    process.watch_cronograma_prev_json = None
+    process.watch_documentos_prev_json = None
+    process.watch_changelog_json = None
+
+
 def delete_process_analysis(session: Session, process: Process) -> None:
     if process.analysis is not None:
         session.delete(process.analysis)
@@ -179,6 +187,7 @@ def discard_process_downloads(
     leave_descargados_list(session, process)
     clear_list_ranks(process)
     clear_process_download_metadata(process)
+    clear_process_watch_metadata(process)
     session.flush()
     if path is not None and _delete_resolved_path(path):
         logger.info("Eliminada carpeta proceso id=%s path=%s", process.id, path)
