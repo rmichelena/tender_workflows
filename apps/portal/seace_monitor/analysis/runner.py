@@ -28,7 +28,7 @@ from ..document_storage import (
     prefer_canonical_archivo,
     write_manifest,
 )
-from ..parser import parse_ficha
+from ..parser import extract_cronograma_fechas, parse_ficha
 from ..watchlist import _resolve_current_row
 from .analysis_lock import AnalysisBusyError, analysis_lock
 from .document_prep import extract_archives, resolve_selected_documents
@@ -295,11 +295,21 @@ class AnalysisRunner:
         row = _resolve_current_row(self.config, client, process)
         ficha = client.open_ficha(row)
         parsed = parse_ficha(ficha.html, ficha.ficha_id, row.nid_proceso)
+        fechas = extract_cronograma_fechas(parsed.cronograma)
         process.nid_proceso = row.nid_proceso
         process.link_id = row.link_id
         process.nid_convocatoria = row.nid_convocatoria
         process.nid_sistema = row.nid_sistema
         process.ntipo = row.ntipo
+        process.fecha_publicacion = row.fecha_publicacion or parsed.fecha_publicacion
+        process.fecha_consultas = fechas.fecha_consultas
+        process.fecha_presentacion = fechas.fecha_presentacion
+        process.cronograma_json = json.dumps(
+            [asdict(c) for c in parsed.cronograma], ensure_ascii=False
+        )
+        process.ficha_id = parsed.ficha_id
+        process.ficha_url = ficha.url
+        process.content_hash = parsed.content_hash()
         return [asdict(d) for d in parsed.documentos]
 
     def _refresh_documentos(self, process: Process, ruc: str) -> list[dict]:
