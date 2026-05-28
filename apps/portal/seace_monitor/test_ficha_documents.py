@@ -68,6 +68,7 @@ def test_collect_documentos_fetches_additional_pages():
       <update id="tbFicha:dtDocumentos"><![CDATA[
         {_doc_row("uuid-6", "Doc6.zip")}
       ]]></update>
+      <update id="javax.faces.ViewState:0"><![CDATA[vs-updated]]></update>
     </changes></partial-response>"""
     session = MagicMock()
     response = MagicMock()
@@ -82,4 +83,46 @@ def test_collect_documentos_fetches_additional_pages():
     session.post.assert_called_once()
     posted = session.post.call_args.kwargs["data"]
     assert posted["tbFicha:dtDocumentos_first"] == "5"
-    assert posted["tbFicha:dtDocumentos_rows"] == "5"
+    assert posted["javax.faces.ViewState"] == "vs-test"
+
+
+def test_collect_documentos_propagates_view_state_across_pages():
+    page1_rows = "".join(_doc_row(f"uuid-{i}", f"Doc{i}.pdf") for i in range(1, 6))
+    html = _ficha_html(page1_rows, row_count=12, rows_per_page=5)
+    partial_page2 = """<?xml version='1.0' encoding='UTF-8'?>
+    <partial-response><changes>
+      <update id="tbFicha:dtDocumentos"><![CDATA[
+        {rows}
+      ]]></update>
+      <update id="javax.faces.ViewState:0"><![CDATA[vs-page-2]]></update>
+    </changes></partial-response>""".format(
+        rows="".join(_doc_row(f"uuid-{i}", f"Doc{i}.pdf") for i in range(6, 11))
+    )
+    partial_page3 = """<?xml version='1.0' encoding='UTF-8'?>
+    <partial-response><changes>
+      <update id="tbFicha:dtDocumentos"><![CDATA[
+        {rows}
+      ]]></update>
+    </changes></partial-response>""".format(
+        rows=_doc_row("uuid-12", "Doc12.zip")
+    )
+    session = MagicMock()
+
+    def _post(_url, data, timeout=60):
+        response = MagicMock()
+        response.raise_for_status = MagicMock()
+        if data["javax.faces.ViewState"] == "vs-test":
+            response.text = partial_page2
+        elif data["javax.faces.ViewState"] == "vs-page-2":
+            response.text = partial_page3
+        else:
+            raise AssertionError(f"ViewState inesperado: {data['javax.faces.ViewState']!r}")
+        return response
+
+    session.post.side_effect = _post
+
+    docs = collect_ficha_documentos(html, session, "https://ficha.example/x")
+
+    assert len(docs) == 12
+    assert session.post.call_count == 2
+    assert session.post.call_args_list[1].kwargs["data"]["javax.faces.ViewState"] == "vs-page-2"

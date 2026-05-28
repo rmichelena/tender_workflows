@@ -205,6 +205,17 @@ def test_migrate_process_identity_schema_relaxes_legacy_sqlite_nid(tmp_path: Pat
                 "VALUES (1, 1, 2026, '987654', 'AS-SM-1-2026')"
             )
         )
+        conn.execute(
+            text(
+                "CREATE TABLE analysis_results ("
+                "id INTEGER PRIMARY KEY, process_id INTEGER NOT NULL UNIQUE, "
+                "status VARCHAR(32) DEFAULT 'pending', "
+                "FOREIGN KEY(process_id) REFERENCES processes(id))"
+            )
+        )
+        conn.execute(
+            text("INSERT INTO analysis_results (id, process_id, status) VALUES (1, 1, 'done')")
+        )
 
     _ensure_table_columns(
         engine,
@@ -225,3 +236,10 @@ def test_migrate_process_identity_schema_relaxes_legacy_sqlite_nid(tmp_path: Pat
             set(uc.get("column_names") or ()) == {"source", "entity_id", "source_ref"}
             for uc in insp.get_unique_constraints("processes")
         )
+        analysis_ddl = conn.execute(
+            text("SELECT sql FROM sqlite_master WHERE type='table' AND name='analysis_results'")
+        ).scalar()
+        assert analysis_ddl is not None
+        assert "processes_old" not in analysis_ddl
+        conn.execute(text("UPDATE analysis_results SET status = 'error' WHERE id = 1"))
+        conn.commit()

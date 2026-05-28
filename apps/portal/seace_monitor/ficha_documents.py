@@ -30,7 +30,7 @@ def collect_ficha_documentos(
     view_state = _view_state(soup)
     seen = {doc.uuid for doc in docs}
     for page_index in range(1, total_pages):
-        page_soup = _fetch_documentos_page(
+        page_soup, view_state = _fetch_documentos_page(
             session,
             ficha_url,
             view_state,
@@ -95,7 +95,7 @@ def _fetch_documentos_page(
     *,
     page_index: int,
     rows_per_page: int,
-) -> BeautifulSoup:
+) -> tuple[BeautifulSoup, str]:
     data = {
         "javax.faces.partial.ajax": "true",
         "javax.faces.source": FICHA_DOC_TABLE_ID,
@@ -112,21 +112,28 @@ def _fetch_documentos_page(
     }
     response = session.post(ficha_url, data=data, timeout=60)
     response.raise_for_status()
-    page_soup = _partial_documentos_soup(response.text)
+    page_soup, updated_view_state = _partial_documentos_soup(response.text)
     if page_soup is None:
         raise RuntimeError(
             f"No se pudo parsear página {page_index + 1} de documentos en ficha SEACE"
         )
-    return page_soup
+    if updated_view_state:
+        view_state = updated_view_state
+    return page_soup, view_state
 
 
-def _partial_documentos_soup(partial_xml: str) -> BeautifulSoup | None:
+def _partial_documentos_soup(partial_xml: str) -> tuple[BeautifulSoup | None, str | None]:
     xml = BeautifulSoup(partial_xml, "xml")
     update = xml.find("update", {"id": FICHA_DOC_TABLE_ID})
     if update is None:
-        return None
+        return None, None
     rows_html = update.string or update.get_text()
-    return BeautifulSoup(
+    page_soup = BeautifulSoup(
         f"<html><body><table><tbody>{rows_html}</tbody></table></body></html>",
         "lxml",
     )
+    view_state_update = xml.find("update", id=re.compile("ViewState"))
+    updated_view_state = (
+        view_state_update.get_text(strip=True) if view_state_update is not None else None
+    )
+    return page_soup, updated_view_state

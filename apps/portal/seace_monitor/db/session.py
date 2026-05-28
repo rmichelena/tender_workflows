@@ -9,6 +9,7 @@ import time
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.schema import MetaData
 
 from .models import Base
 
@@ -196,6 +197,98 @@ def _sqlite_drop_named_indexes(engine, table_name: str) -> None:
             conn.execute(text(f'DROP INDEX IF EXISTS "{name}"'))
 
 
+def _process_migration_copy_defaults() -> dict[str, str]:
+    return {
+        "source": "'seace'",
+        "workflow_profile": "'public_tender'",
+        "interest_status": "'none'",
+        "status": "'publicada'",
+        "auto_reject_exempt": "0",
+        "watch_unread": "0",
+        "first_seen_at": "CURRENT_TIMESTAMP",
+        "last_seen_at": "CURRENT_TIMESTAMP",
+        "updated_at": "CURRENT_TIMESTAMP",
+    }
+
+
+def _process_migration_select_sql(old_cols: set[str]) -> tuple[str, str]:
+    from .models import Process
+
+    copy_defaults = _process_migration_copy_defaults()
+    insert_cols: list[str] = []
+    select_exprs: list[str] = []
+    for col in Process.__table__.columns:
+        name = col.name
+        insert_cols.append(name)
+        if name in old_cols:
+            select_exprs.append(name)
+        elif name in copy_defaults:
+            select_exprs.append(copy_defaults[name])
+        elif col.nullable:
+            select_exprs.append("NULL")
+        else:
+            raise RuntimeError(
+                f"Migración SQLite: falta valor por defecto para columna {name!r}"
+            )
+    return ", ".join(insert_cols), ", ".join(select_exprs)
+
+
+def _sqlite_table_create_sql(engine, table_name: str) -> str | None:
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT sql FROM sqlite_master WHERE type='table' AND name=:name"),
+            {"name": table_name},
+        ).fetchone()
+    return row[0] if row else None
+
+
+def _sqlite_recreate_table_from_model(engine, model) -> None:
+    """Recrea una tabla SQLite conservando filas (resetea FKs rotos)."""
+    table_name = model.__tablename__
+    insp = inspect(engine)
+    if table_name not in insp.get_table_names():
+        return
+    old_cols = {col["name"] for col in insp.get_columns(table_name)}
+    insert_cols = [col.name for col in model.__table__.columns if col.name in old_cols]
+    if not insert_cols:
+        return
+    cols_sql = ", ".join(insert_cols)
+    temp_md = MetaData()
+    new_table = model.__table__.to_metadata(temp_md, name=f"{table_name}_new")
+    with engine.begin() as conn:
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(text(f"DROP TABLE IF EXISTS {table_name}_new"))
+    new_table.create(engine)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                f"INSERT INTO {table_name}_new ({cols_sql}) "
+                f"SELECT {cols_sql} FROM {table_name}"
+            )
+        )
+        conn.execute(text(f"DROP TABLE {table_name}"))
+        conn.execute(text(f"ALTER TABLE {table_name}_new RENAME TO {table_name}"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+
+
+def _sqlite_fix_analysis_results_fk_if_needed(engine) -> None:
+    """Repara FK hacia processes_old tras rebuild interrumpido."""
+    ddl = _sqlite_table_create_sql(engine, "analysis_results")
+    if not ddl or "processes_old" not in ddl:
+        return
+    from .models import AnalysisResult
+
+    _sqlite_recreate_table_from_model(engine, AnalysisResult)
+
+
+def _sqlite_assert_foreign_key_check(engine) -> None:
+    with engine.connect() as conn:
+        violations = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
+    if violations:
+        sample = ", ".join(str(row) for row in violations[:3])
+        raise RuntimeError(f"SQLite foreign_key_check falló tras migración: {sample}")
+
+
 def _sqlite_recover_failed_processes_rebuild(engine) -> bool:
     """Completa un rebuild interrumpido (processes vacía + processes_old con datos)."""
     insp = inspect(engine)
@@ -208,38 +301,8 @@ def _sqlite_recover_failed_processes_rebuild(engine) -> bool:
     if old_count == 0 or cur_count > 0:
         return False
 
-    from .models import Process
-
-    insp = inspect(engine)
     old_cols = {col["name"] for col in insp.get_columns("processes_old")}
-    copy_defaults = {
-        "source": "'seace'",
-        "workflow_profile": "'public_tender'",
-        "interest_status": "'none'",
-        "status": "'publicada'",
-        "auto_reject_exempt": "0",
-        "watch_unread": "0",
-        "first_seen_at": "CURRENT_TIMESTAMP",
-        "last_seen_at": "CURRENT_TIMESTAMP",
-        "updated_at": "CURRENT_TIMESTAMP",
-    }
-    insert_cols: list[str] = []
-    select_exprs: list[str] = []
-    for col in Process.__table__.columns:
-        name = col.name
-        insert_cols.append(name)
-        if name in old_cols:
-            select_exprs.append(name)
-        elif name in copy_defaults:
-            select_exprs.append(copy_defaults[name])
-        elif col.nullable:
-            select_exprs.append("NULL")
-        else:
-            raise RuntimeError(
-                f"Migración SQLite: falta valor por defecto para columna {name!r}"
-            )
-    cols_sql = ", ".join(insert_cols)
-    select_sql = ", ".join(select_exprs)
+    cols_sql, select_sql = _process_migration_select_sql(old_cols)
     with engine.begin() as conn:
         conn.execute(text("PRAGMA foreign_keys=OFF"))
         conn.execute(
@@ -247,6 +310,8 @@ def _sqlite_recover_failed_processes_rebuild(engine) -> bool:
         )
         conn.execute(text("DROP TABLE processes_old"))
         conn.execute(text("PRAGMA foreign_keys=ON"))
+    _sqlite_fix_analysis_results_fk_if_needed(engine)
+    _sqlite_assert_foreign_key_check(engine)
     return True
 
 
@@ -259,45 +324,22 @@ def _sqlite_rebuild_processes_table(engine) -> None:
 
     insp = inspect(engine)
     old_cols = {col["name"] for col in insp.get_columns("processes")}
-    copy_defaults = {
-        "source": "'seace'",
-        "workflow_profile": "'public_tender'",
-        "interest_status": "'none'",
-        "status": "'publicada'",
-        "auto_reject_exempt": "0",
-        "watch_unread": "0",
-        "first_seen_at": "CURRENT_TIMESTAMP",
-        "last_seen_at": "CURRENT_TIMESTAMP",
-        "updated_at": "CURRENT_TIMESTAMP",
-    }
-    insert_cols: list[str] = []
-    select_exprs: list[str] = []
-    for col in Process.__table__.columns:
-        name = col.name
-        insert_cols.append(name)
-        if name in old_cols:
-            select_exprs.append(name)
-        elif name in copy_defaults:
-            select_exprs.append(copy_defaults[name])
-        elif col.nullable:
-            select_exprs.append("NULL")
-        else:
-            raise RuntimeError(
-                f"Migración SQLite: falta valor por defecto para columna {name!r}"
-            )
-    cols_sql = ", ".join(insert_cols)
-    select_sql = ", ".join(select_exprs)
+    cols_sql, select_sql = _process_migration_select_sql(old_cols)
+    temp_md = MetaData()
+    processes_new = Process.__table__.to_metadata(temp_md, name="processes_new")
     with engine.begin() as conn:
         conn.execute(text("PRAGMA foreign_keys=OFF"))
-        conn.execute(text("ALTER TABLE processes RENAME TO processes_old"))
-    _sqlite_drop_named_indexes(engine, "processes_old")
-    Process.__table__.create(engine, checkfirst=True)
+        conn.execute(text("DROP TABLE IF EXISTS processes_new"))
+    processes_new.create(engine)
     with engine.begin() as conn:
         conn.execute(
-            text(f"INSERT INTO processes ({cols_sql}) SELECT {select_sql} FROM processes_old")
+            text(f"INSERT INTO processes_new ({cols_sql}) SELECT {select_sql} FROM processes")
         )
-        conn.execute(text("DROP TABLE processes_old"))
+        conn.execute(text("DROP TABLE processes"))
+        conn.execute(text("ALTER TABLE processes_new RENAME TO processes"))
         conn.execute(text("PRAGMA foreign_keys=ON"))
+    _sqlite_fix_analysis_results_fk_if_needed(engine)
+    _sqlite_assert_foreign_key_check(engine)
 
 
 def _has_process_source_identity_unique(engine) -> bool:
