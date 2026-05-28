@@ -290,8 +290,14 @@ class AnalysisRunner:
     def _fetch_documentos_from_seace(self, process: Process, ruc: str) -> list[dict]:
         from dataclasses import asdict
 
-        row, ficha, _client = open_ficha_for_process(self.config, process)
-        parsed = parse_ficha(ficha.html, ficha.ficha_id, row.nid_proceso)
+        row, ficha, client = open_ficha_for_process(self.config, process)
+        parsed = parse_ficha(
+            ficha.html,
+            ficha.ficha_id,
+            row.nid_proceso,
+            http_session=client.session,
+            ficha_url=ficha.url,
+        )
         fechas = extract_cronograma_fechas(parsed.cronograma)
         apply_list_row_to_process(process, row)
         if not process.fecha_publicacion and parsed.fecha_publicacion:

@@ -272,7 +272,13 @@ def _refresh_watchlist_process(
             process.nomenclatura,
         )
         return False
-    ficha = parse_ficha(ficha_result.html, ficha_result.ficha_id, row.nid_proceso)
+    ficha = parse_ficha(
+        ficha_result.html,
+        ficha_result.ficha_id,
+        row.nid_proceso,
+        http_session=_client.session,
+        ficha_url=ficha_result.url,
+    )
     _validate_watchlist_ficha(process, ficha)
 
     new_cron_json = json.dumps(
