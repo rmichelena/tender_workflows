@@ -180,6 +180,74 @@ def _process_identity_index_names(engine) -> set[str]:
     return names
 
 
+def _sqlite_drop_named_indexes(engine, table_name: str) -> None:
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='index' AND tbl_name=:table "
+                "AND name NOT LIKE 'sqlite_autoindex_%'"
+            ),
+            {"table": table_name},
+        ).fetchall()
+        for (name,) in rows:
+            conn.execute(text(f'DROP INDEX IF EXISTS "{name}"'))
+
+
+def _sqlite_recover_failed_processes_rebuild(engine) -> bool:
+    """Completa un rebuild interrumpido (processes vacía + processes_old con datos)."""
+    insp = inspect(engine)
+    tables = insp.get_table_names()
+    if "processes_old" not in tables or "processes" not in tables:
+        return False
+    with engine.connect() as conn:
+        old_count = conn.execute(text("SELECT COUNT(*) FROM processes_old")).scalar()
+        cur_count = conn.execute(text("SELECT COUNT(*) FROM processes")).scalar()
+    if old_count == 0 or cur_count > 0:
+        return False
+
+    from .models import Process
+
+    insp = inspect(engine)
+    old_cols = {col["name"] for col in insp.get_columns("processes_old")}
+    copy_defaults = {
+        "source": "'seace'",
+        "workflow_profile": "'public_tender'",
+        "interest_status": "'none'",
+        "status": "'publicada'",
+        "auto_reject_exempt": "0",
+        "watch_unread": "0",
+        "first_seen_at": "CURRENT_TIMESTAMP",
+        "last_seen_at": "CURRENT_TIMESTAMP",
+        "updated_at": "CURRENT_TIMESTAMP",
+    }
+    insert_cols: list[str] = []
+    select_exprs: list[str] = []
+    for col in Process.__table__.columns:
+        name = col.name
+        insert_cols.append(name)
+        if name in old_cols:
+            select_exprs.append(name)
+        elif name in copy_defaults:
+            select_exprs.append(copy_defaults[name])
+        elif col.nullable:
+            select_exprs.append("NULL")
+        else:
+            raise RuntimeError(
+                f"Migración SQLite: falta valor por defecto para columna {name!r}"
+            )
+    cols_sql = ", ".join(insert_cols)
+    select_sql = ", ".join(select_exprs)
+    with engine.begin() as conn:
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(
+            text(f"INSERT INTO processes ({cols_sql}) SELECT {select_sql} FROM processes_old")
+        )
+        conn.execute(text("DROP TABLE processes_old"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+    return True
+
+
 def _sqlite_rebuild_processes_table(engine) -> None:
     """Recrea `processes` con el esquema actual (nid_proceso nullable, identidad por source)."""
     from .models import Process
@@ -220,6 +288,7 @@ def _sqlite_rebuild_processes_table(engine) -> None:
     with engine.begin() as conn:
         conn.execute(text("PRAGMA foreign_keys=OFF"))
         conn.execute(text("ALTER TABLE processes RENAME TO processes_old"))
+    _sqlite_drop_named_indexes(engine, "processes_old")
     Process.__table__.create(engine, checkfirst=True)
     with engine.begin() as conn:
         conn.execute(
@@ -245,6 +314,9 @@ def _migrate_process_identity_schema(engine) -> None:
         return
 
     _backfill_process_sources(engine)
+
+    if engine.dialect.name == "sqlite" and _sqlite_recover_failed_processes_rebuild(engine):
+        insp = inspect(engine)
 
     dialect = engine.dialect.name
     cols = {col["name"]: col for col in insp.get_columns("processes")}
