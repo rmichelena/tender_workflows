@@ -24,11 +24,11 @@
       <td>{{ p.fecha_publicacion or '—' }}</td>
       <td class="col-entidad">{{ entidad_nombre(p.entity) }}</td>
       <td>{{ p.nomenclatura }}</td>
-      <td class="status-cell">{{ status_cell(p) }}</td>
       <td>{{ p.objeto or '—' }}</td>
       <td class="desc">{{ p.descripcion or '—' }}</td>
       <td>{{ item.fin_consultas }}</td>
       <td>{{ item.fin_presentacion }}</td>
+      <td class="status-cell">{{ status_cell(p) }}</td>
       <td class="actions-cell">
         <div class="actions-stack js-action-row">
         {% if p.status.value == 'archivando' %}

@@ -11,11 +11,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from .analysis.analysis_history import archive_analysis_before_rerun
+from .client import ProcessRow
 from .config import AppConfig
 from .db.models import AnalysisResult, Base, Entity, Process, ProcessStatus
 from .parser import CronogramaEtapa, Documento, FichaData
 from .watchlist import (
     _refresh_watchlist_process,
+    _resolve_current_row,
     mark_watchlist_read,
     refresh_watchlist_processes,
     watchlist_fingerprint,
@@ -157,6 +159,26 @@ def _ficha_with_docs(docs: list[Documento]) -> FichaData:
     )
 
 
+def _row(nid: str, *, link_id: str = "link") -> ProcessRow:
+    return ProcessRow(
+        row_index=0,
+        numero="",
+        fecha_publicacion="",
+        nomenclatura="T",
+        reiniciado_desde="",
+        objeto="",
+        descripcion="",
+        cuantia="",
+        moneda="",
+        version_seace="",
+        nid_proceso=nid,
+        nid_convocatoria="conv-fresh",
+        nid_sistema="3",
+        link_id=link_id,
+        ntipo="0",
+    )
+
+
 def test_refresh_preserves_prev_baseline_while_unread(
     watch_session: Session, tmp_path: Path
 ):
@@ -185,12 +207,102 @@ def test_refresh_preserves_prev_baseline_while_unread(
 
     with (
         patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist._resolve_current_row", return_value=_row(proc.nid_proceso)),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document", side_effect=_download),
     ):
         assert _refresh_watchlist_process(cfg, watch_session, proc) is True
 
     assert proc.watch_documentos_prev_json == baseline
+
+
+def test_watchlist_resolves_current_row_across_list_pages(
+    watch_session: Session, tmp_path: Path
+):
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[{"uuid": "u1", "nombre": "a.pdf"}],
+    )
+    proc.nid_proceso = "target-nid"
+    first_soup = object()
+    second_soup = object()
+    current_row = _row("target-nid", link_id="fresh-link")
+    client = MagicMock()
+    client.fetch_list_page.side_effect = [("", first_soup), ("", second_soup)]
+    client.total_pages.return_value = 2
+    client.parse_rows.side_effect = [
+        [_row("other-nid")],
+        [current_row],
+    ]
+
+    row = _resolve_current_row(cfg, client, proc)
+
+    assert row is current_row
+    assert client.fetch_list_page.call_args_list[0].args == (0,)
+    assert client.fetch_list_page.call_args_list[1].args == (1,)
+
+
+def test_refresh_uses_current_row_when_process_moved_to_later_page(
+    watch_session: Session, tmp_path: Path
+):
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[{"uuid": "u1", "nombre": "a.pdf"}],
+    )
+    current_row = _row(proc.nid_proceso, link_id="fresh-link")
+    ficha = _ficha_with_docs([Documento("u1", "a.pdf", "", "", "", "", "3")])
+    mock_client = MagicMock()
+    mock_client.open_ficha.return_value = MagicMock(html="<html>", url="http://x", ficha_id="f1")
+
+    with (
+        patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist._resolve_current_row", return_value=current_row),
+        patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
+        patch("seace_monitor.watchlist.download_and_store_document"),
+    ):
+        _refresh_watchlist_process(cfg, watch_session, proc)
+
+    mock_client.open_ficha.assert_called_once_with(current_row)
+
+
+def test_refresh_rejects_empty_ficha_when_existing_content_would_be_wiped(
+    watch_session: Session, tmp_path: Path
+):
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[{"uuid": "u1", "nombre": "a.pdf"}],
+    )
+    old_cronograma = proc.cronograma_json
+    old_docs = proc.documentos_json
+    empty_ficha = FichaData(
+        ficha_id="f1",
+        nid_proceso=proc.nid_proceso,
+        nomenclatura="",
+        descripcion="",
+        objeto="",
+        fecha_publicacion="",
+        cronograma=[],
+        documentos=[],
+    )
+    mock_client = MagicMock()
+    mock_client.open_ficha.return_value = MagicMock(html="<html>", url="http://x", ficha_id="f1")
+
+    with (
+        patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist._resolve_current_row", return_value=_row(proc.nid_proceso)),
+        patch("seace_monitor.watchlist.parse_ficha", return_value=empty_ficha),
+    ):
+        with pytest.raises(RuntimeError, match="vacía"):
+            _refresh_watchlist_process(cfg, watch_session, proc)
+
+    assert proc.cronograma_json == old_cronograma
+    assert proc.documentos_json == old_docs
 
 
 def test_refresh_rollback_on_download_failure(
@@ -214,6 +326,7 @@ def test_refresh_rollback_on_download_failure(
 
     with (
         patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist._resolve_current_row", return_value=_row(proc.nid_proceso)),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document", side_effect=_fail_u2),
     ):
@@ -242,6 +355,7 @@ def test_refresh_advances_checked_at_on_success(
 
     with (
         patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist._resolve_current_row", return_value=_row(proc.nid_proceso)),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document"),
     ):
@@ -272,6 +386,7 @@ def test_refresh_triggers_on_fecha_publicacion_only(
 
     with (
         patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist._resolve_current_row", return_value=_row(proc.nid_proceso)),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document"),
     ):
@@ -307,6 +422,7 @@ def test_refresh_fecha_only_preserves_stored_document_names(
 
     with (
         patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist._resolve_current_row", return_value=_row(proc.nid_proceso)),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document"),
     ):
@@ -347,6 +463,7 @@ def test_refresh_does_not_write_manifest_on_failed_download_validation(
 
     with (
         patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist._resolve_current_row", return_value=_row(proc.nid_proceso)),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document", side_effect=_download),
     ):
@@ -388,6 +505,7 @@ def test_refresh_persists_post_download_document_names(
 
     with (
         patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist._resolve_current_row", return_value=_row(proc.nid_proceso)),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document", side_effect=_download),
     ):

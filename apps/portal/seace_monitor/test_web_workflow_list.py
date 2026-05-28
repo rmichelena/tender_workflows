@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from .config import AppConfig
-from .db.models import InterestStatus, Process, ProcessStatus
+from .db.models import Entity, InterestStatus, Process, ProcessStatus
 from .db.session import session_factory
 from .web.app import create_app
 
@@ -29,6 +31,101 @@ def _seed_analizado(tmp_path: Path) -> int:
         return proc.id
     finally:
         db.close()
+
+
+def _first_table_row_cells(html: str) -> list[str]:
+    soup = BeautifulSoup(html, "lxml")
+    row = soup.select_one("table.data tbody tr")
+    assert row is not None
+    return [" ".join(cell.get_text(" ", strip=True).split()) for cell in row.find_all("td")]
+
+
+def _seed_workflow_list_process(status: ProcessStatus, *, rank_attr: str) -> int:
+    db: Session = session_factory()
+    try:
+        entity = Entity(ruc="20123456789", nombre="ENTIDAD TEST", activa=True)
+        db.add(entity)
+        db.flush()
+        proc = Process(
+            entity_id=entity.id,
+            anio=2026,
+            nid_proceso=f"list-{status.value}",
+            nomenclatura="NOM-TEST",
+            status=status,
+            fecha_publicacion="01/06/2026 10:00",
+            objeto="Bien",
+            descripcion="Compra de radios",
+            cronograma_json=json.dumps(
+                [
+                    {
+                        "etapa": "Presentación de consultas",
+                        "fecha_inicio": "02/06/2026 00:00",
+                        "fecha_fin": "03/06/2026 23:59",
+                    },
+                    {
+                        "etapa": "Presentación de ofertas",
+                        "fecha_inicio": "04/06/2026 00:00",
+                        "fecha_fin": "05/06/2026 23:59",
+                    },
+                ]
+            ),
+        )
+        setattr(proc, rank_attr, 1)
+        db.add(proc)
+        db.commit()
+        return proc.id
+    finally:
+        db.close()
+
+
+def test_descargados_list_cells_match_headers(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'web_list.db'}")
+    app = create_app(cfg)
+    _seed_workflow_list_process(
+        ProcessStatus.descargada,
+        rank_attr="list_rank_descargados",
+    )
+
+    response = TestClient(app).get("/descargados")
+
+    assert response.status_code == 200
+    cells = _first_table_row_cells(response.text)
+    assert cells[:9] == [
+        "1",
+        "01/06/2026 10:00",
+        "ENTIDAD TEST",
+        "NOM-TEST",
+        "Bien",
+        "Compra de radios",
+        "03/06/2026 23:59",
+        "05/06/2026 23:59",
+        "descargada",
+    ]
+
+
+def test_analizados_list_cells_match_headers(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'web_list2.db'}")
+    app = create_app(cfg)
+    _seed_workflow_list_process(
+        ProcessStatus.analizada,
+        rank_attr="list_rank_analizados",
+    )
+
+    response = TestClient(app).get("/analizados")
+
+    assert response.status_code == 200
+    cells = _first_table_row_cells(response.text)
+    assert cells[:9] == [
+        "1",
+        "01/06/2026 10:00",
+        "ENTIDAD TEST",
+        "NOM-TEST",
+        "Bien",
+        "Compra de radios",
+        "03/06/2026 23:59",
+        "05/06/2026 23:59",
+        "analizada",
+    ]
 
 
 def test_cambiar_estado_preserves_sort_and_scroll(tmp_path: Path):

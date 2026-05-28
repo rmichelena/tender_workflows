@@ -37,25 +37,27 @@ WATCHLIST_STATUSES = frozenset(
         ProcessStatus.portafolio,
     }
 )
+WATCHLIST_PAGE_SEARCH_CAP = 200
 
 
-def _row_from_process(process: Process) -> ProcessRow:
-    return ProcessRow(
-        row_index=0,
-        numero=process.numero or "",
-        fecha_publicacion=process.fecha_publicacion or "",
-        nomenclatura=process.nomenclatura,
-        reiniciado_desde=process.reiniciado_desde or "",
-        objeto=process.objeto or "",
-        descripcion=process.descripcion or "",
-        cuantia=process.cuantia or "",
-        moneda=process.moneda or "",
-        version_seace=process.version_seace or "",
-        nid_proceso=process.nid_proceso,
-        nid_convocatoria=process.nid_convocatoria or "",
-        nid_sistema=process.nid_sistema or "3",
-        link_id=process.link_id or "",
-        ntipo=process.ntipo or "0",
+def _resolve_current_row(
+    config: AppConfig, client: SeaceClient, process: Process
+) -> ProcessRow:
+    """Busca la fila vigente para abrir ficha con link_id/ViewState actuales."""
+    _, first_soup = client.fetch_list_page(0)
+    total_pages = min(client.total_pages(first_soup), WATCHLIST_PAGE_SEARCH_CAP)
+    for page in range(total_pages):
+        if page == 0:
+            soup = first_soup
+        else:
+            _, soup = client.fetch_list_page(page)
+        rows = client.parse_rows(soup)
+        for row in rows:
+            if row.nid_proceso == process.nid_proceso:
+                return row
+    raise RuntimeError(
+        f"Watchlist: proceso {process.nid_proceso} no aparece en las "
+        f"{total_pages} página(s) actuales de entidad {process.entity_id}"
     )
 
 
@@ -108,6 +110,27 @@ def _document_uuids_from_json(documentos_json: str | None) -> set[str]:
         for item in raw
         if isinstance(item, dict) and str(item.get("uuid", "")).strip()
     }
+
+
+def _json_list_has_items(raw_json: str | None) -> bool:
+    if not raw_json:
+        return False
+    try:
+        raw = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(raw, list) and bool(raw)
+
+
+def _validate_watchlist_ficha(process: Process, ficha) -> None:
+    had_content = _json_list_has_items(process.cronograma_json) or _json_list_has_items(
+        process.documentos_json
+    )
+    if had_content and not ficha.cronograma and not ficha.documentos:
+        raise RuntimeError(
+            f"Watchlist: ficha vacía para proceso id={process.id} nid={process.nid_proceso}; "
+            "se conserva cronograma/documentos actuales"
+        )
 
 
 def _stored_docs_by_uuid(documentos_json: str | None) -> dict[str, dict]:
@@ -264,9 +287,10 @@ def _refresh_watchlist_process(
         config.rows_per_page,
         http_proxy=config.http_proxy,
     )
-    row = _row_from_process(process)
+    row = _resolve_current_row(config, client, process)
     ficha_result = client.open_ficha(row)
     ficha = parse_ficha(ficha_result.html, ficha_result.ficha_id, process.nid_proceso)
+    _validate_watchlist_ficha(process, ficha)
 
     new_cron_json = json.dumps(
         [asdict(c) for c in ficha.cronograma], ensure_ascii=False
@@ -337,6 +361,10 @@ def _refresh_watchlist_process(
     process.content_hash = ficha.content_hash()
     process.ficha_id = ficha.ficha_id
     process.ficha_url = ficha_result.url
+    process.link_id = row.link_id
+    process.nid_convocatoria = row.nid_convocatoria
+    process.nid_sistema = row.nid_sistema
+    process.ntipo = row.ntipo
     process.documentos_json = new_docs_json
     process.updated_at = datetime.now(timezone.utc)
     process.watch_unread = True
