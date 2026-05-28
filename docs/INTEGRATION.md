@@ -1,6 +1,6 @@
 # Integración SEACE Monitor ↔ pipeline documental
 
-**Documentación ampliada:** [STAGES.md](STAGES.md) (etapas A→D) · [ARCHITECTURE.md](ARCHITECTURE.md) · [ROADMAP.md](ROADMAP.md).
+**Documentación ampliada:** [STAGES.md](STAGES.md) (etapas A→D) · [INPUT_SOURCES.md](INPUT_SOURCES.md) · [ARCHITECTURE.md](ARCHITECTURE.md) · [ROADMAP.md](ROADMAP.md).
 
 ## Visión del sistema completo
 
@@ -24,7 +24,7 @@ flowchart TB
   end
 
   subgraph entry2 [Entrypoint 2/3 - Manual]
-    MAN[Proceso o docs manuales]
+    MAN[PipelineItem o docs manuales]
     MAN --> DL
   end
 
@@ -40,7 +40,7 @@ flowchart TB
 | Fase | Qué es | Componente |
 |------|--------|--------------|
 | Monitoreo SEACE | Listado multi-entidad, cronograma, estados | `apps/portal/seace_monitor` |
-| Go/no-go rápido | Multi-PDF → Gemini free reader | `analysis/fast_reader.py` |
+| Go/no-go rápido | Multi-PDF → Gemini free reader con perfil por fuente | `analysis/fast_reader.py` |
 | Análisis documental completo | 1.0–1.3 + **1.2b** planos + **1.3b** eje 0 | `scripts/run_step1_to_1_3.py` |
 | Extracción profunda | 1.5+, agentes, BOM | `instrucciones/` + Hermes (externo hoy) |
 
@@ -90,10 +90,13 @@ Variables de entorno: `GEMINI_API_KEY`, `SEACE_HTTP_PROXY` (ver `deploy/.env.exa
 | `descargando` | Descarga en curso |
 | `descargada` | Documentos en disco; pendiente analizar |
 | `analizada` | Fast-path o Paso 1 completado |
-| `portafolio` | Interés confirmado; candidata a 1.5+ |
+| `portafolio` | Seleccionada para análisis profundo; no equivale obligatoriamente a oportunidad |
+| `autorejected` | Rechazada por reglas automáticas de filtro |
 | `descartada` | Descartada; sin datos locales |
 
 Al descartar desde descargados/analizados: se borran disco, `documentos_json` y `AnalysisResult`.
+
+El interés comercial se modela aparte como `interest_status` (`none`, `watching`, `candidate`, `opportunity`, `rejected`). Ver [INPUT_SOURCES.md](INPUT_SOURCES.md).
 
 ## Próximos pasos
 
@@ -104,9 +107,11 @@ Ver [ROADMAP.md](ROADMAP.md). Resumen:
 3. Prefiltros descarte + auto-análisis
 4. Multiusuario
 5. WhatsApp (API existente en otro proyecto)
+6. Multi-ingesta: portales cliente, email, Change Detection como trigger y paquetes documentales
 
 ## Referencias
 
 - [docs/STAGES.md](STAGES.md) — etapas A→D
+- [docs/INPUT_SOURCES.md](INPUT_SOURCES.md) — fuentes, entrypoints y prompts por perfil
 - [instrucciones/C_conversion/01_runbook.md](../instrucciones/C_conversion/01_runbook.md) — runbook conversión
 - [scripts/run_step1_to_1_3.py](../scripts/run_step1_to_1_3.py) — runner Paso 1

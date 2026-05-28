@@ -18,12 +18,12 @@ flowchart LR
 
 | Etapa | Resumen | Estado |
 |-------|---------|--------|
-| **A** | Detectar o registrar oportunidad, descargar docs, análisis rápido (free reader) | ✅ SEACE operativo |
+| **A** | Detectar o registrar item del pipeline, descargar docs, análisis rápido (free reader) | ✅ SEACE operativo |
 | **B** | Elegir docs, uploads, aclaraciones → `portafolio/inputs/` | 📋 planificado |
 | **C** | Normalización PDF→MD, índice (scripts + orquestador ante fallos) | 🔄 existe, sin integrar |
 | **D** | BOM, specs, búsqueda, consolidado (agente) | 🔄 existe, sin integrar |
 
-Modelo canónico: **[docs/STAGES.md](docs/STAGES.md)**.
+Modelo canónico: **[docs/STAGES.md](docs/STAGES.md)**. Fuentes/entrypoints: **[docs/INPUT_SOURCES.md](docs/INPUT_SOURCES.md)**.
 
 ---
 
@@ -52,10 +52,12 @@ No solo SEACE:
 | Entrypoint | Ejemplo | Estado inicial |
 |------------|---------|----------------|
 | Scan automático | Worker + entidades activas (BD / Settings) | `publicada` |
-| Alta directa (entidad + N° proceso) | SEACE u otro portal soportado | `descargada` |
-| Creación manual | Invitación privada, RFP no público | `descargada` |
+| Alta directa (entidad/cliente + referencia) | SEACE u otro portal soportado | `descargada` |
+| Change Detection → adapter | Portal privado/público de cliente | `publicada` o `descargada` |
+| Email / mailbox | Estudio de mercado, specs preliminares, invitación privada | `descargada` |
+| Creación manual | RFP no público, upload de expediente | `descargada` |
 
-El usuario puede marcar **portafolio** sin **analizar**; el sistema ejecuta el free reader con el perfil del canal. Ver [docs/STAGES.md](docs/STAGES.md).
+El usuario puede marcar **portafolio** sin **analizar**; el sistema ejecuta el free reader con perfil según `entity/source/workflow/stage`. El interés comercial vive en `interest_status` (`none`, `watching`, `candidate`, `opportunity`, `rejected`), separado del estado operativo. Ver [docs/STAGES.md](docs/STAGES.md) y [docs/INPUT_SOURCES.md](docs/INPUT_SOURCES.md).
 
 ---
 
@@ -113,6 +115,7 @@ Runbook legacy (deprecado): `instrucciones/01_workflow.md` → migrando a C/D.
 | Doc | Contenido |
 |-----|-----------|
 | [docs/STAGES.md](docs/STAGES.md) | Etapas A–D, ingesta, layouts, renumeración |
+| [docs/INPUT_SOURCES.md](docs/INPUT_SOURCES.md) | Fuentes, entrypoints, triggers, paquetes y perfiles |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Capas, componentes, despliegue |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Fases de producto |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | Portal ↔ pipeline |

@@ -26,8 +26,8 @@ from ..db.maintenance import (
     is_stale_running_analysis,
     recover_stale_analyses,
 )
-from ..db.models import AnalysisResult, Entity, Process, ProcessStatus, utcnow
-from ..db.session import init_db, session_factory
+from ..db.models import AnalysisResult, Entity, InterestStatus, Process, ProcessStatus, utcnow
+from ..db.session import commit_session_with_retry, init_db, session_factory
 from ..process_storage import (
     clear_process_download_metadata,
     delete_process_analysis,
@@ -69,14 +69,17 @@ from .seace_proxy import (
 )
 from .seace_view import can_open_seace
 from .analysis_chat import register_analysis_chat_routes
+from .settings_autoreject import register_autoreject_settings_routes
 from .settings_entities import bootstrap_entities, register_settings_routes
 from .sorting import (
+    PUBLICACIONES_SORT_COLUMNS,
     SORTABLE_COLUMNS,
     WORKFLOW_LIST_DEFAULT_SORT,
     WORKFLOW_LIST_SORT_COLUMNS,
     build_sort_query,
     normalize_dir,
     normalize_sort,
+    normalize_sort_for_columns,
     sort_process_list_views,
 )
 
@@ -232,6 +235,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.globals["can_open_seace"] = can_open_seace
     templates.env.globals["seace_view_path"] = seace_view_path
+    templates.env.globals["InterestStatus"] = InterestStatus
     templates.env.filters["urlquote_path"] = lambda value: quote(str(value), safe="/")
 
     def render(request: Request, name: str, *, db: Session | None = None, **ctx):
@@ -309,7 +313,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
         if objeto:
             q = q.filter(Process.objeto == objeto)
-        sort_col = normalize_sort(sort)
+        sort_col = normalize_sort_for_columns(sort, PUBLICACIONES_SORT_COLUMNS)
         sort_dir = normalize_dir(dir, sort_col)
         rows = q.all()
         processes = sort_process_list_views(
@@ -370,7 +374,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             filtro_objeto=filtro_objeto,
             sort=sort_col,
             sort_dir=sort_dir,
-            sort_columns=SORTABLE_COLUMNS,
+            sort_columns=PUBLICACIONES_SORT_COLUMNS,
             sort_href=sort_href,
             ProcessStatus=ProcessStatus,
             statuses=workflow_statuses,
@@ -408,6 +412,36 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             status_code=303,
         )
 
+    def _descartados_redirect(estado: str = "") -> RedirectResponse:
+        if estado in ("descartada", "autorejected"):
+            return RedirectResponse(f"/descartados?estado={estado}", status_code=303)
+        return RedirectResponse("/descartados", status_code=303)
+
+    def _safe_workflow_path(path: str) -> str:
+        allowed = {"/publicaciones", "/descargados", "/analizados", "/descartados", "/archivados"}
+        return path if path in allowed else "/analizados"
+
+    @app.post("/processes/{process_id}/interest")
+    def cambiar_interes(
+        process_id: int,
+        db: Session = Depends(get_db),
+        interest_status: str = Form(...),
+        return_to: str = Form("/analizados"),
+        sort: str = Form(""),
+        dir: str = Form(""),
+        scroll: str = Form(""),
+    ):
+        proc = db.get(Process, process_id)
+        if proc is None:
+            raise HTTPException(404)
+        try:
+            proc.interest_status = InterestStatus(interest_status)
+        except ValueError as exc:
+            raise HTTPException(400, "Estado de interés inválido") from exc
+        return _workflow_list_redirect(
+            _safe_workflow_path(return_to), sort=sort, dir=dir, scroll=scroll
+        )
+
     @app.post("/publicaciones/{process_id}/descartar")
     def descartar(
         process_id: int,
@@ -437,11 +471,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
 
     @app.get("/descartados", response_class=HTMLResponse)
-    def descartados(request: Request, db: Session = Depends(get_db)):
+    def descartados(
+        request: Request,
+        db: Session = Depends(get_db),
+        estado: str = "",
+    ):
+        status_filter = {
+            "descartada": [ProcessStatus.descartada],
+            "autorejected": [ProcessStatus.autorejected],
+        }.get(estado, [ProcessStatus.descartada, ProcessStatus.autorejected])
         rows = (
             db.query(Process)
             .options(joinedload(Process.entity), joinedload(Process.analysis))
-            .filter(Process.status == ProcessStatus.descartada)
+            .filter(Process.status.in_(status_filter))
             .order_by(Process.updated_at.desc())
             .all()
         )
@@ -451,10 +493,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             db=db,
             active_page="descartados",
             processes=rows,
+            estado=estado if estado in ("descartada", "autorejected") else "",
         )
 
     @app.post("/descartados/{process_id}/restaurar")
-    def restaurar(process_id: int, db: Session = Depends(get_db)):
+    def restaurar(
+        process_id: int,
+        db: Session = Depends(get_db),
+        estado: str = Form(""),
+    ):
         proc = (
             db.query(Process)
             .options(joinedload(Process.analysis))
@@ -463,12 +510,33 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if proc is None:
             raise HTTPException(404)
+        was_autorejected = proc.status == ProcessStatus.autorejected
         new_status = resolve_restore_status(_config, proc)
         if new_status == ProcessStatus.publicada:
             clear_process_download_metadata(proc)
             delete_process_analysis(db, proc)
+        if was_autorejected:
+            proc.auto_reject_exempt = True
+            proc.auto_reject_reason = None
         proc.status = new_status
-        return RedirectResponse("/descartados", status_code=303)
+        return _descartados_redirect(estado)
+
+    @app.post("/descartados/{process_id}/descartar")
+    def descartar_autorejected(
+        process_id: int,
+        db: Session = Depends(get_db),
+        estado: str = Form(""),
+    ):
+        proc = db.get(Process, process_id)
+        if proc is None:
+            raise HTTPException(404)
+        if proc.status == ProcessStatus.descartada:
+            return _descartados_redirect(estado)
+        if proc.status != ProcessStatus.autorejected:
+            raise HTTPException(400, "Solo autorejected puede descartarse desde Descartados")
+        proc.status = ProcessStatus.descartada
+        proc.auto_reject_reason = None
+        return _descartados_redirect(estado)
 
     @app.get("/archivados", response_class=HTMLResponse)
     def archivados(request: Request, db: Session = Depends(get_db)):
@@ -557,7 +625,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             raise HTTPException(400, "Estado no válido para descarga")
 
         proc.status = ProcessStatus.descargando
-        db.commit()
+        commit_session_with_retry(db)
         db.expunge(proc)
 
         def _job():
@@ -1179,6 +1247,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         }
 
     register_settings_routes(app, _config, render, get_db)
+    register_autoreject_settings_routes(app, _config, render, get_db)
     register_analysis_chat_routes(app, _config, get_db)
 
     return app

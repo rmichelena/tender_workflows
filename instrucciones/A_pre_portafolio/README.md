@@ -11,8 +11,9 @@ Sistema **no agéntico**: portal, workers de ingesta, descarga, análisis rápid
 | Función | Componente |
 |---------|------------|
 | Scan / detección | `apps/portal/seace_monitor/scanner.py` |
-| Alta directa (entidad + N°) | *planificado* — adapter por `source` |
+| Alta directa (entidad/cliente + referencia) | *planificado* — adapter por `source` |
 | Creación manual | *planificado* — form + upload |
+| Email / estudio de mercado | *planificado* — mailbox → paquete documental |
 | Descarga documentos | `downloader.py`, Alfresco |
 | Free reader | `analysis/fast_reader.py` |
 | Chat post-análisis | `web/analysis_chat.py` |
@@ -24,15 +25,18 @@ Sistema **no agéntico**: portal, workers de ingesta, descarga, análisis rápid
 
 Ver **[free_reader_profiles.yaml](free_reader_profiles.yaml)**.
 
-| Canal | Cronograma en prompt | Prompt |
-|-------|----------------------|--------|
+| Canal / ruta | Cronograma en prompt | Prompt |
+|--------------|----------------------|--------|
 | **SEACE** | No (ficha portal) | [prompts/seace_free_reader.md](prompts/seace_free_reader.md) |
-| **Privados** (AdP, etc.) | Sí, desde PDF | [prompts/private_documents.template.md](prompts/private_documents.template.md) |
+| **Portales cliente** (AdP, Aeropuertos Andinos, etc.) | Sí, desde PDF cuando exista | [prompts/private_documents.template.md](prompts/private_documents.template.md) |
+| **Email / market study** | Normalmente no existe; no forzar | Perfil planificado |
 | **Manual** | Según UI | [prompts/manual.template.md](prompts/manual.template.md) (dinámico) |
+
+La resolución final debe considerar `entity/source/workflow_profile/stage`; ver [docs/INPUT_SOURCES.md](../../docs/INPUT_SOURCES.md).
 
 ### Portafolio sin analizar
 
-Desde **`descargada`**, marcar **`portafolio`** dispara free reader con perfil del `source` si falta resumen.
+Desde **`descargada`**, marcar **`portafolio`** dispara free reader con perfil del item si falta resumen. Esto no equivale obligatoriamente a `interest_status=opportunity`; puede usarse para análisis profundo de candidatos.
 
 ---
 
@@ -47,7 +51,7 @@ Desde **`descargada`**, marcar **`portafolio`** dispara free reader con perfil d
 
 Código portal:
 
-- `fast_reader.py` → `instrucciones/A_pre_portafolio/prompts/seace_free_reader.md`
+- `fast_reader.py` → perfil desde `free_reader_profiles.yaml`
 - `gemini_session.py` → `instrucciones/A_pre_portafolio/prompts/seace_followup.md`
 
 ---
@@ -68,4 +72,5 @@ Ver [docs/STAGES.md](../../docs/STAGES.md).
 ## Referencias
 
 - [docs/STAGES.md](../../docs/STAGES.md)
+- [docs/INPUT_SOURCES.md](../../docs/INPUT_SOURCES.md)
 - [vision/flujo_completo.md](../vision/flujo_completo.md)

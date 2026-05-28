@@ -12,7 +12,6 @@ from pathlib import Path
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
-from .client import ProcessRow, SeaceClient
 from .config import AppConfig
 from .db.models import Process, ProcessStatus, utcnow
 from .document_storage import (
@@ -25,6 +24,11 @@ from .document_storage import (
     write_manifest,
 )
 from .parser import extract_cronograma_fechas, parse_ficha
+from .seace_search import (
+    apply_list_row_to_process,
+    normalize_nomenclatura,
+    open_ficha_for_process,
+)
 from .watchlist_changelog import append_watchlist_changelog, build_watchlist_changelog_entry
 from .watchlist_compare import watchlist_content_changed
 
@@ -37,26 +41,6 @@ WATCHLIST_STATUSES = frozenset(
         ProcessStatus.portafolio,
     }
 )
-
-
-def _row_from_process(process: Process) -> ProcessRow:
-    return ProcessRow(
-        row_index=0,
-        numero=process.numero or "",
-        fecha_publicacion=process.fecha_publicacion or "",
-        nomenclatura=process.nomenclatura,
-        reiniciado_desde=process.reiniciado_desde or "",
-        objeto=process.objeto or "",
-        descripcion=process.descripcion or "",
-        cuantia=process.cuantia or "",
-        moneda=process.moneda or "",
-        version_seace=process.version_seace or "",
-        nid_proceso=process.nid_proceso,
-        nid_convocatoria=process.nid_convocatoria or "",
-        nid_sistema=process.nid_sistema or "3",
-        link_id=process.link_id or "",
-        ntipo=process.ntipo or "0",
-    )
 
 
 def watchlist_fingerprint(
@@ -108,6 +92,27 @@ def _document_uuids_from_json(documentos_json: str | None) -> set[str]:
         for item in raw
         if isinstance(item, dict) and str(item.get("uuid", "")).strip()
     }
+
+
+def _json_list_has_items(raw_json: str | None) -> bool:
+    if not raw_json:
+        return False
+    try:
+        raw = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(raw, list) and bool(raw)
+
+
+def _validate_watchlist_ficha(process: Process, ficha) -> None:
+    had_content = _json_list_has_items(process.cronograma_json) or _json_list_has_items(
+        process.documentos_json
+    )
+    if had_content and not ficha.cronograma and not ficha.documentos:
+        raise RuntimeError(
+            f"Watchlist: ficha vacía para proceso id={process.id} nid={process.nid_proceso}; "
+            "se conserva cronograma/documentos actuales"
+        )
 
 
 def _stored_docs_by_uuid(documentos_json: str | None) -> dict[str, dict]:
@@ -248,9 +253,9 @@ def _refresh_watchlist_process(
 ) -> bool:
     if not process.entity:
         return False
-    if not process.nid_convocatoria or not process.link_id:
+    if not normalize_nomenclatura(process.nomenclatura):
         logger.warning(
-            "Watchlist: sin metadatos ficha id=%s nid=%s",
+            "Watchlist: sin nomenclatura id=%s nid=%s",
             process.id,
             process.nid_proceso,
         )
@@ -258,15 +263,23 @@ def _refresh_watchlist_process(
 
     _repair_document_metadata(process)
 
-    client = SeaceClient(
-        process.entity.ruc,
-        process.anio,
-        config.rows_per_page,
-        http_proxy=config.http_proxy,
+    try:
+        row, ficha_result, _client = open_ficha_for_process(config, process)
+    except RuntimeError:
+        logger.warning(
+            "Watchlist: fila no encontrada id=%s nomenclatura=%s",
+            process.id,
+            process.nomenclatura,
+        )
+        return False
+    ficha = parse_ficha(
+        ficha_result.html,
+        ficha_result.ficha_id,
+        row.nid_proceso,
+        http_session=_client.session,
+        ficha_url=ficha_result.url,
     )
-    row = _row_from_process(process)
-    ficha_result = client.open_ficha(row)
-    ficha = parse_ficha(ficha_result.html, ficha_result.ficha_id, process.nid_proceso)
+    _validate_watchlist_ficha(process, ficha)
 
     new_cron_json = json.dumps(
         [asdict(c) for c in ficha.cronograma], ensure_ascii=False
@@ -337,6 +350,7 @@ def _refresh_watchlist_process(
     process.content_hash = ficha.content_hash()
     process.ficha_id = ficha.ficha_id
     process.ficha_url = ficha_result.url
+    apply_list_row_to_process(process, row)
     process.documentos_json = new_docs_json
     process.updated_at = datetime.now(timezone.utc)
     process.watch_unread = True

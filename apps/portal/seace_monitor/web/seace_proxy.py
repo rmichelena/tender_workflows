@@ -7,7 +7,6 @@ worker uvicorn (o sticky sessions) cuando se use /seace/p; ver deploy/README.md.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import threading
@@ -21,11 +20,10 @@ from fastapi.responses import RedirectResponse
 
 from bs4 import BeautifulSoup
 
-from ..client import ProcessRow
 from ..config import AppConfig
 from ..db.models import Process
 from ..http_util import requests_proxies
-from .seace_view import can_open_seace, row_from_list_html
+from ..seace_search import log_resolved_row_change, open_ficha_for_process
 
 logger = logging.getLogger(__name__)
 
@@ -189,16 +187,6 @@ def _buscador_list_url(process: Process) -> str:
     )
 
 
-def _buscador_form_action(soup: BeautifulSoup, list_url: str) -> str:
-    form = soup.find("form", id="formBuscador")
-    if not form:
-        raise RuntimeError("No se encontró formBuscador")
-    action = form.get("action", "")
-    if not action or action == ".":
-        return list_url
-    return urljoin(list_url, action)
-
-
 def _proxy_location_from_absolute(absolute_url: str) -> str | None:
     if not absolute_url:
         return None
@@ -213,113 +201,38 @@ def _proxy_location_from_absolute(absolute_url: str) -> str | None:
     return location
 
 
-def _row_for_open(process: Process, list_html: str) -> ProcessRow | None:
-    resolved = row_from_list_html(list_html, process.nid_proceso)
-    if resolved is not None:
-        if resolved.link_id != (process.link_id or ""):
-            logger.info(
-                "SEACE proxy: link_id %s → %s (nid=%s)",
-                process.link_id,
-                resolved.link_id,
-                process.nid_proceso,
-            )
-        return resolved
-    logger.warning(
-        "SEACE proxy: fila no encontrada en listado vivo (nid=%s); "
-        "no se usa link_id almacenado",
-        process.nid_proceso,
-    )
-    return None
-
-
 def _try_server_open_ficha(
     session: requests.Session,
     process: Process,
     list_html: str,
     list_url: str,
+    config: AppConfig,
 ) -> str | None:
-    soup = BeautifulSoup(list_html, "lxml")
-    vs_el = soup.find("input", {"name": "javax.faces.ViewState"})
-    if not vs_el or not vs_el.get("value"):
-        return None
-    row = _row_for_open(process, list_html)
-    if row is None or not row.link_id:
+    del list_html, list_url
+    if not process.entity:
         return None
     try:
-        action = _buscador_form_action(soup, list_url)
-    except RuntimeError:
-        return None
-    post_data = {
-        "formBuscador": "formBuscador",
-        "javax.faces.ViewState": vs_el["value"],
-        "ntipo": row.ntipo,
-        row.link_id: row.link_id,
-        "nidConvocatoria": row.nid_convocatoria,
-        "nidProceso": row.nid_proceso,
-        "nidSistema": row.nid_sistema,
-        "ptoRetorno": "LOCAL_ONGEI",
-    }
-    try:
-        resp = session.post(
-            action,
-            data=post_data,
-            headers={"User-Agent": USER_AGENT},
-            timeout=60,
-            allow_redirects=True,
+        row, ficha_result, _client = open_ficha_for_process(
+            config, process, http_session=session
         )
-    except requests.RequestException:
+    except Exception:
         logger.exception(
-            "SEACE proxy: falló POST apertura ficha nid=%s", process.nid_proceso
+            "SEACE proxy: fila no encontrada por nomenclatura (id=%s nomenclatura=%s)",
+            process.id,
+            process.nomenclatura,
         )
         return None
-    if "fichaSeleccion" not in resp.url:
+    if not row.link_id:
+        return None
+    log_resolved_row_change(process, row, context="SEACE proxy")
+    if "fichaSeleccion" not in ficha_result.url:
         logger.warning(
-            "SEACE proxy: POST ficha no redirigió (nid=%s url=%s)",
+            "SEACE proxy: apertura ficha no redirigió (nid=%s url=%s)",
             process.nid_proceso,
-            resp.url[:120],
+            ficha_result.url[:120],
         )
         return None
-    return _proxy_location_from_absolute(resp.url)
-
-
-def _auto_open_script(row: ProcessRow) -> str:
-    payload: dict[str, str] = {
-        "formBuscador": "formBuscador",
-        "ntipo": row.ntipo,
-        row.link_id: row.link_id,
-        "nidConvocatoria": row.nid_convocatoria,
-        "nidProceso": row.nid_proceso,
-        "nidSistema": row.nid_sistema,
-        "ptoRetorno": "LOCAL_ONGEI",
-    }
-    payload_json = json.dumps(payload, ensure_ascii=False)
-    return (
-        "<script>(function(){"
-        "if(window.__seaceAutoOpen)return;"
-        "window.__seaceAutoOpen=true;"
-        "var form=document.getElementById('formBuscador');"
-        "if(!form)return;"
-        "var vs=document.querySelector('input[name=\"javax.faces.ViewState\"]');"
-        "if(!vs)return;"
-        "var f=document.createElement('form');"
-        "f.method='POST';"
-        "var action=form.getAttribute('action')||form.action||'';"
-        "if(!action||action==='.'){action=window.location.pathname+window.location.search;}"
-        "f.action=action;"
-        "var payload="
-        + payload_json
-        + ";"
-        "Object.keys(payload).forEach(function(k){"
-        "var inp=document.createElement('input');"
-        "inp.type='hidden';inp.name=k;inp.value=payload[k];f.appendChild(inp);"
-        "});"
-        "var vsInp=document.createElement('input');"
-        "vsInp.type='hidden';vsInp.name='javax.faces.ViewState';vsInp.value=vs.value;"
-        "f.appendChild(vsInp);"
-        "document.body.appendChild(f);"
-        "f.submit();"
-        "})();</script>"
-    )
+    return _proxy_location_from_absolute(ficha_result.url)
 
 
 def _open_failure_notice(process: Process) -> str:
@@ -333,17 +246,11 @@ def _open_failure_notice(process: Process) -> str:
     )
 
 
-def _inject_auto_open(html: str, process: Process, *, list_html: str) -> str:
-    row = _row_for_open(process, list_html)
-    if row is None or not row.link_id:
-        notice = _open_failure_notice(process)
-        if re.search(r"</body>", html, re.I):
-            return re.sub(r"</body>", notice + "</body>", html, count=1, flags=re.I)
-        return html + notice
-    script = _auto_open_script(row)
+def _inject_open_failure_notice(html: str, process: Process) -> str:
+    notice = _open_failure_notice(process)
     if re.search(r"</body>", html, re.I):
-        return re.sub(r"</body>", script + "</body>", html, count=1, flags=re.I)
-    return html + script
+        return re.sub(r"</body>", notice + "</body>", html, count=1, flags=re.I)
+    return html + notice
 
 
 def _upstream_path(path: str, query: str) -> str:
@@ -374,7 +281,6 @@ def _build_response(
     upstream: requests.Response,
     *,
     process_for_inject: Process | None = None,
-    list_html_for_open: str | None = None,
 ) -> Response:
     if upstream.status_code in (301, 302, 303, 307, 308):
         location = upstream.headers.get("Location", "")
@@ -398,8 +304,7 @@ def _build_response(
         text = content.decode(upstream.encoding or "utf-8", errors="replace")
         text = _rewrite_text(text)
         if process_for_inject is not None and "html" in media_type:
-            source_html = list_html_for_open or text
-            text = _inject_auto_open(text, process_for_inject, list_html=source_html)
+            text = _inject_open_failure_notice(text, process_for_inject)
         content = text.encode("utf-8")
         content_type = content_type.split(";", 1)[0] + "; charset=utf-8"
 
@@ -485,6 +390,7 @@ def proxy_seace_request(
                 inject_process,
                 upstream.text,
                 list_url,
+                config,
             )
         if proxied:
             return RedirectResponse(proxied, status_code=302)
@@ -493,5 +399,4 @@ def proxy_seace_request(
     return _build_response(
         upstream,
         process_for_inject=inject_process if should_inject else None,
-        list_html_for_open=upstream.text if should_inject else None,
     )

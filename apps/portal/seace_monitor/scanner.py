@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from .auto_reject import AutoRejectRule, apply_auto_reject_rules, load_auto_reject_rules
 from .client import ProcessRow, SeaceClient
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus, utcnow
@@ -29,6 +30,7 @@ class MultiEntityScanner:
     def __init__(self, config: AppConfig, session: Session) -> None:
         self.config = config
         self.session = session
+        self.auto_reject_rules: list[AutoRejectRule] = load_auto_reject_rules(config)
 
     def run_once(self, options: ScanOptions | None = None) -> int:
         opts = options or ScanOptions()
@@ -107,8 +109,9 @@ class MultiEntityScanner:
                 proc = (
                     self.session.query(Process)
                     .filter(
+                        Process.source == "seace",
                         Process.entity_id == entity.id,
-                        Process.nid_proceso == row.nid_proceso,
+                        Process.source_ref == row.nid_proceso,
                     )
                     .one_or_none()
                 )
@@ -191,11 +194,16 @@ class MultiEntityScanner:
             proc = Process(
                 entity_id=entity.id,
                 anio=self.config.anio,
+                source="seace",
+                source_ref=row.nid_proceso,
                 nid_proceso=row.nid_proceso,
                 status=ProcessStatus.publicada,
                 first_seen_at=utcnow(),
             )
             self.session.add(proc)
+        elif not proc.source_ref:
+            proc.source = proc.source or "seace"
+            proc.source_ref = proc.nid_proceso
 
         proc.ficha_id = ficha.ficha_id
         proc.nid_convocatoria = row.nid_convocatoria
@@ -221,6 +229,14 @@ class MultiEntityScanner:
         proc.content_hash = ficha.content_hash()
         proc.last_seen_at = utcnow()
         proc.updated_at = datetime.now(timezone.utc)
+        match = apply_auto_reject_rules(proc, entity, self.auto_reject_rules)
+        if match is not None:
+            logger.info(
+                "Autorechazado %s por regla %s — %s",
+                row.nid_proceso,
+                match.id,
+                row.nomenclatura,
+            )
         self.session.flush()
 
         logger.info(

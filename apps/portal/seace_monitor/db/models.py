@@ -33,9 +33,23 @@ class ProcessStatus(str, enum.Enum):
     descartando = "descartando"
     analizada = "analizada"
     portafolio = "portafolio"
+    autorejected = "autorejected"
     archivando = "archivando"
     descartada = "descartada"
     archivada = "archivada"
+
+
+class InterestStatus(str, enum.Enum):
+    none = "none"
+    watching = "watching"
+    candidate = "candidate"
+    opportunity = "opportunity"
+    rejected = "rejected"
+
+
+def _default_source_ref(context) -> str:
+    params = context.get_current_parameters()
+    return str(params.get("source_ref") or params.get("nid_proceso") or "")
 
 
 class Entity(Base):
@@ -60,7 +74,12 @@ class Entity(Base):
 class Process(Base):
     __tablename__ = "processes"
     __table_args__ = (
-        UniqueConstraint("entity_id", "nid_proceso", name="uq_entity_nid_proceso"),
+        UniqueConstraint(
+            "source",
+            "entity_id",
+            "source_ref",
+            name="uq_process_source_identity",
+        ),
         Index("ix_processes_status_entity", "status", "entity_id"),
         Index("ix_processes_status_objeto", "status", "objeto"),
     )
@@ -71,14 +90,27 @@ class Process(Base):
     )
     anio: Mapped[int] = mapped_column(Integer, index=True)
 
-    nid_proceso: Mapped[str] = mapped_column(String(32), index=True)
+    source: Mapped[str] = mapped_column(String(32), default="seace", index=True)
+    source_ref: Mapped[str | None] = mapped_column(
+        String(256),
+        default=_default_source_ref,
+        index=True,
+    )
+    workflow_profile: Mapped[str] = mapped_column(
+        String(64), default="public_tender", index=True
+    )
+    interest_status: Mapped[InterestStatus] = mapped_column(
+        Enum(InterestStatus, native_enum=False), default=InterestStatus.none, index=True
+    )
+
+    nid_proceso: Mapped[str | None] = mapped_column(String(32), index=True)
     nid_convocatoria: Mapped[str | None] = mapped_column(Text)
     nid_sistema: Mapped[str | None] = mapped_column(String(8))
     link_id: Mapped[str | None] = mapped_column(String(128))
     ntipo: Mapped[str | None] = mapped_column(String(8))
     ficha_id: Mapped[str | None] = mapped_column(String(36))
     status: Mapped[ProcessStatus] = mapped_column(
-        Enum(ProcessStatus), default=ProcessStatus.publicada, index=True
+        Enum(ProcessStatus, native_enum=False), default=ProcessStatus.publicada, index=True
     )
 
     # Columnas del listado SEACE
@@ -102,6 +134,8 @@ class Process(Base):
     list_hash: Mapped[str | None] = mapped_column(String(64))
     content_hash: Mapped[str | None] = mapped_column(String(64))
     data_dir: Mapped[str | None] = mapped_column(String(512))
+    auto_reject_reason: Mapped[str | None] = mapped_column(Text)
+    auto_reject_exempt: Mapped[bool] = mapped_column(default=False, index=True)
 
     watch_unread: Mapped[bool] = mapped_column(default=False, index=True)
     watch_checked_at: Mapped[datetime | None] = mapped_column(

@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from ..config import AppConfig
 from ..db.models import Process
 from ..parser import clean_cronograma_etapa, fechas_listado_from_cronograma_json
@@ -33,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gemini-2.5-pro"
 PROMPT_REL = Path("instrucciones/A_pre_portafolio/prompts/seace_free_reader.md")
+PROFILES_REL = Path("instrucciones/A_pre_portafolio/free_reader_profiles.yaml")
 
 
 def _repo_root(config: AppConfig) -> Path:
@@ -42,8 +45,52 @@ def _repo_root(config: AppConfig) -> Path:
     return Path(__file__).resolve().parents[4]
 
 
-def _load_system_prompt(config: AppConfig) -> str:
-    path = _repo_root(config) / PROMPT_REL
+def _section_block(profile: dict[str, Any], sections: dict[str, Any]) -> str:
+    include_sections = profile.get("include_sections", [])
+    exclude_sections = set(profile.get("exclude_sections", []) or [])
+    if include_sections == "all_except_excluded":
+        keys = [key for key in sections if key not in exclude_sections]
+    elif isinstance(include_sections, list):
+        keys = [str(key) for key in include_sections]
+    else:
+        keys = [key for key, value in sections.items() if value.get("default", False)]
+    lines = []
+    for key in keys:
+        section = sections.get(key)
+        if not isinstance(section, dict):
+            continue
+        label = section.get("label")
+        if label:
+            lines.append(f"- {label}")
+    return "\n".join(lines)
+
+
+def _profiles_for_process(
+    config: AppConfig, process: Process
+) -> tuple[Path, dict[str, Any], dict[str, Any], bool]:
+    repo = _repo_root(config)
+    profiles_path = repo / PROFILES_REL
+    if not profiles_path.exists():
+        return repo / PROMPT_REL, {}, {}, False
+    raw = yaml.safe_load(profiles_path.read_text(encoding="utf-8")) or {}
+    source = (process.source or "seace").strip().lower()
+    profiles = raw.get("profiles", {}) or {}
+    for profile in profiles.values():
+        source_types = [str(item).lower() for item in profile.get("source_types", [])]
+        if source in source_types:
+            template = profile.get("prompt_template")
+            if template:
+                return profiles_path.parent / str(template), raw, profile, True
+    if source != "seace":
+        logger.warning(
+            "Fuente %s sin perfil free-reader; usando prompt SEACE por defecto",
+            source,
+        )
+    return repo / PROMPT_REL, raw, {}, False
+
+
+def _load_system_prompt(config: AppConfig, process: Process) -> str:
+    path, profiles_raw, profile, _matched = _profiles_for_process(config, process)
     if path.exists():
         base = path.read_text(encoding="utf-8")
     else:
@@ -51,6 +98,9 @@ def _load_system_prompt(config: AppConfig) -> str:
             "Lee las bases adjuntas y responde en Markdown narrativo. "
             "No extraigas cronograma del documento."
         )
+    if "{{SECTIONS_BLOCK}}" in base:
+        sections = profiles_raw.get("sections", {}) or {}
+        base = base.replace("{{SECTIONS_BLOCK}}", _section_block(profile, sections))
     today, year, iso = today_anchor_peru()
     return (
         f"{base.rstrip()}\n\n"
@@ -70,6 +120,7 @@ def _load_system_prompt(config: AppConfig) -> str:
 
 def _build_user_context(process: Process, source_paths: list[Path]) -> str:
     today, year, iso = today_anchor_peru()
+    source = process.source or "seace"
     lines = [
         "## Referencia temporal",
         f"- Fecha de hoy: {today} ({iso}, America/Lima)",
@@ -81,29 +132,40 @@ def _build_user_context(process: Process, source_paths: list[Path]) -> str:
     ]
     for path in source_paths:
         lines.append(f"- {path.name}")
-    lines.extend(
-        [
-            f"Nomenclatura SEACE: {process.nomenclatura}",
-            f"Entidad: {process.entity.nombre if process.entity else '—'}",
-        ]
-    )
+    if source == "seace":
+        lines.extend(
+            [
+                f"Nomenclatura SEACE: {process.nomenclatura}",
+                f"Entidad: {process.entity.nombre if process.entity else '—'}",
+            ]
+        )
+    else:
+        lines.append(f"Referencia {source}: {process.source_ref or process.nid_proceso}")
+        if process.nomenclatura:
+            lines.append(f"Nomenclatura / título: {process.nomenclatura}")
+        if process.entity:
+            lines.append(f"Entidad / comprador: {process.entity.nombre}")
     if process.objeto:
         lines.append(f"Objeto (ficha): {process.objeto}")
     if process.descripcion:
-        lines.append(f"Descripción (ficha): {process.descripcion}")
-    fechas = fechas_listado_from_cronograma_json(
-        process.cronograma_json,
-        fallback_consultas=process.fecha_consultas or "",
-        fallback_presentacion=process.fecha_presentacion or "",
-    )
-    if fechas.fecha_consultas:
-        lines.append(f"Fin consultas (ficha SEACE): {fechas.fecha_consultas}")
-    if fechas.fecha_presentacion:
-        lines.append(f"Fin presentación propuestas (ficha SEACE): {fechas.fecha_presentacion}")
-    lines.append(
-        "Recuerda: NO incluyas sección de cronograma del proceso; "
-        "ese dato se toma de la ficha SEACE aparte."
-    )
+        label = "Descripción (ficha)" if source == "seace" else "Descripción"
+        lines.append(f"{label}: {process.descripcion}")
+    if source == "seace":
+        fechas = fechas_listado_from_cronograma_json(
+            process.cronograma_json,
+            fallback_consultas=process.fecha_consultas or "",
+            fallback_presentacion=process.fecha_presentacion or "",
+        )
+        if fechas.fecha_consultas:
+            lines.append(f"Fin consultas (ficha SEACE): {fechas.fecha_consultas}")
+        if fechas.fecha_presentacion:
+            lines.append(
+                f"Fin presentación propuestas (ficha SEACE): {fechas.fecha_presentacion}"
+            )
+        lines.append(
+            "Recuerda: NO incluyas sección de cronograma del proceso; "
+            "ese dato se toma de la ficha SEACE aparte."
+        )
     return "\n".join(lines)
 
 
@@ -137,7 +199,7 @@ def run_gemini_free_reader(
             mime_type = uploaded.mime_type or "application/pdf"
             parts.append(types.Part.from_uri(file_uri=uploaded.uri, mime_type=mime_type))
 
-        system = _load_system_prompt(config)
+        system = _load_system_prompt(config, process)
         user = _build_user_context(process, source_paths)
         parts.append(types.Part.from_text(text=user))
 
@@ -159,6 +221,8 @@ def run_gemini_free_reader(
 
 
 def append_seace_cronograma(markdown: str, process: Process) -> str:
+    if (process.source or "seace") != "seace":
+        return markdown
     if not process.cronograma_json:
         return markdown
     try:

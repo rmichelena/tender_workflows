@@ -1,0 +1,44 @@
+rules:
+  - id: servicio_limpieza
+    reason: Servicios de limpieza fuera de foco
+    query: 'objeto:servicio (limpieza OR "servicio de limpieza" OR fumigacion)'
+
+  - id: servicio_vigilancia
+    reason: Servicios de seguridad/vigilancia fuera de foco
+    query: 'objeto:servicio (vigilancia OR seguridad OR "seguridad y vigilancia")'
+
+  - id: servicio_alimentacion
+    reason: Servicios de alimentación/catering fuera de foco
+    query: 'objeto:servicio (alimentacion OR comedor OR catering OR "servicio de alimentacion")'
+
+  - id: servicio_asesoria_legal
+    reason: Asesoría legal/jurídica fuera de foco
+    query: 'objeto:servicio (legal OR juridico OR juridica OR "defensa legal" OR "asesoria legal")'
+
+  - id: servicio_transporte
+    reason: Servicios de transporte/traslado fuera de foco salvo CORPAC
+    query: 'objeto:servicio ("transporte de personal" OR "traslado de personal" OR "servicio de transporte" OR movilidad) -entidad:corpac'
+
+  - id: servicio_alquiler_vehiculos
+    reason: Alquiler de vehículos/camionetas fuera de foco
+    query: 'objeto:servicio (("alquiler de vehiculos" OR "alquiler de camionetas" OR "alquiler de camioneta" OR "alquiler de unidades vehiculares") OR (alquiler (vehiculos OR camionetas OR camioneta)))'
+
+  - id: servicio_alquiler_local
+    reason: Alquiler de local/ambientes/salones fuera de foco
+    query: 'objeto:servicio ("alquiler de local" OR "alquiler de locales" OR "alquiler de ambientes" OR "alquiler de salon" OR "alquiler de salas")'
+
+  - id: bien_alimentos
+    reason: Alimentos, víveres y raciones fuera de foco
+    query: 'objeto:bien (alimentos OR viveres OR raciones OR leche OR arroz OR azucar)'
+
+  - id: bien_uniformes_vestimenta
+    reason: Uniformes, vestimenta y calzado fuera de foco
+    query: 'objeto:bien (uniformes OR uniforme OR vestimenta OR calzado OR botas OR "ropa de cama")'
+
+  - id: bien_oficina_papel
+    reason: Útiles/equipos de oficina comunes fuera de foco
+    query: 'objeto:bien (utiles OR "utiles de oficina" OR papel OR toner)'
+
+  - id: obra_construccion
+    reason: Obras y consultorías de obra fuera de foco
+    query: 'objeto:("obra" OR "consultoria de obra")'

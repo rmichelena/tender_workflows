@@ -1,7 +1,7 @@
 # Roadmap — tender_workflows
 
 Roadmap del producto integrado (portal + ingesta + análisis + agentes).  
-**Modelo de etapas:** [STAGES.md](STAGES.md) · **Arquitectura:** [ARCHITECTURE.md](ARCHITECTURE.md).
+**Modelo de etapas:** [STAGES.md](STAGES.md) · **Fuentes:** [INPUT_SOURCES.md](INPUT_SOURCES.md) · **Arquitectura:** [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Última actualización: mayo 2026.
 
@@ -31,6 +31,7 @@ Roadmap del producto integrado (portal + ingesta + análisis + agentes).
 | Descarte con limpieza disco/BD | Incluye `documentos_json`, `AnalysisResult` |
 | Proxy Ver en SEACE | Server-side ViewState |
 | Puente Paso 1 completo | Existe; no es el camino default en VPS |
+| Fundación multi-ingesta | `Process.source`/`source_ref`, registry `ingest`, fast reader por `source` en branch `multiple-inputs` |
 
 ---
 
@@ -41,9 +42,10 @@ Roadmap del producto integrado (portal + ingesta + análisis + agentes).
 | Ítem | Descripción | Prioridad |
 |------|-------------|-----------|
 | 1.0 | **Etapa B:** UI staging (selección docs, upload, aclaraciones → `staging_manifest.json`) | Alta |
-| 1.0b | **Multi-entrypoint:** alta directa entidad+N° → `descargada`; creación manual | Alta |
-| 1.0c | **Portafolio sin analizar:** disparar free reader con perfil por `source` | Alta |
+| 1.0b | **Multi-entrypoint:** alta directa entidad/cliente+referencia → `descargada`; creación manual | Alta |
+| 1.0c | **Portafolio sin analizar:** disparar free reader con perfil por `entity/source/workflow/stage` | Alta |
 | 1.0d | **Volumen compartido VPS:** bind `/data` con layout `tenants/default/`; montar en Hermes | Alta — prereq |
+| 1.0e | **Interest status:** `none/watching/candidate/opportunity/rejected` independiente del estado operativo; `autorejected` queda como `status` operativo de reglas automáticas | Alta |
 | 1.1 | Botón **Continuar conversión** → etapa C (`run_step1` / Hermes) | Alta |
 | 1.2 | Chat embebido etapa D (Hermes gateway u Open WebUI acoplado) | Alta |
 | 1.3 | Errores visibles: descarga/análisis fallido con mensaje en UI | Media |
@@ -84,14 +86,14 @@ Reglas sobre campos del **listado/ficha** (sin descargar documentos):
 
 | Regla ejemplo | Acción |
 |---------------|--------|
-| `objeto = servicio` **y** `descripción` contiene `legal` | → `descartada` + motivo |
-| `descripción` contiene `reparto` | → `descartada` + motivo |
-| Keywords configurables por entidad | → `descartada` |
+| `objeto = servicio` **y** `descripción` contiene `legal` | → `autorejected` + motivo |
+| `descripción` contiene `reparto` | → `autorejected` + motivo |
+| Keywords configurables por entidad | → `autorejected` |
 
 **Implementación propuesta:**
 
 - Tabla o YAML `filter_rules` con: condiciones (campo, operador, valor/patrón), acción, prioridad, activo.
-- Motor evalúa tras upsert en scanner; persiste `discard_reason` en `Process`.
+- Motor evalúa tras upsert en scanner; persiste motivo de rechazo automático en `Process`.
 - UI en descartados muestra motivo; reglas editables en Settings (Fase 2).
 
 ### 3.2 Auto-descarga + auto-análisis
@@ -136,7 +138,7 @@ Reglas compuestas que disparan pipeline sin intervención:
 
 **Impacto:** toca rutas web, BD, paths en código y deploy. Preparar `tenant_id=default` **antes** del overhaul reduce el dolor.
 
-**Preparación ya acordada:** `Process` → `Opportunity` + `source`; paths vía `tenant_data_dir()`; Dropbox fuera del flujo automático.
+**Preparación ya acordada:** `Process` debe entenderse como `PipelineItem` conceptual, no como oportunidad. Oportunidad será `interest_status=opportunity`; paths vía `tenant_data_dir()`; Dropbox fuera del flujo automático.
 
 ---
 
@@ -148,7 +150,7 @@ Reglas compuestas que disparan pipeline sin intervención:
 |-------|-----|-------|
 | **WhatsApp** | Alertas nuevas publicaciones, resumen análisis, confirmar portafolio | API ya existe en otro proyecto — integrar vía adapter HTTP |
 | Telegram / Discord | Mantener para desarrollo agentes | Hermes/OpenClaw |
-| Email | Forward de invitaciones directas (entrypoint 3) | 🔮 Fase 6 |
+| Email | Forward/lectura de estudios de mercado e invitaciones directas | 🔮 Fase 6 |
 
 **Integración WhatsApp (borrador):**
 
@@ -176,11 +178,13 @@ sequenceDiagram
 
 | Ítem | Descripción |
 |------|-------------|
-| 6.1 | Adapter email (forwards → `inputs/`) |
-| 6.2 | Segundo portal de licitación |
-| 6.3 | Upload manual de expediente |
-| 6.4 | Workflow profiles: `pe_public`, `market_study`, `multilateral` |
-| 6.5 | `workflows/profiles/*.yaml` referenciando `instrucciones/` |
+| 6.0 | Modelo `PipelineItem` conceptual: `workflow_profile`, `interest_status`, trigger separado de `source` |
+| 6.1 | Adapter email (mailbox IMAP/POP → paquetes documentales; default `market_study`) |
+| 6.2 | Segundo portal de cliente (parser/descarga por portal; Change Detection como trigger opcional) |
+| 6.3 | Upload manual de expediente como fallback controlado |
+| 6.4 | Workflow profiles: `public_tender`, `private_tender`, `market_study`, `multilateral` |
+| 6.5 | Paquetes documentales versionados en manifest/disco; tabla formal después si hace falta |
+| 6.6 | Prompt free-reader dinámico compuesto por `entity/source/workflow_profile/stage` |
 
 ---
 

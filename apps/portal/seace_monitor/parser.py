@@ -7,10 +7,14 @@ import json
 import logging
 import re
 from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING
 
 from bs4 import BeautifulSoup
 
 from .client import ProcessRow, validate_ficha_id
+
+if TYPE_CHECKING:
+    import requests
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +81,14 @@ def row_snapshot_hash(row: ProcessRow) -> str:
     ).hexdigest()
 
 
-def parse_ficha(html: str, ficha_id: str, nid_proceso: str) -> FichaData:
+def parse_ficha(
+    html: str,
+    ficha_id: str,
+    nid_proceso: str,
+    *,
+    http_session: requests.Session | None = None,
+    ficha_url: str | None = None,
+) -> FichaData:
     ficha_id = validate_ficha_id(ficha_id)
     soup = BeautifulSoup(html, "lxml")
     data = FichaData(
@@ -95,7 +106,12 @@ def parse_ficha(html: str, ficha_id: str, nid_proceso: str) -> FichaData:
     data.fecha_publicacion = _label_value(soup, "Fecha y Hora Publicación:")
 
     data.cronograma = _parse_cronograma(soup)
-    data.documentos = _parse_documentos(soup)
+    if http_session is not None and ficha_url:
+        from .ficha_documents import collect_ficha_documentos
+
+        data.documentos = collect_ficha_documentos(html, http_session, ficha_url)
+    else:
+        data.documentos = _parse_documentos(soup)
     return data
 
 

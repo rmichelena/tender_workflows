@@ -1,176 +1,193 @@
-# Multi-review — latest `main` commit
+# Multi-review — `multiple-inputs` branch vs `main`
 
-Review target: `rmichelena/tender_workflows` on `main`  
-Commit reviewed: `4aa386686fc3237f50aa0d4503b7e419334fb38f`  
-Commit title: `Add correlativo ordering and sortable columns to descargados/analizados lists`  
-Scope: latest commit only, with surrounding code inspection.
+Review target: `rmichelena/tender_workflows`  
+Branch: `multiple-inputs` at `97ac11580b4897ddd10b4587a96707a009eb559b`  
+Base: `main` at `b9dd8ee455d73a6a4a2391d2bf8a2595ebc4e665`  
+Scope: full branch diff, 34 files, +1621/-107
 
-Reviewers used:
-- GPT-5.5
-- DeepSeek V4 Pro
-- GLM-5.1
-- Qwen 3.6 Plus
-
-Note: local `pytest` was unavailable in the review snapshot (`No module named pytest`), so this review is based on static code/diff inspection.
+Reviewers:
+- GPT-5.5 (via OpenAI) — completed
+- GLM-5.1 (via zai) — completed
+- DeepSeek V4 Pro (via OpenRouter) — completed
+- Qwen 3.6 Plus — unavailable (Fireworks provider error)
 
 ## Executive summary
 
-The new `list_order.py` abstraction is small and mostly sound, but the integration has several runtime and workflow-state regressions. Two web actions can crash immediately, and the analysis state transition can leave new or re-analyzed items with missing or duplicate correlativos.
+The branch introduces auto-reject rules, multi-source ingest adapters, workflow profiles, and a settings editor. The architecture is clean with good test coverage.
+
+Key risks: auto-reject restore loop, query parser edge cases, YAML settings editor without input limits, and backfill running on every boot.
 
 Recommended fix order:
-1. Define/use the missing workflow redirect helper and fix the `descartar_analizado → archivar_analizado` call signature.
-2. Fix analysis transitions so processes leave/enter list ranks in the correct order.
-3. Preserve `sort`/`dir` in workflow action redirects.
-4. Fix archived restore/repair paths that transition to `analizada` without assigning `list_rank_analizados`.
+1. Fix restore loop for autorejected processes.
+2. Harden query parser: reject empty `_And([])`, unmatched parens, trailing `OR`, unknown fields.
+3. Add size/rate limits to YAML settings editor.
+4. Run backfill only once (migration marker).
+5. Add Postgres adaptation for `interest_status` column.
+6. Validate field names in queries.
 
 ## Findings
 
-### 1. Critical — `_workflow_list_redirect()` is called but never defined
+### 1. Critical — Restored autorejected processes get silently re-rejected
 
-- File: `apps/portal/seace_monitor/web/app.py`
-- Line: `1013`
-- Reviewers: GPT-5.5, DeepSeek, GLM, Qwen
+- File: `apps/portal/seace_monitor/web/app.py` line `483-498`
+- Reviewers: GPT-5.5, GLM, DeepSeek (all three agree)
 
-`cambiar_estado_analizados()` commits a status change and then calls `_workflow_list_redirect(...)`, but no function with that name exists in the codebase. `workflow_list_query()` exists and is imported, but the wrapper redirect helper was never defined.
+When a user restores an autorejected process via "Restaurar", the route sets status to `publicada` but does NOT clear `auto_reject_reason`. On the next scanner cycle, the same rule matches and the process is silently re-rejected. The user's restore is undone every scan cycle with no exemption mechanism.
 
-Trace:
-1. User posts `/analizados/{id}/estado` to toggle `analizada ↔ portafolio`.
-2. Route validates and commits `proc.status`.
-3. Python evaluates `_workflow_list_redirect(...)`.
-4. `NameError` → HTTP 500 after the DB change is already persisted.
+Trace: Restaurar → `publicada` → scanner runs → `apply_auto_reject_rules` → match → `autorejected` again.
 
-Fix:
-
-```python
-def _workflow_list_redirect(
-    path: str,
-    *,
-    sort: str = "",
-    dir: str = "",
-    scroll: str = "",
-) -> RedirectResponse:
-    return RedirectResponse(
-        workflow_list_query(path, sort=sort, dir=dir, scroll=scroll),
-        status_code=303,
-    )
-```
-
-Or inline `RedirectResponse(workflow_list_query(...), status_code=303)` at the call site.
+Fix: Clear `proc.auto_reject_reason = None` when restoring, and/or add an `auto_reject_exempt` flag.
 
 ---
 
-### 2. Critical — `descartar_analizado()` passes unsupported `sort`/`dir` kwargs
+### 2. Critical — `_And([])` evaluates to `True` — malformed queries match everything
 
-- File: `apps/portal/seace_monitor/web/app.py`
-- Line: `991`
-- Reviewers: GPT-5.5, GLM, Qwen
+- File: `apps/portal/seace_monitor/auto_reject.py` line `73-74`
+- Reviewers: GPT-5.5, DeepSeek
 
-`descartar_analizado()` accepts `sort` and `dir` form values and forwards them to `archivar_analizado(...)`, but `archivar_analizado()` only accepts `process_id`, `background_tasks`, `db`, and `scroll`. This raises `TypeError` on every compatibility discard action for analyzed processes.
+`_And([]).evaluate()` returns `all([])` which is `True`. A trailing `OR` (e.g., `objeto:servicio OR `) or bare `()` produces `_And([])`, matching every process. A typo in the rules editor could silently auto-reject the entire pipeline.
 
-Trace:
-1. User posts `/analizados/{id}/descartar`.
-2. `descartar_analizado()` calls `archivar_analizado(..., scroll=scroll, sort=sort, dir=dir)`.
-3. Python raises `TypeError: archivar_analizado() got an unexpected keyword argument 'sort'`.
-
-Fix: either add `sort: str = Form("")` and `dir: str = Form("")` to `archivar_analizado()`, or avoid the direct Python call and delegate to a shared helper that accepts normalized redirect context.
+Fix: Return `False` for empty `_And([])`, or raise `ValueError` in validation when a query parses to an empty node tree.
 
 ---
 
-### 3. High — newly analyzed processes do not get an `analizados` correlativo
+### 3. High — Unmatched opening parenthesis silently accepted
 
-- File: `apps/portal/seace_monitor/analysis/runner.py`
-- Line: `185-188`
-- Reviewer: GPT-5.5; verified against code
+- File: `apps/portal/seace_monitor/auto_reject.py` line `155-162`
+- Reviewer: DeepSeek
 
-On first successful analysis, the process status is still `descargada` when `enter_analizados_list()` is called. `enter_analizados_list()` immediately returns unless the current status is `analizada`, `portafolio`, or `archivando`, so `list_rank_analizados` remains `NULL`. The code sets `process.status = analizada` only afterward.
+`_parse_primary` pops `(` but if the closing `)` is missing, the parser silently returns without error. `(objeto:servicio` passes validation.
 
-Trace:
-1. Process starts as `descargada`, `list_rank_analizados=None`.
-2. Analysis succeeds.
-3. `leave_descargados_list()` clears the descargados rank.
-4. `enter_analizados_list()` runs while `process.status == descargada`, so it no-ops.
-5. `process.status = analizada`.
-6. The process appears in `analizados` with correlativo `—` / null rank.
-
-Fix: set `process.status = ProcessStatus.analizada` before calling `enter_analizados_list()`, or change the rank helper to accept an explicit target list independent of current status.
+Fix: After parsing inside `()`, if `_peek()` is not `)`, raise `ValueError("Unmatched parenthesis")`.
 
 ---
 
-### 4. High — re-analysis can preserve stale `list_rank_analizados` and create duplicate correlativos
+### 4. High — Unknown query field names silently return empty string
 
-- File: `apps/portal/seace_monitor/analysis/runner.py`
-- Line: `157-159`, `185-188`
-- Reviewer: DeepSeek; verified against code
+- File: `apps/portal/seace_monitor/auto_reject.py` line `47-58`
+- Reviewer: DeepSeek
 
-When re-analyzing an already `analizada` process, the code changes it to `descargada` and enters the descargados list, but never calls `leave_analizados_list()`. The old `list_rank_analizados` remains stored while the process is temporarily outside `ANALIZADOS_LIST_STATUSES`. If other analyzed processes enter/leave and renumber during the analysis, the stale rank can collide when the process returns.
+`_Context.fields` only defines `objeto`, `descripcion`, `nomenclatura`, `entidad`, `source`. Writing `cuantia:50000` silently returns `""` — the condition never matches but no error is raised.
 
-Concrete trace:
-1. `P1(rank=1)`, `P2(rank=2)`, `P3(rank=3)` are `analizada`.
-2. Re-analysis starts for `P2`: status becomes `descargada`, but `list_rank_analizados` stays `2`.
-3. `P3` leaves or another process enters, causing `_renumber_list()` among currently analyzed rows. `P2` is excluded because status is `descargada`.
-4. Another process can receive rank `2`.
-5. `P2` succeeds; `list_rank_analizados is not None`, so `enter_analizados_list()` is skipped.
-6. `P2` returns to `analizada` with stale rank `2`, duplicating another row.
-
-Fix: before temporarily moving an analyzed process to `descargada`, call `leave_analizados_list(self.session, process)`. Then success can safely re-enter `analizados` with a fresh rank.
+Fix: Validate field names against `ALLOWED_FIELDS` at parse time and raise `ValueError` on unknown fields.
 
 ---
 
-### 5. Medium — workflow list actions lose active `sort`/`dir` context
+### 5. High — Query ending with `:` causes `IndexError`
 
-- File: `apps/portal/seace_monitor/web/app.py`
-- Lines: `856-897`
-- Reviewers: GPT-5.5, DeepSeek, GLM
+- File: `apps/portal/seace_monitor/auto_reject.py` line `156`
+- Reviewer: DeepSeek
 
-The templates submit hidden `sort` and `dir` fields, but `descartar_descargado()` ignores them and `archivar_analizado()` does not accept them. Redirects only preserve `scroll`, sending users back to default correlativo ordering after actions.
+`objeto:` → `_parse_factor` consumes `:` → recursive call → `_parse_primary()` with empty token list → `IndexError`.
 
-Trace:
-1. User opens `/descargados?sort=fecha_publicacion&dir=desc`.
-2. User clicks discard; form includes hidden `sort`/`dir`.
-3. Route ignores those fields and redirects to `/descargados` or `/descargados?scroll=N`.
-4. User loses the active sort direction/column.
-
-Fix: accept `sort` and `dir` in both routes, normalize them, and build redirects via `workflow_list_query(path, sort=sort, dir=dir, scroll=scroll)`.
+Fix: Add bounds check at top of `_parse_primary`: `if self.index >= len(self.tokens): raise ValueError("Unexpected end of query")`.
 
 ---
 
-### 6. Medium — `restore_archived_process()` early return can transition to `analizada` without rank
+### 6. High — YAML settings editor has no input size/rate limits
 
-- File: `apps/portal/seace_monitor/process_storage.py`
-- Line: `205-216`
-- Reviewer: DeepSeek; related issue also noted by Qwen for repair path
+- File: `apps/portal/seace_monitor/web/settings_autoreject.py` line `41-52`
+- Reviewers: GLM, DeepSeek
 
-If the archived process directory is missing, `restore_archived_process()` sets status based on whether completed analysis exists and returns early. When analysis exists, it sets `status = analizada` but does not call `enter_analizados_list()`, leaving `list_rank_analizados = NULL`.
+POST handler reads `rules_yaml` with no max size. A large payload causes excessive memory/CPU in the regex tokenizer and recursive parser.
 
-Trace:
-1. Archived process has `analysis.status == "done"`.
-2. Its archived `data_dir` is missing, so `src is None or not src.is_dir()`.
-3. Function sets `process.status = ProcessStatus.analizada` and returns.
-4. Process appears in `analizados` without correlativo.
-
-Fix: in the early-return branch, call `enter_analizados_list(session, process)` after assigning `analizada`; similarly call `enter_descargados_list()` if choosing `descargada` in future variants.
+Fix: Add max YAML size (e.g., 64KB), max rule count (e.g., 50-100 rules), max query length per rule.
 
 ---
 
-### 7. Low — `repair_archived_processes()` also transitions to `analizada` without rank
+### 7. High — Backfill runs on every `init_db()` call
 
-- File: `apps/portal/seace_monitor/process_storage.py`
-- Line: `343-344`
-- Reviewers: Qwen, DeepSeek
+- File: `apps/portal/seace_monitor/db/session.py` line `99`
+- Reviewer: GLM
 
-For archived processes missing their data directory but still having completed analysis, `repair_archived_processes()` clears download metadata and sets `status = analizada` without assigning `list_rank_analizados`. This is rarer than the restore path, but it creates the same null-correlativo state.
+`_backfill_process_sources` and `_backfill_process_pipeline_fields` execute `UPDATE ... WHERE ... IS NULL` on every app startup. For large tables this is two full-table scans per boot.
 
-Fix: call `enter_analizados_list(session, proc)` after setting `proc.status = ProcessStatus.analizada`, or run/backfill ranks after repairs.
+Fix: Add a migration marker to run backfills only once, or check `SELECT COUNT(*) WHERE ... IS NULL` first.
 
-## Notes on filtered findings
+---
 
-- `_append_rank()` has a theoretical concurrent max-rank race if multiple workers mutate ranks simultaneously. I did not include it as a main finding because the current deployment model may serialize writes enough to make it less urgent, and the more immediate duplicate-rank bug above is concrete in normal re-analysis flow.
-- Redundant `clear_list_ranks()` after `leave_descargados_list()` is harmless and not worth blocking on.
+### 8. Medium — `_Field` nesting drops outer field silently (`a:b:term`)
 
-## Suggested tests to add
+- File: `apps/portal/seace_monitor/auto_reject.py` line `97`
+- Reviewer: GLM
 
-- FastAPI route test for `/analizados/{id}/estado` confirming no 500 and sort/dir/scroll preservation.
-- FastAPI route test for `/analizados/{id}/descartar` confirming no `TypeError`.
-- Integration test: first successful analysis of a `descargada` process assigns `list_rank_analizados`.
-- Integration test: re-analysis of an existing `analizada` process leaves and re-enters `analizados` without duplicate ranks.
-- `restore_archived_process()` missing-dir branch assigns rank when returning to `analizada`.
+`_with_field` has `if isinstance(node, _Field): return node` which ignores the incoming field. Nested field syntax silently drops the outer field.
+
+Fix: Propagate the field or raise `ValueError` for nested field syntax.
+
+---
+
+### 9. Medium — `load_auto_reject_rules` re-serializes YAML just to filter `enabled`
+
+- File: `apps/portal/seace_monitor/auto_reject.py` line `~195-218`
+- Reviewers: GPT-5.5, GLM, DeepSeek (all three agree)
+
+`yaml.safe_load` → filter → `yaml.safe_dump` → `validate_rules_yaml` → `yaml.safe_load` again. Wasteful double-parse that can alter quoting and loses comments.
+
+Fix: Validate directly from the parsed dict without re-serializing.
+
+---
+
+### 10. Medium — `interest_status` column: Enum vs VARCHAR mismatch on PostgreSQL
+
+- File: `apps/portal/seace_monitor/db/models.py` line `92`; `db/session.py` line `20`
+- Reviewer: GLM
+
+`interest_status` is mapped as `Enum(InterestStatus)` but the migration adds `VARCHAR(32) DEFAULT 'none'`. On PostgreSQL, `create_all` creates a native ENUM while `_ensure_table_columns` adds VARCHAR — type mismatch.
+
+Fix: Add Postgres adaptation for this column type in `_adapt_column_type`.
+
+---
+
+### 11. Medium — `source_ref` default lambda may return `None` in bulk/raw contexts
+
+- File: `apps/portal/seace_monitor/db/models.py` line `83-87`
+- Reviewers: GLM, DeepSeek
+
+The default lambda `context.get_current_parameters().get("nid_proceso")` returns `None` if `nid_proceso` is absent from insert parameters (possible in bulk inserts or non-SEACE sources).
+
+Fix: Verify `nid_proceso` presence; for non-SEACE sources, make the default source-aware.
+
+---
+
+### 12. Medium — `descartar` routes don't handle `autorejected` status
+
+- File: `apps/portal/seace_monitor/web/app.py` line `459`
+- Reviewer: GLM
+
+Autorejected processes appear in `/descartados` but can only be "restaurar"ed, not "descartar"ed (fully deleted). Attempting to descartar from another list gives an opaque 400.
+
+Fix: Explicitly handle `autorejected` in descartar routes or document the state transitions.
+
+---
+
+### 13. Medium — `_load_system_prompt` reads profiles YAML twice per invocation
+
+- File: `apps/portal/seace_monitor/analysis/fast_reader.py` line `~53, 85`
+- Reviewer: GPT-5.5
+
+`_prompt_path_for_process` parses `free_reader_profiles.yaml` once for path resolution, then `_load_system_prompt` parses it again for section block expansion.
+
+Fix: Parse once and reuse the result.
+
+---
+
+### 14. Low — Unregistered sources silently fall back to SEACE prompt
+
+- File: `apps/portal/seace_monitor/analysis/fast_reader.py` line `~53`
+- Reviewer: GPT-5.5
+
+If a new source is added without a corresponding profile, the SEACE-specific prompt is used with no warning.
+
+Fix: Log a warning when no profile matches and `source != "seace"`.
+
+---
+
+### 15. Low — `validate_rules_yaml` return value unused by settings editor
+
+- File: `apps/portal/seace_monitor/web/settings_autoreject.py` line `46-48`
+- Reviewer: DeepSeek
+
+The save handler validates but then writes raw user text to disk, discarding the validated representation. The return value of `validate_rules_yaml` is unused.
+
+Fix: Intentional for preserving formatting, but worth documenting with an explicit assignment.

@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from .analysis.analysis_history import archive_analysis_before_rerun
+from .client import ProcessRow
 from .config import AppConfig
 from .db.models import AnalysisResult, Base, Entity, Process, ProcessStatus
 from .parser import CronogramaEtapa, Documento, FichaData
@@ -21,6 +22,31 @@ from .watchlist import (
     watchlist_fingerprint,
 )
 from .web.detail_data import parse_cronograma
+
+
+def _row(nid: str, *, link_id: str = "link") -> ProcessRow:
+    return ProcessRow(
+        row_index=0,
+        numero="",
+        fecha_publicacion="",
+        nomenclatura="T",
+        reiniciado_desde="",
+        objeto="",
+        descripcion="",
+        cuantia="",
+        moneda="",
+        version_seace="",
+        nid_proceso=nid,
+        nid_convocatoria="conv-fresh",
+        nid_sistema="3",
+        link_id=link_id,
+        ntipo="0",
+    )
+
+
+def _open_ficha_result(row: ProcessRow) -> tuple[ProcessRow, MagicMock, MagicMock]:
+    ficha_result = MagicMock(html="<html>", url="http://x", ficha_id="f1")
+    return row, ficha_result, MagicMock()
 
 
 def test_watchlist_fingerprint_detects_document_change():
@@ -174,8 +200,6 @@ def test_refresh_preserves_prev_baseline_while_unread(
         Documento("u2", "b.pdf", "", "", "", "", "3"),
     ]
     ficha = _ficha_with_docs(new_docs)
-    mock_client = MagicMock()
-    mock_client.open_ficha.return_value = MagicMock(html="<html>", url="http://x", ficha_id="f1")
 
     def _download(docs_dir, doc, **kwargs):
         path = docs_dir / f"{doc['uuid']}.pdf"
@@ -184,13 +208,101 @@ def test_refresh_preserves_prev_baseline_while_unread(
         return doc["uuid"] == "u2"
 
     with (
-        patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist.open_ficha_for_process", return_value=_open_ficha_result(_row(proc.nid_proceso))),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document", side_effect=_download),
     ):
         assert _refresh_watchlist_process(cfg, watch_session, proc) is True
 
     assert proc.watch_documentos_prev_json == baseline
+
+
+def test_refresh_uses_current_row_when_process_moved_to_later_page(
+    watch_session: Session, tmp_path: Path
+):
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[{"uuid": "u1", "nombre": "a.pdf"}],
+    )
+    current_row = _row("continued-nid", link_id="fresh-link")
+    current_row.nomenclatura = proc.nomenclatura
+    ficha = _ficha_with_docs([Documento("u1", "a.pdf", "", "", "", "", "3")])
+
+    with (
+        patch(
+            "seace_monitor.watchlist.open_ficha_for_process",
+            return_value=_open_ficha_result(current_row),
+        ),
+        patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
+        patch("seace_monitor.watchlist.download_and_store_document"),
+    ):
+        _refresh_watchlist_process(cfg, watch_session, proc)
+    assert proc.nid_proceso == "continued-nid"
+
+
+def test_refresh_resolves_row_when_ficha_metadata_missing(
+    watch_session: Session, tmp_path: Path
+):
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[{"uuid": "u1", "nombre": "a.pdf"}],
+    )
+    proc.link_id = None
+    proc.nid_convocatoria = None
+    current_row = _row("fresh-nid", link_id="fresh-link")
+    current_row.nomenclatura = proc.nomenclatura
+    ficha = _ficha_with_docs([Documento("u1", "a.pdf", "", "", "", "", "3")])
+
+    with (
+        patch(
+            "seace_monitor.watchlist.open_ficha_for_process",
+            return_value=_open_ficha_result(current_row),
+        ) as open_ficha,
+        patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
+        patch("seace_monitor.watchlist.download_and_store_document"),
+    ):
+        _refresh_watchlist_process(cfg, watch_session, proc)
+
+    open_ficha.assert_called_once()
+    assert proc.link_id == "fresh-link"
+    assert proc.nid_convocatoria == "conv-fresh"
+
+
+def test_refresh_rejects_empty_ficha_when_existing_content_would_be_wiped(
+    watch_session: Session, tmp_path: Path
+):
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[{"uuid": "u1", "nombre": "a.pdf"}],
+    )
+    old_cronograma = proc.cronograma_json
+    old_docs = proc.documentos_json
+    empty_ficha = FichaData(
+        ficha_id="f1",
+        nid_proceso=proc.nid_proceso,
+        nomenclatura="",
+        descripcion="",
+        objeto="",
+        fecha_publicacion="",
+        cronograma=[],
+        documentos=[],
+    )
+
+    with (
+        patch("seace_monitor.watchlist.open_ficha_for_process", return_value=_open_ficha_result(_row(proc.nid_proceso))),
+        patch("seace_monitor.watchlist.parse_ficha", return_value=empty_ficha),
+    ):
+        with pytest.raises(RuntimeError, match="vacía"):
+            _refresh_watchlist_process(cfg, watch_session, proc)
+
+    assert proc.cronograma_json == old_cronograma
+    assert proc.documentos_json == old_docs
 
 
 def test_refresh_rollback_on_download_failure(
@@ -205,15 +317,12 @@ def test_refresh_rollback_on_download_failure(
         Documento("u2", "b.pdf", "", "", "", "", "3"),
     ]
     ficha = _ficha_with_docs(new_docs)
-    mock_client = MagicMock()
-    mock_client.open_ficha.return_value = MagicMock(html="<html>", url="http://x", ficha_id="f1")
-
     def _fail_u2(_uuid, dest, **kwargs):
         if "u2" in str(dest) or dest.name.startswith("b"):
             raise OSError("download failed")
 
     with (
-        patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist.open_ficha_for_process", return_value=_open_ficha_result(_row(proc.nid_proceso))),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document", side_effect=_fail_u2),
     ):
@@ -237,11 +346,8 @@ def test_refresh_advances_checked_at_on_success(
     )
     ficha = _ficha_with_docs([Documento("u1", "a.pdf", "", "", "", "", "3")])
 
-    mock_client = MagicMock()
-    mock_client.open_ficha.return_value = MagicMock(html="<html>", url="http://x", ficha_id="f1")
-
     with (
-        patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist.open_ficha_for_process", return_value=_open_ficha_result(_row(proc.nid_proceso))),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document"),
     ):
@@ -265,13 +371,8 @@ def test_refresh_triggers_on_fecha_publicacion_only(
     watch_session.flush()
     ficha = _ficha_with_docs([Documento("u1", "a.pdf", "", "", "", "", "3")])
     ficha.fecha_publicacion = "02/01/26"
-    mock_client = MagicMock()
-    mock_client.open_ficha.return_value = MagicMock(
-        html="<html>", url="http://x", ficha_id="f1"
-    )
-
     with (
-        patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist.open_ficha_for_process", return_value=_open_ficha_result(_row(proc.nid_proceso))),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document"),
     ):
@@ -300,13 +401,8 @@ def test_refresh_fecha_only_preserves_stored_document_names(
     watch_session.flush()
     ficha = _ficha_with_docs([Documento("u1", "(2646 KB)", "", "", "", "", "3")])
     ficha.fecha_publicacion = "02/01/26"
-    mock_client = MagicMock()
-    mock_client.open_ficha.return_value = MagicMock(
-        html="<html>", url="http://x", ficha_id="f1"
-    )
-
     with (
-        patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist.open_ficha_for_process", return_value=_open_ficha_result(_row(proc.nid_proceso))),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document"),
     ):
@@ -334,11 +430,6 @@ def test_refresh_does_not_write_manifest_on_failed_download_validation(
         Documento("u2", "b.pdf", "", "", "", "", "3"),
     ]
     ficha = _ficha_with_docs(new_docs)
-    mock_client = MagicMock()
-    mock_client.open_ficha.return_value = MagicMock(
-        html="<html>", url="http://x", ficha_id="f1"
-    )
-
     def _download(docs_dir, doc, **kwargs):
         path = docs_dir / f"{doc['uuid']}.pdf"
         path.write_bytes(b"" if doc["uuid"] == "u2" else b"pdf")
@@ -346,7 +437,7 @@ def test_refresh_does_not_write_manifest_on_failed_download_validation(
         return doc["uuid"] == "u2"
 
     with (
-        patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist.open_ficha_for_process", return_value=_open_ficha_result(_row(proc.nid_proceso))),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document", side_effect=_download),
     ):
@@ -373,11 +464,6 @@ def test_refresh_persists_post_download_document_names(
         Documento("u2", "b.pdf", "", "", "", "", "3"),
     ]
     ficha = _ficha_with_docs(new_docs)
-    mock_client = MagicMock()
-    mock_client.open_ficha.return_value = MagicMock(
-        html="<html>", url="http://x", ficha_id="f1"
-    )
-
     def _download(docs_dir, doc, **kwargs):
         doc["archivo"] = f"{doc['uuid']}.pdf"
         doc["nombre"] = f"Canonical-{doc['uuid']}.pdf"
@@ -387,7 +473,7 @@ def test_refresh_persists_post_download_document_names(
         return True
 
     with (
-        patch("seace_monitor.watchlist.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.watchlist.open_ficha_for_process", return_value=_open_ficha_result(_row(proc.nid_proceso))),
         patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
         patch("seace_monitor.watchlist.download_and_store_document", side_effect=_download),
     ):

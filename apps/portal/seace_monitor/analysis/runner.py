@@ -10,7 +10,6 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from ..client import ProcessRow, SeaceClient
 from ..config import AppConfig
 from ..db.models import AnalysisResult, Process, ProcessStatus, utcnow
 from ..list_order import (
@@ -28,7 +27,11 @@ from ..document_storage import (
     prefer_canonical_archivo,
     write_manifest,
 )
-from ..parser import parse_ficha
+from ..parser import extract_cronograma_fechas, parse_ficha
+from ..seace_search import (
+    apply_list_row_to_process,
+    open_ficha_for_process,
+)
 from .analysis_lock import AnalysisBusyError, analysis_lock
 from .document_prep import extract_archives, resolve_selected_documents
 from .fast_reader import run_fast_analysis
@@ -90,8 +93,10 @@ class AnalysisRunner:
         docs_dir = proc_dir / "documentos"
         docs_dir.mkdir(parents=True, exist_ok=True)
 
+        # Liberar SQLite antes del fetch SEACE (puede tardar varios segundos).
+        self.session.commit()
+
         docs = self._fetch_documentos_from_seace(process, entity.ruc)
-        # Commit antes de la descarga larga (SEACE) para no bloquear SQLite.
         self.session.commit()
 
         try:
@@ -285,31 +290,26 @@ class AnalysisRunner:
     def _fetch_documentos_from_seace(self, process: Process, ruc: str) -> list[dict]:
         from dataclasses import asdict
 
-        client = SeaceClient(
-            ruc,
-            process.anio,
-            self.config.rows_per_page,
-            http_proxy=self.config.http_proxy,
+        row, ficha, client = open_ficha_for_process(self.config, process)
+        parsed = parse_ficha(
+            ficha.html,
+            ficha.ficha_id,
+            row.nid_proceso,
+            http_session=client.session,
+            ficha_url=ficha.url,
         )
-        row = ProcessRow(
-            row_index=0,
-            numero=process.numero or "",
-            fecha_publicacion=process.fecha_publicacion or "",
-            nomenclatura=process.nomenclatura,
-            reiniciado_desde=process.reiniciado_desde or "",
-            objeto=process.objeto or "",
-            descripcion=process.descripcion or "",
-            cuantia=process.cuantia or "",
-            moneda=process.moneda or "",
-            version_seace=process.version_seace or "",
-            nid_proceso=process.nid_proceso,
-            nid_convocatoria=process.nid_convocatoria or "",
-            nid_sistema=process.nid_sistema or "3",
-            link_id=process.link_id or "",
-            ntipo=process.ntipo or "0",
+        fechas = extract_cronograma_fechas(parsed.cronograma)
+        apply_list_row_to_process(process, row)
+        if not process.fecha_publicacion and parsed.fecha_publicacion:
+            process.fecha_publicacion = parsed.fecha_publicacion
+        process.fecha_consultas = fechas.fecha_consultas
+        process.fecha_presentacion = fechas.fecha_presentacion
+        process.cronograma_json = json.dumps(
+            [asdict(c) for c in parsed.cronograma], ensure_ascii=False
         )
-        ficha = client.open_ficha(row)
-        parsed = parse_ficha(ficha.html, ficha.ficha_id, process.nid_proceso)
+        process.ficha_id = parsed.ficha_id
+        process.ficha_url = ficha.url
+        process.content_hash = parsed.content_hash()
         return [asdict(d) for d in parsed.documentos]
 
     def _refresh_documentos(self, process: Process, ruc: str) -> list[dict]:

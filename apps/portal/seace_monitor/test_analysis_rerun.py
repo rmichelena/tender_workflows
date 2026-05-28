@@ -5,15 +5,17 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from .analysis.runner import AnalysisRunner
+from .client import ProcessRow
 from .config import AppConfig
 from .db.models import AnalysisResult, Base, Entity, Process, ProcessStatus
+from .parser import CronogramaEtapa, Documento, FichaData
 
 
 @contextmanager
@@ -178,3 +180,280 @@ def test_analysis_snapshot_includes_run_id_for_rollback():
     analysis = AnalysisResult(status="done", run_id="run-abc")
     snap = AnalysisRunner._analysis_snapshot(analysis)
     assert snap["run_id"] == "run-abc"
+
+
+def test_download_fetches_documents_with_current_row_from_later_page(
+    analysis_session: Session,
+):
+    cfg = AppConfig()
+    entity = analysis_session.query(Entity).one()
+    proc = Process(
+        entity_id=entity.id,
+        anio=2026,
+        nid_proceso="target-nid",
+        nomenclatura="T-target",
+        status=ProcessStatus.publicada,
+        nid_convocatoria="old-conv",
+        link_id="old-link",
+    )
+    analysis_session.add(proc)
+    analysis_session.flush()
+    fresh_row = ProcessRow(
+        row_index=0,
+        numero="",
+        fecha_publicacion="",
+        nomenclatura="T-target",
+        reiniciado_desde="",
+        objeto="",
+        descripcion="",
+        cuantia="",
+        moneda="",
+        version_seace="",
+        nid_proceso="target-nid",
+        nid_convocatoria="fresh-conv",
+        nid_sistema="3",
+        link_id="fresh-link",
+        ntipo="0",
+    )
+    first_soup = object()
+    second_soup = object()
+    mock_client = MagicMock()
+    mock_client.fetch_list_page.side_effect = [("", first_soup), ("", second_soup)]
+    mock_client.total_pages.return_value = 2
+    mock_client.parse_rows.side_effect = [[], [fresh_row]]
+    mock_client.open_ficha.return_value = MagicMock(
+        html="<html>", url="http://x", ficha_id="f1"
+    )
+    ficha = FichaData(
+        ficha_id="f1",
+        nid_proceso="target-nid",
+        nomenclatura="T-target",
+        descripcion="",
+        objeto="",
+        fecha_publicacion="",
+        documentos=[Documento("u1", "bases.pdf", "", "", "", "", "3")],
+    )
+
+    runner = AnalysisRunner(cfg, analysis_session)
+    with (
+        patch("seace_monitor.seace_search.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.analysis.runner.parse_ficha", return_value=ficha),
+    ):
+        docs = runner._fetch_documentos_from_seace(proc, entity.ruc)
+
+    assert docs[0]["uuid"] == "u1"
+    mock_client.open_ficha.assert_called_once_with(fresh_row)
+    assert proc.link_id == "fresh-link"
+    assert proc.nid_convocatoria == "fresh-conv"
+
+
+def test_download_persists_cronograma_from_ficha(
+    analysis_session: Session,
+):
+    cfg = AppConfig()
+    entity = analysis_session.query(Entity).one()
+    proc = Process(
+        entity_id=entity.id,
+        anio=2026,
+        nid_proceso="target-nid",
+        nomenclatura="T-target",
+        status=ProcessStatus.publicada,
+        nid_convocatoria="old-conv",
+        link_id="old-link",
+    )
+    analysis_session.add(proc)
+    analysis_session.flush()
+    row = ProcessRow(
+        row_index=0,
+        numero="",
+        fecha_publicacion="01/01/2026 10:00",
+        nomenclatura="T-target",
+        reiniciado_desde="",
+        objeto="Bien",
+        descripcion="Compra",
+        cuantia="",
+        moneda="Soles",
+        version_seace="3",
+        nid_proceso="target-nid",
+        nid_convocatoria="fresh-conv",
+        nid_sistema="3",
+        link_id="fresh-link",
+        ntipo="0",
+    )
+    mock_client = MagicMock()
+    mock_client.fetch_list_page.return_value = ("", object())
+    mock_client.total_pages.return_value = 1
+    mock_client.parse_rows.return_value = [row]
+    mock_client.open_ficha.return_value = MagicMock(
+        html="<html>", url="http://seace/ficha", ficha_id="f1"
+    )
+    ficha = FichaData(
+        ficha_id="f1",
+        nid_proceso="target-nid",
+        nomenclatura="T-target",
+        descripcion="Compra",
+        objeto="Bien",
+        fecha_publicacion="01/01/2026 10:00",
+        cronograma=[
+            CronogramaEtapa(
+                "Formulación de consultas y observaciones",
+                "02/01/2026 00:01",
+                "03/01/2026 23:59",
+            ),
+            CronogramaEtapa(
+                "Presentación de ofertas",
+                "04/01/2026 00:01",
+                "05/01/2026 23:59",
+            ),
+        ],
+        documentos=[Documento("u1", "bases.pdf", "", "", "", "", "3")],
+    )
+
+    runner = AnalysisRunner(cfg, analysis_session)
+    with (
+        patch("seace_monitor.seace_search.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.analysis.runner.parse_ficha", return_value=ficha),
+    ):
+        docs = runner._fetch_documentos_from_seace(proc, entity.ruc)
+
+    assert docs[0]["uuid"] == "u1"
+    cronograma = json.loads(proc.cronograma_json or "[]")
+    assert len(cronograma) == 2
+    assert proc.fecha_consultas == "03/01/2026 23:59"
+    assert proc.fecha_presentacion == "05/01/2026 23:59"
+    assert proc.fecha_publicacion == "01/01/2026 10:00"
+    assert proc.ficha_id == "f1"
+    assert proc.ficha_url == "http://seace/ficha"
+    assert proc.content_hash == ficha.content_hash()
+
+
+def test_download_uses_continued_process_row_matched_by_nomenclatura(
+    analysis_session: Session,
+):
+    cfg = AppConfig()
+    entity = analysis_session.query(Entity).one()
+    proc = Process(
+        entity_id=entity.id,
+        anio=2026,
+        nid_proceso="old-nid",
+        nomenclatura="LP-ABR-7-2026-BCRPLIM-2",
+        status=ProcessStatus.publicada,
+        nid_convocatoria="old-conv",
+        link_id="old-link",
+    )
+    analysis_session.add(proc)
+    analysis_session.flush()
+    continued_row = ProcessRow(
+        row_index=0,
+        numero="",
+        fecha_publicacion="",
+        nomenclatura="LP-ABR-7-2026-BCRPLIM-2",
+        reiniciado_desde="",
+        objeto="",
+        descripcion="",
+        cuantia="",
+        moneda="",
+        version_seace="",
+        nid_proceso="new-nid",
+        nid_convocatoria="fresh-conv",
+        nid_sistema="3",
+        link_id="fresh-link",
+        ntipo="0",
+    )
+    mock_client = MagicMock()
+    mock_client.fetch_list_page.return_value = ("", object())
+    mock_client.total_pages.return_value = 1
+    mock_client.parse_rows.return_value = [continued_row]
+    mock_client.open_ficha.return_value = MagicMock(
+        html="<html>", url="http://x", ficha_id="f1"
+    )
+    ficha = FichaData(
+        ficha_id="f1",
+        nid_proceso="new-nid",
+        nomenclatura="LP-ABR-7-2026-BCRPLIM-2",
+        descripcion="",
+        objeto="",
+        fecha_publicacion="",
+        documentos=[Documento("u1", "bases.pdf", "", "", "", "", "3")],
+    )
+
+    runner = AnalysisRunner(cfg, analysis_session)
+    with (
+        patch("seace_monitor.seace_search.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.analysis.runner.parse_ficha", return_value=ficha),
+    ):
+        docs = runner._fetch_documentos_from_seace(proc, entity.ruc)
+
+    assert docs[0]["uuid"] == "u1"
+    mock_client.open_ficha.assert_called_once_with(continued_row)
+    assert proc.nid_proceso == "new-nid"
+    assert proc.link_id == "fresh-link"
+
+
+def test_download_commits_before_and_after_seace_fetch(analysis_session: Session):
+    cfg = AppConfig()
+    entity = analysis_session.query(Entity).one()
+    proc = Process(
+        entity_id=entity.id,
+        anio=2026,
+        nid_proceso="target-nid",
+        nomenclatura="T-target",
+        status=ProcessStatus.descargando,
+        nid_convocatoria="old-conv",
+        link_id="old-link",
+    )
+    analysis_session.add(proc)
+    analysis_session.flush()
+    proc.entity = entity
+
+    row = ProcessRow(
+        row_index=0,
+        numero="",
+        fecha_publicacion="",
+        nomenclatura="T-target",
+        reiniciado_desde="",
+        objeto="",
+        descripcion="",
+        cuantia="",
+        moneda="",
+        version_seace="",
+        nid_proceso="target-nid",
+        nid_convocatoria="fresh-conv",
+        nid_sistema="3",
+        link_id="fresh-link",
+        ntipo="0",
+    )
+    ficha_result = MagicMock(html="<html>", url="http://x", ficha_id="f1")
+    ficha = FichaData(
+        ficha_id="f1",
+        nid_proceso="target-nid",
+        nomenclatura="T-target",
+        descripcion="",
+        objeto="",
+        fecha_publicacion="",
+        documentos=[Documento("u1", "bases.pdf", "", "", "", "", "3")],
+    )
+    order: list[str] = []
+    real_commit = analysis_session.commit
+
+    def track_commit() -> None:
+        order.append("commit")
+        real_commit()
+
+    analysis_session.commit = track_commit  # type: ignore[method-assign]
+
+    def seace_fetch(*_args, **_kwargs):
+        order.append("seace")
+        return row, ficha_result, MagicMock()
+
+    runner = AnalysisRunner(cfg, analysis_session)
+    with (
+        patch("seace_monitor.analysis.runner.open_ficha_for_process", side_effect=seace_fetch),
+        patch("seace_monitor.analysis.runner.parse_ficha", return_value=ficha),
+        patch.object(runner, "_fetch_documents"),
+    ):
+        runner.download(proc.id)
+
+    assert order[:2] == ["commit", "seace"]
+    assert order.count("commit") >= 2
+    assert proc.nid_convocatoria == "fresh-conv"

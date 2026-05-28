@@ -5,6 +5,9 @@
 {% macro status_cell(process) %}
 <div class="status-stack">
   <span class="badge badge-{{ process.status.value }}">{{ process.status.value }}</span>
+  {% if process.interest_status and process.interest_status.value != 'none' %}
+  <span class="badge badge-interest">{{ process.interest_status.value }}</span>
+  {% endif %}
   {% if can_open_seace(process) %}
   <a href="{{ seace_view_path(process.id) }}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm btn-seace">Ver en SEACE</a>
   {% endif %}
