@@ -294,7 +294,8 @@ class AnalysisRunner:
         )
         row = _resolve_current_row(self.config, client, process)
         ficha = client.open_ficha(row)
-        parsed = parse_ficha(ficha.html, ficha.ficha_id, process.nid_proceso)
+        parsed = parse_ficha(ficha.html, ficha.ficha_id, row.nid_proceso)
+        process.nid_proceso = row.nid_proceso
         process.link_id = row.link_id
         process.nid_convocatoria = row.nid_convocatoria
         process.nid_sistema = row.nid_sistema

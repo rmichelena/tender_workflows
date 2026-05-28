@@ -60,6 +60,39 @@ def test_google_style_query_exclusion_can_keep_corpac_transport():
     )
 
 
+def test_food_rule_does_not_match_operaciones_substring():
+    proc, entity = _process(
+        objeto="Bien",
+        descripcion=(
+            "SISTEMA DE SEGURIDAD INFORMATICA PARA EL CENTRO NACIONAL "
+            "DE OPERACIONES DE IMAGENES SATELITALES"
+        ),
+    )
+    rule = AutoRejectRule(
+        id="bien_alimentos",
+        query="objeto:bien (alimentos OR viveres OR raciones OR leche OR arroz OR azucar)",
+        reason="Alimentos fuera de foco",
+    )
+
+    assert apply_auto_reject_rules(proc, entity, [rule]) is None
+    assert proc.status == ProcessStatus.publicada
+
+
+def test_food_rule_still_matches_raciones_as_word():
+    proc, entity = _process(
+        objeto="Bien",
+        descripcion="ADQUISICION DE RACIONES PARA PERSONAL",
+    )
+    rule = AutoRejectRule(
+        id="bien_alimentos",
+        query="objeto:bien (alimentos OR viveres OR raciones OR leche OR arroz OR azucar)",
+        reason="Alimentos fuera de foco",
+    )
+
+    assert apply_auto_reject_rules(proc, entity, [rule]) == rule
+    assert proc.status == ProcessStatus.autorejected
+
+
 def test_apply_auto_reject_marks_public_process_and_stores_reason():
     proc, entity = _process(
         objeto="Bien",

@@ -13,7 +13,7 @@ rules:
 
   - id: servicio_asesoria_legal
     reason: Asesoría legal/jurídica fuera de foco
-    query: 'objeto:servicio (legal OR juridic OR "defensa legal" OR "asesoria legal")'
+    query: 'objeto:servicio (legal OR juridico OR juridica OR "defensa legal" OR "asesoria legal")'
 
   - id: servicio_transporte
     reason: Servicios de transporte/traslado fuera de foco salvo CORPAC

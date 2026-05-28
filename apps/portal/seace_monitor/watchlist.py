@@ -40,10 +40,19 @@ WATCHLIST_STATUSES = frozenset(
 WATCHLIST_PAGE_SEARCH_CAP = 200
 
 
+def _normalize_nomenclatura(value: str | None) -> str:
+    return " ".join((value or "").strip().upper().split())
+
+
 def _resolve_current_row(
     config: AppConfig, client: SeaceClient, process: Process
 ) -> ProcessRow:
-    """Busca la fila vigente para abrir ficha con link_id/ViewState actuales."""
+    """Busca la fila vigente por nomenclatura para abrir ficha con ViewState actual."""
+    target_nomenclatura = _normalize_nomenclatura(process.nomenclatura)
+    if not target_nomenclatura:
+        raise RuntimeError(
+            f"Watchlist: proceso {process.id} no tiene nomenclatura para buscar en SEACE"
+        )
     _, first_soup = client.fetch_list_page(0)
     total_pages = min(client.total_pages(first_soup), WATCHLIST_PAGE_SEARCH_CAP)
     for page in range(total_pages):
@@ -53,10 +62,10 @@ def _resolve_current_row(
             _, soup = client.fetch_list_page(page)
         rows = client.parse_rows(soup)
         for row in rows:
-            if row.nid_proceso == process.nid_proceso:
+            if _normalize_nomenclatura(row.nomenclatura) == target_nomenclatura:
                 return row
     raise RuntimeError(
-        f"Watchlist: proceso {process.nid_proceso} no aparece en las "
+        f"Watchlist: proceso {process.nomenclatura} no aparece en las "
         f"{total_pages} página(s) actuales de entidad {process.entity_id}"
     )
 
@@ -289,7 +298,7 @@ def _refresh_watchlist_process(
     )
     row = _resolve_current_row(config, client, process)
     ficha_result = client.open_ficha(row)
-    ficha = parse_ficha(ficha_result.html, ficha_result.ficha_id, process.nid_proceso)
+    ficha = parse_ficha(ficha_result.html, ficha_result.ficha_id, row.nid_proceso)
     _validate_watchlist_ficha(process, ficha)
 
     new_cron_json = json.dumps(
@@ -361,6 +370,7 @@ def _refresh_watchlist_process(
     process.content_hash = ficha.content_hash()
     process.ficha_id = ficha.ficha_id
     process.ficha_url = ficha_result.url
+    process.nid_proceso = row.nid_proceso
     process.link_id = row.link_id
     process.nid_convocatoria = row.nid_convocatoria
     process.nid_sistema = row.nid_sistema

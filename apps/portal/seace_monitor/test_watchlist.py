@@ -229,6 +229,7 @@ def test_watchlist_resolves_current_row_across_list_pages(
     first_soup = object()
     second_soup = object()
     current_row = _row("target-nid", link_id="fresh-link")
+    current_row.nomenclatura = proc.nomenclatura
     client = MagicMock()
     client.fetch_list_page.side_effect = [("", first_soup), ("", second_soup)]
     client.total_pages.return_value = 2
@@ -244,6 +245,32 @@ def test_watchlist_resolves_current_row_across_list_pages(
     assert client.fetch_list_page.call_args_list[1].args == (1,)
 
 
+def test_watchlist_resolves_continued_process_by_nomenclatura(
+    watch_session: Session, tmp_path: Path
+):
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[{"uuid": "u1", "nombre": "a.pdf"}],
+    )
+    proc.nid_proceso = "old-nid"
+    proc.nomenclatura = "LP-ABR-7-2026-BCRPLIM-2"
+    first_soup = object()
+    continued_row = _row("new-nid", link_id="fresh-link")
+    continued_row.nomenclatura = "  LP-ABR-7-2026-BCRPLIM-2  "
+    stale_same_nid = _row("old-nid", link_id="stale-link")
+    stale_same_nid.nomenclatura = "LP-ABR-7-2026-BCRPLIM-1"
+    client = MagicMock()
+    client.fetch_list_page.return_value = ("", first_soup)
+    client.total_pages.return_value = 1
+    client.parse_rows.return_value = [stale_same_nid, continued_row]
+
+    row = _resolve_current_row(cfg, client, proc)
+
+    assert row is continued_row
+
+
 def test_refresh_uses_current_row_when_process_moved_to_later_page(
     watch_session: Session, tmp_path: Path
 ):
@@ -253,7 +280,8 @@ def test_refresh_uses_current_row_when_process_moved_to_later_page(
         tmp_path=tmp_path,
         docs=[{"uuid": "u1", "nombre": "a.pdf"}],
     )
-    current_row = _row(proc.nid_proceso, link_id="fresh-link")
+    current_row = _row("continued-nid", link_id="fresh-link")
+    current_row.nomenclatura = proc.nomenclatura
     ficha = _ficha_with_docs([Documento("u1", "a.pdf", "", "", "", "", "3")])
     mock_client = MagicMock()
     mock_client.open_ficha.return_value = MagicMock(html="<html>", url="http://x", ficha_id="f1")
@@ -267,6 +295,7 @@ def test_refresh_uses_current_row_when_process_moved_to_later_page(
         _refresh_watchlist_process(cfg, watch_session, proc)
 
     mock_client.open_ficha.assert_called_once_with(current_row)
+    assert proc.nid_proceso == "continued-nid"
 
 
 def test_refresh_rejects_empty_ficha_when_existing_content_would_be_wiped(

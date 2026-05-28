@@ -245,3 +245,67 @@ def test_download_fetches_documents_with_current_row_from_later_page(
     mock_client.open_ficha.assert_called_once_with(fresh_row)
     assert proc.link_id == "fresh-link"
     assert proc.nid_convocatoria == "fresh-conv"
+
+
+def test_download_uses_continued_process_row_matched_by_nomenclatura(
+    analysis_session: Session,
+):
+    cfg = AppConfig()
+    entity = analysis_session.query(Entity).one()
+    proc = Process(
+        entity_id=entity.id,
+        anio=2026,
+        nid_proceso="old-nid",
+        nomenclatura="LP-ABR-7-2026-BCRPLIM-2",
+        status=ProcessStatus.publicada,
+        nid_convocatoria="old-conv",
+        link_id="old-link",
+    )
+    analysis_session.add(proc)
+    analysis_session.flush()
+    continued_row = ProcessRow(
+        row_index=0,
+        numero="",
+        fecha_publicacion="",
+        nomenclatura="LP-ABR-7-2026-BCRPLIM-2",
+        reiniciado_desde="",
+        objeto="",
+        descripcion="",
+        cuantia="",
+        moneda="",
+        version_seace="",
+        nid_proceso="new-nid",
+        nid_convocatoria="fresh-conv",
+        nid_sistema="3",
+        link_id="fresh-link",
+        ntipo="0",
+    )
+    mock_client = MagicMock()
+    mock_client.fetch_list_page.return_value = ("", object())
+    mock_client.total_pages.return_value = 1
+    mock_client.parse_rows.return_value = [continued_row]
+    mock_client.open_ficha.return_value = MagicMock(
+        html="<html>", url="http://x", ficha_id="f1"
+    )
+    ficha = FichaData(
+        ficha_id="f1",
+        nid_proceso="new-nid",
+        nomenclatura="LP-ABR-7-2026-BCRPLIM-2",
+        descripcion="",
+        objeto="",
+        fecha_publicacion="",
+        documentos=[Documento("u1", "bases.pdf", "", "", "", "", "3")],
+    )
+
+    runner = AnalysisRunner(cfg, analysis_session)
+    with (
+        patch("seace_monitor.analysis.runner.SeaceClient", return_value=mock_client),
+        patch("seace_monitor.analysis.runner.parse_ficha", return_value=ficha),
+    ):
+        docs = runner._fetch_documentos_from_seace(proc, entity.ruc)
+
+    assert docs[0]["uuid"] == "u1"
+    mock_client.open_ficha.assert_called_once_with(continued_row)
+    assert proc.nid_proceso == "new-nid"
+    assert proc.link_id == "fresh-link"
+    assert proc.nid_convocatoria == "fresh-conv"

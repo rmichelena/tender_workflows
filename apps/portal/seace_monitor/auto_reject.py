@@ -39,6 +39,14 @@ def _normalize(text: str | None) -> str:
     return value.lower()
 
 
+def _contains_term(text: str, term: str) -> bool:
+    normalized_term = _normalize(term).strip()
+    if not normalized_term:
+        return False
+    pattern = r"(?<![a-z0-9])" + re.escape(normalized_term) + r"(?![a-z0-9])"
+    return re.search(pattern, text) is not None
+
+
 class _Context:
     def __init__(self, process: Process, entity: Entity | None) -> None:
         self.fields = {
@@ -67,7 +75,7 @@ class _Term:
     field: str | None = None
 
     def evaluate(self, ctx: _Context) -> bool:
-        return _normalize(self.value) in ctx.text_for(self.field)
+        return _contains_term(ctx.text_for(self.field), self.value)
 
 
 @dataclass(frozen=True)
