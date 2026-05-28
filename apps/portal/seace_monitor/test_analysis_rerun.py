@@ -388,4 +388,72 @@ def test_download_uses_continued_process_row_matched_by_nomenclatura(
     mock_client.open_ficha.assert_called_once_with(continued_row)
     assert proc.nid_proceso == "new-nid"
     assert proc.link_id == "fresh-link"
+
+
+def test_download_commits_before_and_after_seace_fetch(analysis_session: Session):
+    cfg = AppConfig()
+    entity = analysis_session.query(Entity).one()
+    proc = Process(
+        entity_id=entity.id,
+        anio=2026,
+        nid_proceso="target-nid",
+        nomenclatura="T-target",
+        status=ProcessStatus.descargando,
+        nid_convocatoria="old-conv",
+        link_id="old-link",
+    )
+    analysis_session.add(proc)
+    analysis_session.flush()
+    proc.entity = entity
+
+    row = ProcessRow(
+        row_index=0,
+        numero="",
+        fecha_publicacion="",
+        nomenclatura="T-target",
+        reiniciado_desde="",
+        objeto="",
+        descripcion="",
+        cuantia="",
+        moneda="",
+        version_seace="",
+        nid_proceso="target-nid",
+        nid_convocatoria="fresh-conv",
+        nid_sistema="3",
+        link_id="fresh-link",
+        ntipo="0",
+    )
+    ficha_result = MagicMock(html="<html>", url="http://x", ficha_id="f1")
+    ficha = FichaData(
+        ficha_id="f1",
+        nid_proceso="target-nid",
+        nomenclatura="T-target",
+        descripcion="",
+        objeto="",
+        fecha_publicacion="",
+        documentos=[Documento("u1", "bases.pdf", "", "", "", "", "3")],
+    )
+    order: list[str] = []
+    real_commit = analysis_session.commit
+
+    def track_commit() -> None:
+        order.append("commit")
+        real_commit()
+
+    analysis_session.commit = track_commit  # type: ignore[method-assign]
+
+    def seace_fetch(*_args, **_kwargs):
+        order.append("seace")
+        return row, ficha_result, MagicMock()
+
+    runner = AnalysisRunner(cfg, analysis_session)
+    with (
+        patch("seace_monitor.analysis.runner.open_ficha_for_process", side_effect=seace_fetch),
+        patch("seace_monitor.analysis.runner.parse_ficha", return_value=ficha),
+        patch.object(runner, "_fetch_documents"),
+    ):
+        runner.download(proc.id)
+
+    assert order[:2] == ["commit", "seace"]
+    assert order.count("commit") >= 2
     assert proc.nid_convocatoria == "fresh-conv"

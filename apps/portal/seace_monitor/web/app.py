@@ -27,7 +27,7 @@ from ..db.maintenance import (
     recover_stale_analyses,
 )
 from ..db.models import AnalysisResult, Entity, InterestStatus, Process, ProcessStatus, utcnow
-from ..db.session import init_db, session_factory
+from ..db.session import commit_session_with_retry, init_db, session_factory
 from ..process_storage import (
     clear_process_download_metadata,
     delete_process_analysis,
@@ -612,7 +612,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             raise HTTPException(400, "Estado no válido para descarga")
 
         proc.status = ProcessStatus.descargando
-        db.commit()
+        commit_session_with_retry(db)
         db.expunge(proc)
 
         def _job():

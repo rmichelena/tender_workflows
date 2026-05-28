@@ -93,8 +93,10 @@ class AnalysisRunner:
         docs_dir = proc_dir / "documentos"
         docs_dir.mkdir(parents=True, exist_ok=True)
 
+        # Liberar SQLite antes del fetch SEACE (puede tardar varios segundos).
+        self.session.commit()
+
         docs = self._fetch_documentos_from_seace(process, entity.ruc)
-        # Commit antes de la descarga larga (SEACE) para no bloquear SQLite.
         self.session.commit()
 
         try:

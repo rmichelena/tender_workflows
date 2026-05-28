@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from pathlib import Path
+import time
 
 from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import Base
@@ -390,6 +392,25 @@ def _ensure_sqlite_indexes(engine) -> None:
     with engine.begin() as conn:
         for stmt in statements:
             conn.execute(text(stmt))
+
+
+def commit_session_with_retry(
+    session: Session, *, attempts: int = 8, delay: float = 0.25
+) -> None:
+    """Commit con reintentos ante bloqueos transitorios de SQLite."""
+    for attempt in range(attempts):
+        try:
+            session.commit()
+            return
+        except OperationalError as exc:
+            orig = getattr(exc, "orig", exc)
+            message = str(orig).lower()
+            if "locked" not in message and "busy" not in message:
+                raise
+            session.rollback()
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay * (attempt + 1))
 
 
 def session_factory() -> Session:
