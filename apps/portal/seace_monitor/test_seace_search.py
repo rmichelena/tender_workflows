@@ -40,7 +40,66 @@ def test_normalize_nomenclatura_collapses_whitespace_and_case():
     assert normalize_nomenclatura("  lp-abr-7-2026  ") == "LP-ABR-7-2026"
 
 
-def test_search_finds_row_on_later_page_scanning_backwards():
+def test_search_returns_page_zero_match_without_scanning_all_pages():
+    page0 = object()
+    row = _row("new-nid", link_id="fresh-link", nomenclatura="LP-X")
+    client = MagicMock()
+    client.fetch_list_page.return_value = ("", page0)
+    client.total_pages.return_value = 67
+    client.parse_rows.return_value = [row]
+
+    found = search_list_row_by_nomenclatura(client, "LP-X")
+
+    assert found is row
+    client.fetch_list_page.assert_called_once_with(0)
+
+
+def test_search_prefers_page_zero_over_later_duplicate():
+    """Reconvocatoria en páginas antiguas no debe ganar sobre la fila en página 0."""
+    page0 = object()
+    page5 = object()
+    stale = _row("old-nid", link_id="stale-link", nomenclatura="LP-X")
+    fresh = _row("new-nid", link_id="fresh-link", nomenclatura="LP-X")
+    client = MagicMock()
+    client.fetch_list_page.side_effect = [("", page0)]
+    client.total_pages.return_value = 6
+    client.parse_rows.side_effect = [[fresh]]
+
+    row = search_list_row_by_nomenclatura(client, "LP-X")
+
+    assert row is fresh
+    client.fetch_list_page.assert_called_once_with(0)
+
+
+def test_search_stops_at_first_match_on_page_without_scanning_rest():
+    page0 = object()
+    page1 = object()
+    row = _row("target-nid", link_id="fresh-link", nomenclatura="T-target")
+    client = MagicMock()
+    client.fetch_list_page.side_effect = [("", page0), ("", page1)]
+    client.total_pages.return_value = 5
+    client.parse_rows.side_effect = [[_row("other", nomenclatura="OTHER")], [row]]
+
+    found = search_list_row_by_nomenclatura(client, "T-target")
+
+    assert found is row
+    assert client.fetch_list_page.call_count == 2
+
+
+def test_search_prefers_top_row_on_same_page():
+    fresh = _row("new-nid", link_id="fresh-link", nomenclatura="LP-X")
+    stale = _row("old-nid", link_id="stale-link", nomenclatura="LP-X")
+    client = MagicMock()
+    client.fetch_list_page.return_value = ("", object())
+    client.total_pages.return_value = 1
+    client.parse_rows.return_value = [fresh, stale]
+
+    row = search_list_row_by_nomenclatura(client, "LP-X")
+
+    assert row is fresh
+
+
+def test_search_finds_row_on_later_page_when_not_on_page_zero():
     first_soup = object()
     second_soup = object()
     current_row = _row("target-nid", link_id="fresh-link", nomenclatura="T-target")
@@ -54,19 +113,6 @@ def test_search_finds_row_on_later_page_scanning_backwards():
     assert row is current_row
     assert client.fetch_list_page.call_args_list[0].args == (0,)
     assert client.fetch_list_page.call_args_list[1].args == (1,)
-
-
-def test_search_prefers_last_duplicate_nomenclatura_on_page():
-    stale = _row("old-nid", link_id="stale-link", nomenclatura="LP-X")
-    fresh = _row("new-nid", link_id="fresh-link", nomenclatura="LP-X")
-    client = MagicMock()
-    client.fetch_list_page.return_value = ("", object())
-    client.total_pages.return_value = 1
-    client.parse_rows.return_value = [stale, fresh]
-
-    row = search_list_row_by_nomenclatura(client, "LP-X")
-
-    assert row is fresh
 
 
 def test_resolve_process_row_uses_process_nomenclatura():

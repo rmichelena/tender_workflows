@@ -63,8 +63,9 @@ def search_list_row_by_nomenclatura(
     """
     Localiza la fila vigente en el listado SEACE.
 
-    Recorre páginas de atrás hacia adelante; ante nomenclaturas duplicadas
-    (reconvocatoria) gana la aparición más reciente en el listado.
+    Recorre páginas 0→N y, en cada una, filas de arriba hacia abajo; devuelve
+    el primer match (el listado SEACE ordena lo más reciente arriba y en
+    páginas bajas).
     """
     target = normalize_nomenclatura(nomenclatura)
     if not target:
@@ -74,11 +75,10 @@ def search_list_row_by_nomenclatura(
     total_pages = min(client.total_pages(first_soup), page_cap)
     page_soups = {0: first_soup}
 
-    for page in range(total_pages - 1, -1, -1):
+    for page in range(total_pages):
         if page not in page_soups:
             _, page_soups[page] = client.fetch_list_page(page)
-        rows = client.parse_rows(page_soups[page])
-        for row in reversed(rows):
+        for row in client.parse_rows(page_soups[page]):
             if normalize_nomenclatura(row.nomenclatura) == target:
                 return row
 
