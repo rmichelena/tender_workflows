@@ -176,7 +176,7 @@ class AdpScanner:
             )
             self.session.add(proc)
 
-        proc.objeto = adp_proc.description
+        proc.objeto = WORK_CATEGORIES.get(adp_proc.work_id, "bienes").capitalize()
         proc.descripcion = adp_proc.description
         proc.documentos_json = docs_json
         proc.cronograma_json = cron_json
