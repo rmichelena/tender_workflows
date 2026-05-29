@@ -218,6 +218,18 @@ table.data tr:hover td { background: #f8fafc; }
 .badge-descartada { background: #fee2e2; color: #991b1b; }
 .badge-archivada { background: #f3e8ff; color: #6b21a8; }
 
+.doc-analyzed-tag {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #d1fae5;
+  color: #065f46;
+  vertical-align: middle;
+}
+
 .btn {
   display: inline-block;
   padding: 0.35rem 0.7rem;

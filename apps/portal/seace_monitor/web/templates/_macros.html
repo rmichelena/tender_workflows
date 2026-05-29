@@ -106,7 +106,7 @@
     {% endif %}
     {{ file_icon(node) }}
     <div class="doc-meta">
-      <div class="doc-name">{{ node.nombre }}{{ doc_fecha(node.fecha_publicacion) }}</div>
+      <div class="doc-name">{{ node.nombre }}{% if node.analyzed %}<span class="doc-analyzed-tag">analizado</span>{% endif %}{{ doc_fecha(node.fecha_publicacion) }}</div>
       {% if node.etapa or node.tipo_documento or node.origen %}
       <div class="doc-sub muted">
         {% if node.etapa %}{{ node.etapa }}{% endif %}

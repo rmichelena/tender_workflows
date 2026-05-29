@@ -48,6 +48,7 @@ from .detail_data import (
     filter_new_document_nodes,
     flatten_selectable_leaves,
     load_analysis_selection,
+    load_analyzed_files,
     parse_cronograma,
     parse_watch_changelog,
     save_analysis_selection,
@@ -118,10 +119,14 @@ def _build_analisis_detail_context(proc: Process, *, mark_read: bool) -> dict:
     prev_docs = proc.watch_documentos_prev_json if proc.watch_unread else None
     if mark_read and proc.watch_unread:
         mark_watchlist_read(proc)
+    analyzed_paths = None
+    if proc.data_dir and proc.analysis and proc.analysis.status == "done":
+        analyzed_paths = load_analyzed_files(Path(proc.data_dir))
     documentos = build_document_tree(
         proc,
         prev_documentos_json=prev_docs,
         apply_default_selection=False,
+        analyzed_paths=analyzed_paths,
     )
     cronograma = parse_cronograma(
         proc.cronograma_json, prev_cronograma_json=prev_cron

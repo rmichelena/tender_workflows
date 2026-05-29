@@ -13,8 +13,10 @@ from .web.detail_data import (
     count_document_nodes,
     flatten_selectable_leaves,
     load_analysis_selection,
+    load_analyzed_files,
     media_type_for_path,
     save_analysis_selection,
+    save_analyzed_files,
     list_analyzable_files,
     ArchivoAnalizable,
 )
@@ -63,6 +65,44 @@ def test_save_and_load_analysis_selection(tmp_path: Path):
     save_analysis_selection(tmp_path, ["a.pdf", "_extracted/x/bases.docx"])
     loaded = load_analysis_selection(tmp_path)
     assert loaded == {"a.pdf", "_extracted/x/bases.docx"}
+
+
+def test_save_and_load_analyzed_files(tmp_path: Path):
+    save_analyzed_files(tmp_path, ["bases.pdf", "_extracted/x/anexo.docx"])
+    loaded = load_analyzed_files(tmp_path)
+    assert loaded == {"bases.pdf", "_extracted/x/anexo.docx"}
+
+
+def test_load_analyzed_files_falls_back_to_selected(tmp_path: Path):
+    save_analysis_selection(tmp_path, ["legacy.pdf"])
+    loaded = load_analyzed_files(tmp_path)
+    assert loaded == {"legacy.pdf"}
+
+
+def test_build_document_tree_marks_analyzed_paths(tmp_path: Path):
+    docs = tmp_path / "documentos"
+    docs.mkdir()
+    (docs / "a.pdf").write_bytes(b"%PDF")
+    (docs / "b.pdf").write_bytes(b"%PDF")
+
+    proc = Process(
+        id=1,
+        data_dir=str(tmp_path),
+        documentos_json=json.dumps(
+            [
+                {"uuid": "u1", "nombre": "a.pdf", "archivo": "a.pdf"},
+                {"uuid": "u2", "nombre": "b.pdf", "archivo": "b.pdf"},
+            ]
+        ),
+    )
+    tree = build_document_tree(
+        proc,
+        apply_default_selection=False,
+        analyzed_paths={"a.pdf"},
+    )
+    by_path = {node.rel_path: node for node in tree}
+    assert by_path["a.pdf"].analyzed is True
+    assert by_path["b.pdf"].analyzed is False
 
 
 def test_validate_gemini_upload_size_rejects_large_pdf(tmp_path: Path):

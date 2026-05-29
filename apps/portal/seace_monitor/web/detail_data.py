@@ -48,6 +48,7 @@ DOWNLOAD_MEDIA_TYPES = {
 }
 
 SELECTED_FILES_NAME = "selected_files.json"
+ANALYZED_FILES_NAME = "analyzed_files.json"
 
 
 @dataclass
@@ -96,6 +97,7 @@ class DocumentoNodo:
     previewable: bool = False
     selectable: bool = False
     default_checked: bool = False
+    analyzed: bool = False
     is_new: bool = False
     is_folder: bool = False
     children: list[DocumentoNodo] = field(default_factory=list)
@@ -232,17 +234,11 @@ def selected_files_path(proc_dir: Path) -> Path:
     return proc_dir / "fast_analysis" / SELECTED_FILES_NAME
 
 
-def save_analysis_selection(proc_dir: Path, rel_paths: list[str]) -> None:
-    path = selected_files_path(proc_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(rel_paths, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+def analyzed_files_path(proc_dir: Path) -> Path:
+    return proc_dir / "fast_analysis" / ANALYZED_FILES_NAME
 
 
-def load_analysis_selection(proc_dir: Path) -> set[str] | None:
-    path = selected_files_path(proc_dir)
+def _load_rel_paths_json(path: Path) -> set[str] | None:
     if not path.is_file():
         return None
     try:
@@ -253,6 +249,37 @@ def load_analysis_selection(proc_dir: Path) -> set[str] | None:
         return None
     cleaned = {str(item).strip() for item in raw if str(item).strip()}
     return cleaned or None
+
+
+def save_analysis_selection(proc_dir: Path, rel_paths: list[str]) -> None:
+    path = selected_files_path(proc_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(rel_paths, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_analysis_selection(proc_dir: Path) -> set[str] | None:
+    return _load_rel_paths_json(selected_files_path(proc_dir))
+
+
+def save_analyzed_files(proc_dir: Path, rel_paths: list[str]) -> None:
+    """Persiste qué documentos se enviaron al análisis exitoso más reciente."""
+    path = analyzed_files_path(proc_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cleaned = [str(item).strip() for item in rel_paths if str(item).strip()]
+    path.write_text(
+        json.dumps(cleaned, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_analyzed_files(proc_dir: Path) -> set[str] | None:
+    recorded = _load_rel_paths_json(analyzed_files_path(proc_dir))
+    if recorded is not None:
+        return recorded
+    return load_analysis_selection(proc_dir)
 
 
 def _assign_default_selection(rows: list[ArchivoAnalizable]) -> list[ArchivoAnalizable]:
@@ -428,6 +455,7 @@ def build_document_tree(
     process: Process,
     *,
     checked_paths: set[str] | None = None,
+    analyzed_paths: set[str] | None = None,
     prev_documentos_json: str | None = None,
     apply_default_selection: bool = True,
 ) -> list[DocumentoNodo]:
@@ -486,6 +514,11 @@ def build_document_tree(
         process.analysis and process.analysis.status == "running"
     ):
         _apply_default_selection_to_tree(nodes)
+
+    if analyzed_paths:
+        for node in _walk_document_nodes(nodes):
+            if node.rel_path and node.rel_path in analyzed_paths:
+                node.analyzed = True
 
     if prev_documentos_json:
         _mark_new_document_nodes(nodes, prev_documentos_json)

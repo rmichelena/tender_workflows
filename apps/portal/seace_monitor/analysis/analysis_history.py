@@ -49,5 +49,11 @@ def archive_analysis_before_rerun(
     if summary.is_file():
         shutil.copy2(summary, dest_dir / "free_reader_summary.md")
 
+    from ..web.detail_data import analyzed_files_path
+
+    analyzed = analyzed_files_path(proc_dir)
+    if analyzed.is_file():
+        shutil.copy2(analyzed, dest_dir / analyzed.name)
+
     logger.info("Análisis archivado en %s", dest_dir)
     return dest_dir

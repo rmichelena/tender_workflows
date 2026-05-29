@@ -36,6 +36,7 @@ from .analysis_lock import AnalysisBusyError, analysis_lock
 from .document_prep import extract_archives, resolve_selected_documents
 from .fast_reader import run_fast_analysis
 from .tender_bridge import run_tender_stage1
+from ..web.detail_data import save_analyzed_files
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,7 @@ class AnalysisRunner:
                 enter_analizados_list(self.session, process)
                 analysis.status = "done"
                 analysis.finished_at = utcnow()
+                save_analyzed_files(proc_dir, selected_rel_paths)
         except AnalysisBusyError:
             raise
         except Exception as exc:
