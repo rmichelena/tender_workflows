@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import asdict
 from datetime import datetime, timezone
 
@@ -89,32 +90,35 @@ class AdpScanner:
         entity = _ensure_adp_entity(self.session)
         new_count = 0
 
-        for work_id in ALL_WORK_IDS:
-            cat = WORK_CATEGORIES.get(work_id, str(work_id))
-            try:
-                html = self.client.fetch_category_html(work_id)
-                processes = parse_adp_html(html, work_id)
-                logger.info(
-                    "ADP work_id=%s (%s): %s procesos",
-                    work_id,
-                    cat,
-                    len(processes),
-                )
-            except Exception:
-                logger.exception("ADP: error fetching work_id=%s", work_id)
-                continue
-
-            for adp_proc in processes:
-                savepoint = self.session.begin_nested()
+        try:
+            for work_id in ALL_WORK_IDS:
+                cat = WORK_CATEGORIES.get(work_id, str(work_id))
                 try:
-                    if self._upsert_process(entity, adp_proc):
-                        new_count += 1
-                    savepoint.commit()
-                except Exception:
-                    savepoint.rollback()
-                    logger.exception(
-                        "ADP: error procesando %s", adp_proc.code
+                    html = self.client.fetch_category_html(work_id)
+                    processes = parse_adp_html(html, work_id)
+                    logger.info(
+                        "ADP work_id=%s (%s): %s procesos",
+                        work_id,
+                        cat,
+                        len(processes),
                     )
+                except Exception:
+                    logger.exception("ADP: error fetching work_id=%s", work_id)
+                    continue
+
+                for adp_proc in processes:
+                    savepoint = self.session.begin_nested()
+                    try:
+                        if self._upsert_process(entity, adp_proc):
+                            new_count += 1
+                        savepoint.commit()
+                    except Exception:
+                        savepoint.rollback()
+                        logger.exception(
+                            "ADP: error procesando %s", adp_proc.code
+                        )
+        finally:
+            self.client.close()
 
         return new_count
 
@@ -200,11 +204,7 @@ class AdpScanner:
     @staticmethod
     def _extract_anio(code: str) -> int:
         """Extrae el año del código de proceso (e.g. 'LPN-003-2026-ADP' → 2026)."""
-        import re
-
         m = re.search(r"(20\d{2})", code)
         if m:
             return int(m.group(1))
-        from datetime import datetime
-
         return datetime.now().year

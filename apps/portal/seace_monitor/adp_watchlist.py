@@ -34,6 +34,31 @@ WATCHLIST_STATUSES = frozenset(
 )
 
 
+def _merge_archivo_from_storage(
+    new_docs: list[dict], old_documentos_json: str | None
+) -> None:
+    """Preserva ``archivo`` (path en disco) de documentos ya descargados.
+
+    Análogo a :func:`watchlist._merge_parsed_docs_with_storage` de SEACE.
+    """
+    if not old_documentos_json:
+        return
+    try:
+        old_docs = json.loads(old_documentos_json)
+    except json.JSONDecodeError:
+        return
+    stored_by_namefile: dict[str, dict] = {}
+    for d in old_docs:
+        if isinstance(d, dict) and d.get("name_file") and d.get("archivo"):
+            stored_by_namefile[d["name_file"]] = d
+    for doc in new_docs:
+        if not doc.get("name_file"):
+            continue
+        stored = stored_by_namefile.get(doc["name_file"])
+        if stored and stored.get("archivo"):
+            doc["archivo"] = stored["archivo"]
+
+
 def _docs_fingerprint(docs_json: str | None) -> str:
     """Hash del contenido de documentos para comparación."""
     if not docs_json:
@@ -139,8 +164,10 @@ def _refresh_process(
     if old_fp == new_fp:
         return False
 
-    # Hay cambios — descargar documentos nuevos
+    # Hay cambios — preservar paths de archivos ya descargados
     new_docs = json.loads(new_docs_json)
+    _merge_archivo_from_storage(new_docs, proc.documentos_json)
+
     if proc.data_dir:
         docs_dir = Path(proc.data_dir) / "documentos"
         if docs_dir.is_dir():
