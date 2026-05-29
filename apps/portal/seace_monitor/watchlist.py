@@ -13,6 +13,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from .config import AppConfig
+from .analysis.document_prep import ARCHIVE_SUFFIXES, extract_archives
 from .db.models import Process, ProcessStatus, utcnow
 from .document_storage import (
     download_and_store_document,
@@ -262,6 +263,10 @@ def _refresh_watchlist_process(
         return False
 
     _repair_document_metadata(process)
+    if process.data_dir:
+        docs_dir = Path(process.data_dir) / "documentos"
+        if docs_dir.is_dir():
+            _ensure_archives_extracted(docs_dir)
 
     try:
         row, ficha_result, _client = open_ficha_for_process(config, process)
@@ -366,6 +371,17 @@ def _refresh_watchlist_process(
     return True
 
 
+def _ensure_archives_extracted(docs_dir: Path) -> None:
+    """Descomprime archivos en disco que aún no tienen carpeta en _extracted/."""
+    for path in docs_dir.iterdir():
+        if not path.is_file() or path.suffix.lower() not in ARCHIVE_SUFFIXES:
+            continue
+        dest = docs_dir / "_extracted" / path.stem
+        if not dest.is_dir() or not any(dest.rglob("*")):
+            extract_archives(docs_dir)
+            return
+
+
 def _download_new_documents(
     config: AppConfig,
     process: Process,
@@ -417,3 +433,4 @@ def _download_new_documents(
                 f"Watchlist: documento nuevo {uuid} no quedó en disco (proceso {process.id})"
             )
     write_manifest(docs_dir, docs)
+    extract_archives(docs_dir)

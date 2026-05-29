@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -16,6 +17,8 @@ from .config import AppConfig
 from .db.models import AnalysisResult, Base, Entity, Process, ProcessStatus
 from .parser import CronogramaEtapa, Documento, FichaData
 from .watchlist import (
+    _download_new_documents,
+    _ensure_archives_extracted,
     _refresh_watchlist_process,
     mark_watchlist_read,
     refresh_watchlist_processes,
@@ -181,6 +184,59 @@ def _ficha_with_docs(docs: list[Documento]) -> FichaData:
         cronograma=[CronogramaEtapa("A", "1", "2")],
         documentos=docs,
     )
+
+
+def test_download_new_documents_extracts_archives(
+    watch_session: Session, tmp_path: Path
+):
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[{"uuid": "u1", "nombre": "a.pdf", "tipo_descarga": "3"}],
+    )
+    docs_dir = Path(proc.data_dir) / "documentos"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    new_docs = [
+        {"uuid": "u1", "nombre": "a.pdf", "tipo_descarga": "3"},
+        {"uuid": "u2", "nombre": "pack.zip", "tipo_descarga": "3"},
+    ]
+
+    def _download(docs_dir_arg, doc, **kwargs):
+        if doc["uuid"] == "u2":
+            zpath = docs_dir_arg / "pack.zip"
+            with zipfile.ZipFile(zpath, "w") as zf:
+                zf.writestr("inside.pdf", b"pdf-content")
+            doc["archivo"] = zpath.name
+            return True
+        return False
+
+    with patch(
+        "seace_monitor.watchlist.download_and_store_document",
+        side_effect=_download,
+    ):
+        _download_new_documents(
+            cfg,
+            proc,
+            new_docs,
+            old_documentos_json=proc.documentos_json,
+        )
+
+    assert (docs_dir / "_extracted" / "pack" / "inside.pdf").is_file()
+
+
+def test_ensure_archives_extracted_repairs_existing_zip(
+    tmp_path: Path,
+):
+    docs_dir = tmp_path / "documentos"
+    docs_dir.mkdir()
+    zpath = docs_dir / "pack.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("nested.pdf", b"pdf")
+
+    _ensure_archives_extracted(docs_dir)
+
+    assert (docs_dir / "_extracted" / "pack" / "nested.pdf").is_file()
 
 
 def test_refresh_preserves_prev_baseline_while_unread(
