@@ -8,8 +8,8 @@
   {% if process.interest_status and process.interest_status.value != 'none' %}
   <span class="badge badge-interest">{{ process.interest_status.value }}</span>
   {% endif %}
-  {% if can_open_seace(process) %}
-  <a href="{{ seace_view_path(process.id) }}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm btn-seace">Ver en SEACE</a>
+  {% if can_open_source(process) %}
+  <a href="{{ source_view_url(process) }}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm btn-seace">{{ source_button_label(process) }}</a>
   {% endif %}
 </div>
 {% endmacro %}

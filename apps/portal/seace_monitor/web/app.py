@@ -62,7 +62,7 @@ from .seace_proxy import (
     seace_open_redirect,
     seace_view_path,
 )
-from .seace_view import can_open_seace
+from .seace_view import can_open_seace, can_open_source, source_button_label, source_view_url
 from .analysis_chat import register_analysis_chat_routes
 from .document_routes import register_process_document_routes
 from .list_pages import render_workflow_list
@@ -243,7 +243,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.globals["can_open_seace"] = can_open_seace
+    templates.env.globals["can_open_source"] = can_open_source
     templates.env.globals["seace_view_path"] = seace_view_path
+    templates.env.globals["source_button_label"] = source_button_label
+    templates.env.globals["source_view_url"] = source_view_url
     templates.env.globals["InterestStatus"] = InterestStatus
     templates.env.filters["urlquote_path"] = lambda value: quote(str(value), safe="/")
 
