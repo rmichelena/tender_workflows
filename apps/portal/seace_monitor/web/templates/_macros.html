@@ -26,7 +26,7 @@
 <td class="status-cell">{{ status_cell(p) }}</td>
 {% endmacro %}
 
-{% macro workflow_table(processes, sort_columns, sort, sort_dir, sort_href, empty_message, pending_status='', pending_data_attr='') %}
+{% macro workflow_table(processes, sort_columns, sort, sort_dir, sort_href, empty_message, pending_status='', pending_data_attr='', colspan=10) %}
 <table class="data">
   <thead>
     <tr>
@@ -50,7 +50,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="10" class="muted">{{ empty_message }}</td></tr>
+    <tr><td colspan="{{ colspan }}" class="muted">{{ empty_message }}</td></tr>
     {% endfor %}
   </tbody>
 </table>
