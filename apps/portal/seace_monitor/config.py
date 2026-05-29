@@ -64,6 +64,18 @@ class TenderProcurementConfig:
 
 
 @dataclass
+class AdpConfig:
+    """Configuración del escáner ADP Portal."""
+
+    enabled: bool = True
+    poll_interval: str = "6h"
+
+    @property
+    def poll_interval_seconds(self) -> int:
+        return parse_duration(self.poll_interval)
+
+
+@dataclass
 class AnalysisConfig:
     stage1_script: Path | None = None
     stage2_script: Path | None = None
@@ -87,6 +99,7 @@ class AppConfig:
     http_proxy: str | None = None
     auto_reject_rules_path: Path | None = None
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
+    adp: AdpConfig = field(default_factory=AdpConfig)
 
     @property
     def poll_interval_seconds(self) -> int:
@@ -154,6 +167,12 @@ class AppConfig:
             tender=tender,
         )
 
+        adp_raw = raw.pop("adp", {}) or {}
+        adp = AdpConfig(
+            enabled=bool(adp_raw.get("enabled", True)),
+            poll_interval=str(adp_raw.get("poll_interval", "6h")),
+        )
+
         return cls(
             poll_interval=str(raw.get("poll_interval", raw.get("poll_interval_seconds", "6h"))),
             ficha_refresh_interval=str(
@@ -177,6 +196,7 @@ class AppConfig:
             http_proxy=str(http_proxy).strip() if http_proxy else None,
             auto_reject_rules_path=_optional_path(raw.get("auto_reject_rules_path")),
             analysis=analysis,
+            adp=adp,
         )
 
 
