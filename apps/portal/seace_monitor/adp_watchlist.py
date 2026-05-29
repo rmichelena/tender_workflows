@@ -84,6 +84,15 @@ def refresh_adp_watchlist(config: AppConfig, session: Session) -> int:
         Número de procesos actualizados.
     """
     client = AdpClient(http_proxy=config.http_proxy)
+    try:
+        return _refresh_adp_watchlist_inner(config, session, client)
+    finally:
+        client.close()
+
+
+def _refresh_adp_watchlist_inner(
+    config: AppConfig, session: Session, client: AdpClient
+) -> int:
     threshold = utcnow() - config.watchlist_refresh_timedelta
 
     processes = (
@@ -131,7 +140,6 @@ def refresh_adp_watchlist(config: AppConfig, session: Session) -> int:
                 proc.source_ref,
             )
 
-    client.close()
     return updated
 
 
@@ -167,6 +175,8 @@ def _refresh_process(
     # Hay cambios — preservar paths de archivos ya descargados
     new_docs = json.loads(new_docs_json)
     _merge_archivo_from_storage(new_docs, proc.documentos_json)
+    # Siempre re-serializar después del merge para no perder archivo paths
+    new_docs_json = json.dumps(new_docs, ensure_ascii=False)
 
     if proc.data_dir:
         docs_dir = Path(proc.data_dir) / "documentos"

@@ -58,7 +58,7 @@ class AdpClient:
         )
 
     def fetch_category_html(self, work_id: int) -> str:
-        """Obtiene el HTML de una categoría de procesos.
+        """Obtiene el HTML de una categoría de procesos con reintentos.
 
         Args:
             work_id: 1=consultorías, 2=obras, 3=bienes, 4=servicios.
@@ -67,22 +67,47 @@ class AdpClient:
             HTML parcial con la lista de procesos.
 
         Raises:
-            requests.RequestException: Error de red.
+            requests.RequestException: Error de red agotados reintentos.
             ValueError: ``work_id`` inválido.
         """
         if work_id not in WORK_CATEGORIES:
             raise ValueError(f"work_id inválido: {work_id!r}")
         params = {"lang": "es", "site_id": "", "work_id": str(work_id)}
-        r = self.session.get(
-            ADP_PARTIAL_VIEW_URL,
-            params=params,
-            timeout=_FETCH_TIMEOUT,
-            proxies=self.proxies,
-        )
-        r.raise_for_status()
-        cat = WORK_CATEGORIES[work_id]
-        logger.debug("ADP fetch work_id=%s (%s): %s bytes", work_id, cat, len(r.text))
-        return r.text
+        last_error: Exception | None = None
+
+        for attempt in range(_RETRIES):
+            try:
+                r = self.session.get(
+                    ADP_PARTIAL_VIEW_URL,
+                    params=params,
+                    timeout=_FETCH_TIMEOUT,
+                    proxies=self.proxies,
+                )
+                r.raise_for_status()
+                cat = WORK_CATEGORIES[work_id]
+                logger.debug(
+                    "ADP fetch work_id=%s (%s): %s bytes",
+                    work_id,
+                    cat,
+                    len(r.text),
+                )
+                return r.text
+            except (requests.RequestException, RuntimeError) as exc:
+                last_error = exc
+                if attempt < _RETRIES - 1:
+                    backoff = _RETRY_BACKOFF[min(attempt, len(_RETRY_BACKOFF) - 1)]
+                    logger.warning(
+                        "ADP fetch work_id=%s intento %s/%s falló: %s — reintentando en %.1fs",
+                        work_id,
+                        attempt + 1,
+                        _RETRIES,
+                        exc,
+                        backoff,
+                    )
+                    time.sleep(backoff)
+
+        assert last_error is not None
+        raise last_error
 
     def download_document(
         self,
@@ -107,7 +132,7 @@ class AdpClient:
         for attempt in range(_RETRIES):
             try:
                 return self._download_once(name_file, dest)
-            except (requests.RequestException, OSError) as exc:
+            except (requests.RequestException, OSError, RuntimeError) as exc:
                 last_error = exc
                 if attempt < _RETRIES - 1:
                     backoff = _RETRY_BACKOFF[min(attempt, len(_RETRY_BACKOFF) - 1)]

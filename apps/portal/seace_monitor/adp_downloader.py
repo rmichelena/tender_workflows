@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 
 from .adp_client import AdpClient
-from .document_storage import sanitize_download_filename
+from .document_storage import allocate_unique_path, sanitize_download_filename
 
 logger = logging.getLogger(__name__)
 
@@ -46,17 +46,17 @@ def download_adp_documents(
         if not friendly.lower().endswith(".pdf"):
             friendly += ".pdf"
         filename = sanitize_download_filename(friendly)
-        dest = docs_dir / filename
+        dest = allocate_unique_path(docs_dir, filename)
 
         if dest.exists():
-            doc["archivo"] = filename
+            doc["archivo"] = dest.name
             continue
 
         try:
             client.download_document(name_file, dest)
-            doc["archivo"] = filename
+            doc["archivo"] = dest.name
             downloaded += 1
-            logger.info("ADP descargado: %s → %s", name_file, filename)
+            logger.info("ADP descargado: %s → %s", name_file, dest.name)
         except Exception:
             logger.exception("ADP: fallo descargando %s", name_file)
 
