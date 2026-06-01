@@ -114,6 +114,71 @@ def test_seace_ingest_adapter_is_registered():
     assert adapter.capabilities.fetch_by_reference is True
 
 
+def test_adp_ingest_adapter_is_registered_and_external():
+    from .ingest import get_adapter, registered_sources
+
+    assert {"seace", "adp_portal"}.issubset(set(registered_sources()))
+    adapter = get_adapter("adp_portal")
+    assert adapter.source == "adp_portal"
+    assert adapter.view_label == "ADP"
+    assert adapter.capabilities.opens_external_portal is True
+    assert adapter.portal_url
+
+
+def test_get_adapter_is_case_insensitive_and_raises_for_unknown():
+    from .ingest import get_adapter
+    from .ingest.base import UnknownIngestSource
+
+    assert get_adapter("SEACE").source == "seace"
+    try:
+        get_adapter("telepatia")
+        raised = False
+    except UnknownIngestSource:
+        raised = True
+    assert raised
+
+
+def test_ui_helpers_delegate_to_registry_without_source_branching():
+    """can_open/label/url salen del adapter, no de condicionales por source."""
+    from types import SimpleNamespace
+
+    from .web.seace_view import (
+        can_open_seace,
+        can_open_source,
+        source_button_label,
+        source_view_url,
+    )
+
+    adp = SimpleNamespace(
+        source="adp_portal",
+        source_ref="LPN-003-2026-ADP",
+        nomenclatura="LPN-003-2026-ADP",
+        entity=object(),
+        id=42,
+    )
+    assert can_open_source(adp) is True
+    assert can_open_seace(adp) is False  # ADP no usa el proxy SEACE
+    assert source_button_label(adp) == "Ver en ADP"
+    assert source_view_url(adp) == "https://www.adp.com.pe/"
+
+    seace = SimpleNamespace(
+        source="seace",
+        source_ref="123456",
+        nomenclatura="AS-SM-1-2026",
+        entity=object(),
+        id=7,
+    )
+    assert can_open_source(seace) is True
+    assert can_open_seace(seace) is True
+    assert source_button_label(seace) == "Ver en SEACE"
+    assert source_view_url(seace) == "/seace/open/7"
+
+    unknown = SimpleNamespace(
+        source="email", source_ref="x", nomenclatura="x", entity=object(), id=1
+    )
+    assert can_open_source(unknown) is False
+
+
 def test_non_seace_process_persists_without_nid_proceso():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

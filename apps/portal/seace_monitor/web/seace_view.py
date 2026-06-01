@@ -1,39 +1,46 @@
-"""Helpers para abrir fichas de procesos desde la UI (SEACE y ADP)."""
+"""Helpers para abrir fichas de procesos desde la UI (delegan en el registry de fuentes).
+
+El conocimiento de cada fuente vive en su adapter (`ingest/`), no en condicionales por
+`source` aquí. La resolución de URL interna (proxy SEACE) sí es responsabilidad de la
+capa web y se mantiene en este módulo.
+"""
 
 from __future__ import annotations
 
 from ..db.models import Process
-from ..seace_search import normalize_nomenclatura
+from ..ingest import get_adapter
+from ..ingest.base import SourceAdapter, UnknownIngestSource
 
-ADP_PORTAL_URL = "https://www.adp.com.pe/"
 
-
-def can_open_seace(process: Process) -> bool:
-    return bool(
-        process.source != "adp_portal"
-        and process.entity
-        and normalize_nomenclatura(process.nomenclatura)
-    )
+def _adapter_for(process: Process) -> SourceAdapter | None:
+    try:
+        return get_adapter(process.source)
+    except UnknownIngestSource:
+        return None
 
 
 def can_open_source(process: Process) -> bool:
-    """True si se puede abrir la ficha origen del proceso en un navegador."""
-    if process.source == "adp_portal":
-        return bool(process.source_ref)
-    return can_open_seace(process)
+    """True si se puede abrir la ficha origen del proceso (cualquier fuente)."""
+    adapter = _adapter_for(process)
+    return bool(adapter and adapter.can_open(process))
+
+
+def can_open_seace(process: Process) -> bool:
+    """True solo para procesos SEACE abribles (usado por el proxy `/seace/...`)."""
+    return process.source == "seace" and can_open_source(process)
 
 
 def source_button_label(process: Process) -> str:
-    """Texto del botón según el source."""
-    if process.source == "adp_portal":
-        return "Ver en ADP"
-    return "Ver en SEACE"
+    """Texto del botón según la fuente: 'Ver en SEACE', 'Ver en ADP', …"""
+    adapter = _adapter_for(process)
+    return f"Ver en {adapter.view_label}" if adapter else "Ver en SEACE"
 
 
-def source_view_url(process) -> str:
-    """URL destino del botón según el source."""
-    if process.source == "adp_portal":
-        # ADP no tiene páginas individuales; placeholder al portal
-        return ADP_PORTAL_URL
+def source_view_url(process: Process) -> str:
+    """URL destino del botón: portal externo (dato del adapter) o proxy interno SEACE."""
+    adapter = _adapter_for(process)
+    if adapter and adapter.portal_url:
+        return adapter.portal_url
     from .seace_proxy import seace_view_path
+
     return seace_view_path(process.id)
