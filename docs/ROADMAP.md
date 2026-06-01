@@ -31,7 +31,25 @@ Roadmap del producto integrado (portal + ingesta + análisis + agentes).
 | Descarte con limpieza disco/BD | Incluye `documentos_json`, `AnalysisResult` |
 | Proxy Ver en SEACE | Server-side ViewState |
 | Puente Paso 1 completo | Existe; no es el camino default en VPS |
-| Fundación multi-ingesta | `Process.source`/`source_ref`, registry `ingest`, fast reader por `source` en branch `multiple-inputs` |
+| Fundación multi-ingesta | `Process.source`/`source_ref`, registry `ingest`, fast reader por `source` (mergeado) |
+| Segunda fuente: ADP Portal | `adp_portal` (scanner/watchlist/downloader propios), routing por `source` en worker/runner/UI (mergeado) |
+
+---
+
+## Fase 0 — Refactor de arquitectura de ingesta 🔄
+
+**Objetivo:** convertir las fuentes en plugins reales y preparar feed/pipeline + multi-tenant **antes** de sumar más fuentes o más usuarios. Rama `ingest-plugin-contract`. Diseño completo en [INGEST_CONTRACT.md](INGEST_CONTRACT.md).
+
+| Ítem | Descripción | Prioridad |
+|------|-------------|-----------|
+| 0.1 | **Contrato `SourceAdapter`** (discover/detect_changes/fetch/download/external_url/reader_profile) + DTOs normalizados; SEACE como primer ciudadano | Alta |
+| 0.2 | **ADP al contrato:** colapsar `adp_scanner`/`adp_watchlist`/`adp_downloader` a un `AdpAdapter`; eliminar branching por `source` en worker/runner/UI | Alta |
+| 0.3 | **Split Feed/Pipeline (lógico):** `FeedItem` (compartido, autopurge >90d) + `PipelineItem` (promoción por snapshot sin FK); sacar autoreject del scanner | Alta |
+| 0.4 | **Identidad estable:** UUID interno + `ExternalRef` multi-canal; relajar `UniqueConstraint` atado a `source` | Media |
+| 0.5 | **`lifecycle_phase`:** `estudio_mercado` como fase, no tipo separado | Media |
+| 0.6 | **Multi-tenant (lógico):** `tenant_id` en pipeline/overlay; feed sin `tenant_id`; reglas y selección de entidades por tenant | Media |
+
+**Definition of done:** agregar una tercera fuente = implementar un adapter (client+parser+url), sin tocar worker/runner/UI; el feed se escanea una vez y cada tenant lo filtra con sus reglas.
 
 ---
 
@@ -176,9 +194,11 @@ sequenceDiagram
 
 ## Fase 6 — Multi-ingesta y perfiles de workflow 🔮
 
+> Las bases de modelo (`PipelineItem`, `ExternalRef`, feed/pipeline, multi-tenant) se adelantan en **Fase 0** ([INGEST_CONTRACT.md](INGEST_CONTRACT.md)). Aquí quedan las fuentes nuevas y los perfiles completos.
+
 | Ítem | Descripción |
 |------|-------------|
-| 6.0 | Modelo `PipelineItem` conceptual: `workflow_profile`, `interest_status`, trigger separado de `source` |
+| 6.0 | Modelo `PipelineItem` consolidado: `workflow_profile`, `interest_status`, `lifecycle_phase`, trigger separado de `source` (cimentado en Fase 0) |
 | 6.1 | Adapter email (mailbox IMAP/POP → paquetes documentales; default `market_study`) |
 | 6.2 | Segundo portal de cliente (parser/descarga por portal; Change Detection como trigger opcional) |
 | 6.3 | Upload manual de expediente como fallback controlado |
