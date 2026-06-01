@@ -14,6 +14,8 @@ from .db.models import Entity
 from .db.session import init_db, session_factory
 from .entity_catalog import sync_entity_catalog_if_changed
 from .scanner import MultiEntityScanner
+from .adp_scanner import AdpScanner
+from .adp_watchlist import refresh_adp_watchlist
 from .watchlist import refresh_watchlist_processes
 from .worker_heartbeat import write_worker_heartbeat
 
@@ -106,32 +108,49 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
 
     now = time.time()
     next_scan_at = now
+    next_adp_scan_at = now
     next_watch_at = now
+    next_adp_watch_at = now
 
     while True:
         now = time.time()
         session = session_factory()
         n = 0
         w = 0
+        adp_n = 0
+        adp_w = 0
         ran_scan = False
         ran_watch = False
+        ran_adp_scan = False
+        ran_adp_watch = False
         try:
             if now >= next_scan_at:
                 scanner = MultiEntityScanner(cfg, session)
                 n = scanner.run_once()
                 next_scan_at = now + poll_s
                 ran_scan = True
+            if cfg.adp.enabled and now >= next_adp_scan_at:
+                adp_scanner = AdpScanner(cfg, session)
+                adp_n = adp_scanner.run_once()
+                next_adp_scan_at = now + cfg.adp.poll_interval_seconds
+                ran_adp_scan = True
             if now >= next_watch_at:
                 w = refresh_watchlist_processes(cfg, session)
                 next_watch_at = now + watch_s
                 ran_watch = True
-            if ran_scan or ran_watch:
+            if cfg.adp.enabled and now >= next_adp_watch_at:
+                adp_w = refresh_adp_watchlist(cfg, session)
+                next_adp_watch_at = now + watch_s
+                ran_adp_watch = True
+            if ran_scan or ran_watch or ran_adp_scan or ran_adp_watch:
                 session.commit()
-            if n or w:
+            if n or w or adp_n or adp_w:
                 logger.info(
-                    "Ciclo completado: %s proceso(s) nuevo(s), %s watchlist actualizado(s)",
+                    "Ciclo completado: SEACE %s nuevo(s), %s watch; ADP %s nuevo(s), %s watch",
                     n,
                     w,
+                    adp_n,
+                    adp_w,
                 )
         except Exception:
             session.rollback()
@@ -144,7 +163,9 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
         if once:
             break
         sleep_for = seconds_until_next_wake(
-            time.time(), next_scan_at, next_watch_at
+            time.time(),
+            min(next_scan_at, next_adp_scan_at),
+            min(next_watch_at, next_adp_watch_at),
         )
         time.sleep(sleep_for)
 

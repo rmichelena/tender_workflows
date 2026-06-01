@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from .base import IngestAdapter, IngestCapabilities, UnknownIngestSource
 from .seace import SEACE_ADAPTER
+from .adp import ADP_ADAPTER
 
 _ADAPTERS: dict[str, IngestAdapter] = {
     SEACE_ADAPTER.source: SEACE_ADAPTER,
+    ADP_ADAPTER.source: ADP_ADAPTER,
 }
 
 

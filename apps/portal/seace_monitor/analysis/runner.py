@@ -97,12 +97,19 @@ class AnalysisRunner:
         # Liberar SQLite antes del fetch SEACE (puede tardar varios segundos).
         self.session.commit()
 
-        docs = self._fetch_documentos_from_seace(process, entity.ruc)
+        # Seleccionar downloader según source
+        if process.source == "adp_portal":
+            docs = self._fetch_documentos_from_adp(process)
+        else:
+            docs = self._fetch_documentos_from_seace(process, entity.ruc)
         self.session.commit()
 
         try:
-            self._fetch_documents(docs, docs_dir)
-            extract_archives(docs_dir)
+            if process.source == "adp_portal":
+                self._fetch_adp_documents(docs, docs_dir)
+            else:
+                self._fetch_documents(docs, docs_dir)
+                extract_archives(docs_dir)
         except Exception:
             cleanup_partial_downloads(docs_dir)
             process = self.session.get(Process, process_id)
@@ -319,6 +326,27 @@ class AnalysisRunner:
         process.documentos_json = json.dumps(docs, ensure_ascii=False)
         self.session.flush()
         return docs
+
+    def _fetch_documentos_from_adp(self, process: Process) -> list[dict]:
+        """Obtiene documentos desde el portal ADP (ya parseados en documentos_json)."""
+        if not process.documentos_json:
+            raise RuntimeError(
+                f"Proceso ADP {process.id} sin documentos_json; "
+                "el scanner debió haberlos almacenado"
+            )
+        return json.loads(process.documentos_json)
+
+    def _fetch_adp_documents(self, docs: list[dict], docs_dir: Path) -> None:
+        """Descarga documentos del portal ADP vía HTTP directo."""
+        from ..adp_client import AdpClient
+        from ..adp_downloader import download_adp_documents
+
+        client = AdpClient(http_proxy=self.config.http_proxy)
+        try:
+            download_adp_documents(docs_dir, docs, client)
+        finally:
+            client.close()
+        write_manifest(docs_dir, docs)
 
     def _run_pipeline(
         self,
