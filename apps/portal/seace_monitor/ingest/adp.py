@@ -8,11 +8,13 @@ trabajo de fases posteriores (ver `docs/INGEST_CONTRACT.md`).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .base import IngestCapabilities
 
 if TYPE_CHECKING:
+    from ..analysis.runner import AnalysisRunner
     from ..db.models import Process
 
 ADP_PORTAL_URL = "https://www.adp.com.pe/"
@@ -32,6 +34,18 @@ class AdpIngestAdapter:
 
     def can_open(self, process: "Process") -> bool:
         return bool(process.source_ref)
+
+    def resolve_document_index(
+        self, runner: "AnalysisRunner", process: "Process"
+    ) -> list[dict]:
+        # ADP ya tiene los documentos parseados en documentos_json (los puso el scanner).
+        return runner._fetch_documentos_from_adp(process)
+
+    def fetch_documents(
+        self, runner: "AnalysisRunner", docs: list[dict], docs_dir: Path
+    ) -> None:
+        # ADP descarga vía HTTP directo; no hay archivos comprimidos que extraer.
+        runner._fetch_adp_documents(docs, docs_dir)
 
 
 ADP_ADAPTER = AdpIngestAdapter()

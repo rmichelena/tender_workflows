@@ -12,9 +12,11 @@ Estado de implementación (ver `docs/INGEST_CONTRACT.md`):
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from ..analysis.runner import AnalysisRunner
     from ..db.models import Process
 
 
@@ -50,6 +52,32 @@ class SourceAdapter(Protocol):
 
     def can_open(self, process: "Process") -> bool:
         """¿Se puede abrir la ficha origen de este proceso desde la UI?"""
+        ...
+
+    # --- Descarga (Fase 0.2) ---------------------------------------------
+    # Dispatch de descarga por fuente. El orquestador (AnalysisRunner) maneja
+    # sesión/commits/cleanup; el adapter encapsula los pasos específicos de la
+    # fuente. Transicional: hoy delegan en métodos del runner; el código pesado
+    # migrará al adapter/módulos compartidos en una sub-fase posterior.
+
+    def resolve_document_index(
+        self, runner: "AnalysisRunner", process: "Process"
+    ) -> list[dict]:
+        """Resuelve la lista de documentos a descargar (puede mutar `process`).
+
+        Se ejecuta fuera del bloque de cleanup; su salida se persiste como
+        `documentos_json` tras la descarga.
+        """
+        ...
+
+    def fetch_documents(
+        self, runner: "AnalysisRunner", docs: list[dict], docs_dir: Path
+    ) -> None:
+        """Descarga los bytes a `docs_dir` (incluye extracción cuando aplique).
+
+        Se ejecuta dentro del bloque protegido: si lanza, el runner limpia el
+        directorio y revierte el estado.
+        """
         ...
 
 
