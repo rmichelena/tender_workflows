@@ -177,6 +177,46 @@ def test_ui_helpers_delegate_to_registry_without_source_branching():
         source="email", source_ref="x", nomenclatura="x", entity=object(), id=1
     )
     assert can_open_source(unknown) is False
+    assert can_open_seace(unknown) is False  # fuente sin registrar no pasa el gate del proxy
+
+
+def test_can_open_seace_is_case_insensitive_like_registry():
+    """`can_open_seace` usa el source canónico del adapter, no `process.source` crudo."""
+    from types import SimpleNamespace
+
+    from .web.seace_view import can_open_seace, can_open_source
+
+    upper = SimpleNamespace(
+        source="SEACE",
+        source_ref="123456",
+        nomenclatura="AS-SM-1-2026",
+        entity=object(),
+        id=9,
+    )
+    assert can_open_source(upper) is True
+    assert can_open_seace(upper) is True  # coherente con get_adapter("SEACE")
+
+
+def test_can_open_negative_cases_for_registered_sources():
+    from types import SimpleNamespace
+
+    from .web.seace_view import can_open_seace, can_open_source
+
+    seace_sin_nomenclatura = SimpleNamespace(
+        source="seace", source_ref="1", nomenclatura="", entity=object(), id=2
+    )
+    assert can_open_source(seace_sin_nomenclatura) is False
+    assert can_open_seace(seace_sin_nomenclatura) is False
+
+    seace_sin_entity = SimpleNamespace(
+        source="seace", source_ref="1", nomenclatura="AS-SM-1-2026", entity=None, id=3
+    )
+    assert can_open_source(seace_sin_entity) is False
+
+    adp_sin_ref = SimpleNamespace(
+        source="adp_portal", source_ref="", nomenclatura="x", entity=object(), id=4
+    )
+    assert can_open_source(adp_sin_ref) is False
 
 
 def test_non_seace_process_persists_without_nid_proceso():

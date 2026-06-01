@@ -26,8 +26,13 @@ def can_open_source(process: Process) -> bool:
 
 
 def can_open_seace(process: Process) -> bool:
-    """True solo para procesos SEACE abribles (usado por el proxy `/seace/...`)."""
-    return process.source == "seace" and can_open_source(process)
+    """True solo para procesos SEACE abribles (usado por el proxy `/seace/...`).
+
+    Compara contra el `source` canónico del adapter (no `process.source` crudo) para
+    quedar alineado con la normalización case-insensitive de `get_adapter`.
+    """
+    adapter = _adapter_for(process)
+    return bool(adapter and adapter.source == "seace" and adapter.can_open(process))
 
 
 def source_button_label(process: Process) -> str:
