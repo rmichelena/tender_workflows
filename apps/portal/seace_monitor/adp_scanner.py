@@ -19,6 +19,7 @@ from .adp_parser import AdpProcess, parse_adp_html
 from .auto_reject import AutoRejectRule, apply_auto_reject_rules, load_auto_reject_rules
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus, utcnow
+from .feed import FeedRepository
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ class AdpScanner:
     def __init__(self, config: AppConfig, session: Session) -> None:
         self.config = config
         self.session = session
+        self.feed = FeedRepository(session)
         self.auto_reject_rules: list[AutoRejectRule] = load_auto_reject_rules(config)
         self.client = AdpClient(http_proxy=config.http_proxy)
 
@@ -129,15 +131,7 @@ class AdpScanner:
             ``True`` si el proceso es nuevo.
         """
         content_hash = adp_proc.content_hash()
-        proc = (
-            self.session.query(Process)
-            .filter(
-                Process.source == ADP_PORTAL_SOURCE,
-                Process.entity_id == entity.id,
-                Process.source_ref == adp_proc.code,
-            )
-            .one_or_none()
-        )
+        proc = self.feed.find_by_ref(ADP_PORTAL_SOURCE, entity.id, adp_proc.code)
 
         is_new = proc is None
 

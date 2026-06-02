@@ -334,7 +334,7 @@ riesgo de comportamiento, comparando conteos por estado/lista en el VPS antes/de
 
 | Sub-paso | Qué | Riesgo | Notas |
 |----------|-----|--------|-------|
-| **0.3a** | **Seam feed (sin cambio físico):** módulo `feed/repository.py` con API conceptual `FeedItem` (`upsert_discovered`, `mark_seen/promoted`, `query_inbox(source, …)`) operando sobre `processes`. Scanner y list views pasan a usarlo. | Bajo (behavior-preserving) | No toca la BD. Tests de paridad. **Punto de arranque.** |
+| **0.3a** ✅ | **Seam feed (sin cambio físico):** módulo `feed/repository.py` (`FeedRepository.find_by_ref`, `query_by_status`) operando sobre `processes`. Scanners SEACE/ADP y list views lo usan en vez de consultar el ORM directo. | Bajo (behavior-preserving) | No toca la BD. Tests en `test_feed_repository.py`. |
 | **0.3b** | **Overlay `TenantFeedDecision` (aditivo):** tabla `(tenant_id, feed_item_id, decision, rule_id, reason, created_at)` con `tenant_id='default'`. Backfill desde `status=autorejected`→`autorejected` y `auto_reject_exempt=True`→`exempt`. Doble escritura transitoria. | Bajo (solo CREATE TABLE) | Backup antes. Reversible. |
 | **0.3c** | **Mover autoreject del scanner al overlay:** `apply_auto_reject_rules` deja de mutar `process.status`; escribe `TenantFeedDecision`. Scanner solo registra item crudo. Listas de descartados/exempt leen del overlay. | **Medio** (comportamiento) | Tests exhaustivos + verificación de conteos en VPS. |
 | **0.3d** | **Promoción explícita feed→pipeline (lógica):** acción positiva (descargar/analizar/watchlist/interés) marca `feed.status='promoted'` y consolida snapshot curado. Con `Process` aún única, "promoción" = flags/columnas. | Bajo–medio | Prepara la copia sin FK del split físico. |

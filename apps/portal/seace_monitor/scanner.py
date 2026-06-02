@@ -13,6 +13,7 @@ from .auto_reject import AutoRejectRule, apply_auto_reject_rules, load_auto_reje
 from .client import ProcessRow, SeaceClient
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus, utcnow
+from .feed import FeedRepository
 from .parser import extract_cronograma_fechas, parse_ficha, row_snapshot_hash
 from .scan_options import ScanOptions, passes_date_filter
 
@@ -30,6 +31,7 @@ class MultiEntityScanner:
     def __init__(self, config: AppConfig, session: Session) -> None:
         self.config = config
         self.session = session
+        self.feed = FeedRepository(session)
         self.auto_reject_rules: list[AutoRejectRule] = load_auto_reject_rules(config)
 
     def run_once(self, options: ScanOptions | None = None) -> int:
@@ -106,15 +108,7 @@ class MultiEntityScanner:
                     continue
                 seen_nids.add(row.nid_proceso)
                 list_hash = row_snapshot_hash(row)
-                proc = (
-                    self.session.query(Process)
-                    .filter(
-                        Process.source == "seace",
-                        Process.entity_id == entity.id,
-                        Process.source_ref == row.nid_proceso,
-                    )
-                    .one_or_none()
-                )
+                proc = self.feed.find_by_ref("seace", entity.id, row.nid_proceso)
 
                 if proc is not None and proc.status in (
                     ProcessStatus.descartada,
