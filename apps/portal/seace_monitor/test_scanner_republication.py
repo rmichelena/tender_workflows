@@ -16,6 +16,7 @@ from .feed import FeedRepository
 from .scanner import (
     _REPUBLICATION_CLAIMED_STATUSES,
     adopt_republication,
+    build_claimed_nomenclatura_map,
     is_removable_publicada_duplicate,
 )
 
@@ -152,6 +153,58 @@ def test_is_removable_publicada_duplicate_guards():
     assert is_removable_publicada_duplicate(pub) is True
     assert is_removable_publicada_duplicate(pub_with_dir) is False
     assert is_removable_publicada_duplicate(analizada) is False
+
+
+def test_adopt_does_not_regress_to_older_nid():
+    # Hallazgo review #1: dos filas misma nomenclatura en el mismo scan; la fila con nid
+    # más viejo NO debe revertir la identidad ya avanzada.
+    session = _session()
+    entity = _entity(session)
+    claimed = _proc(
+        entity, source_ref="1018219", nid="1018219", nomenclatura=NOM,
+        status=ProcessStatus.analizada,
+    )
+    session.add(claimed)
+    session.commit()
+
+    # Llega una fila con el nid viejo (1001133 < 1018219): no debe adoptar.
+    adopt_republication(session, claimed, None, _row("1001133", NOM))
+    session.commit()
+
+    assert claimed.source_ref == "1018219"
+    assert claimed.nid_proceso == "1018219"
+
+
+def test_build_claimed_map_prefers_more_advanced_on_collision():
+    # Hallazgo review #2: dos reclamados con misma nomenclatura → elegir el más avanzado
+    # (y a igualdad, nid mayor), sin depender del orden de la consulta.
+    session = _session()
+    entity = _entity(session)
+    descargada = _proc(entity, source_ref="100", nid="100", nomenclatura=NOM,
+                       status=ProcessStatus.descargada)
+    analizada = _proc(entity, source_ref="50", nid="50", nomenclatura=NOM,
+                      status=ProcessStatus.analizada)
+    session.add_all([descargada, analizada])
+    session.commit()
+
+    # Orden de entrada irrelevante: gana 'analizada' (más avanzada) aunque tenga nid menor.
+    for order in ([descargada, analizada], [analizada, descargada]):
+        mapping = build_claimed_nomenclatura_map(order)
+        assert mapping[NOM] is analizada
+
+
+def test_build_claimed_map_breaks_status_tie_by_newer_nid():
+    session = _session()
+    entity = _entity(session)
+    old = _proc(entity, source_ref="100", nid="100", nomenclatura=NOM,
+                status=ProcessStatus.descargada)
+    new = _proc(entity, source_ref="200", nid="200", nomenclatura=NOM,
+                status=ProcessStatus.descargada)
+    session.add_all([old, new])
+    session.commit()
+
+    assert build_claimed_nomenclatura_map([old, new])[NOM] is new
+    assert build_claimed_nomenclatura_map([new, old])[NOM] is new
 
 
 def test_claimed_for_entity_only_returns_claimed_statuses():

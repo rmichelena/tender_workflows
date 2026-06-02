@@ -41,6 +41,33 @@ _REPUBLICATION_CLAIMED_STATUSES = frozenset(
 )
 
 
+# Orden de avance entre estados reclamados (mayor = más trabajo invertido). Sirve para
+# desempatar si dos procesos reclamados comparten nomenclatura (datos legacy).
+_CLAIMED_STATUS_RANK = {
+    ProcessStatus.descargando: 0,
+    ProcessStatus.descargada: 1,
+    ProcessStatus.analizada: 2,
+    ProcessStatus.portafolio: 3,
+}
+
+
+def _nid_int(value: str | None) -> int:
+    """nid SEACE como entero (crece con el tiempo); -1 si no es numérico."""
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return -1
+
+
+def _nid_advances(current: str | None, new: str | None) -> bool:
+    """¿`new` es un nid más reciente que `current`? (nunca regresar identidad)."""
+    new_n = _nid_int(new)
+    if new_n < 0:
+        return False
+    cur_n = _nid_int(current)
+    return cur_n < 0 or new_n > cur_n
+
+
 def is_removable_publicada_duplicate(proc: Process) -> bool:
     """¿`proc` es un duplicado `publicada` sin datos propios (seguro de borrar)?"""
     return (
@@ -50,6 +77,44 @@ def is_removable_publicada_duplicate(proc: Process) -> bool:
     )
 
 
+def build_claimed_nomenclatura_map(processes: list[Process]) -> dict[str, Process]:
+    """Mapa nomenclatura-normalizada → proceso reclamado preferido.
+
+    Ante varios reclamados con la misma nomenclatura (datos legacy / fusión incompleta)
+    elige el más avanzado y, a igualdad, el de nid más reciente, y lo registra en logs;
+    así la reconciliación no depende del orden no determinístico de la consulta.
+    """
+    mapping: dict[str, Process] = {}
+    for proc in processes:
+        key = normalize_nomenclatura(proc.nomenclatura)
+        if not key:
+            continue
+        current = mapping.get(key)
+        if current is None:
+            mapping[key] = proc
+            continue
+        logger.warning(
+            "Nomenclatura duplicada entre reclamados: %s (id=%s estado=%s vs id=%s estado=%s)",
+            key,
+            current.id,
+            current.status.value if current.status else "?",
+            proc.id,
+            proc.status.value if proc.status else "?",
+        )
+        if _claimed_is_preferred(proc, current):
+            mapping[key] = proc
+    return mapping
+
+
+def _claimed_is_preferred(candidate: Process, current: Process) -> bool:
+    """¿`candidate` representa mejor al item que `current`? (más avanzado, luego nid)."""
+    cand_rank = _CLAIMED_STATUS_RANK.get(candidate.status, -1)
+    cur_rank = _CLAIMED_STATUS_RANK.get(current.status, -1)
+    if cand_rank != cur_rank:
+        return cand_rank > cur_rank
+    return _nid_int(candidate.source_ref) > _nid_int(current.source_ref)
+
+
 def adopt_republication(
     session, claimed: Process, existing: Process | None, row
 ) -> None:
@@ -57,24 +122,24 @@ def adopt_republication(
 
     `existing` es la fila hallada por `source_ref` (nuevo nid) si la hubiera: si es un
     duplicado `publicada` sin datos, se elimina para liberar la identidad. Si la
-    identidad queda libre (o no existía), se adopta el nuevo nid en `claimed`. El
-    refresco de contenido (cronograma/documentos) lo sigue gobernando el watchlist, que
-    resuelve por nomenclatura y preserva docs/changelog.
+    identidad queda libre (o no existía) y el nid **avanza** (no regresar a un nid ya
+    superado en el mismo scan), se adopta el nuevo nid en `claimed`. El refresco de
+    contenido (cronograma/documentos) lo sigue gobernando el watchlist, que resuelve por
+    nomenclatura y preserva docs/changelog.
     """
     if existing is not None and is_removable_publicada_duplicate(existing):
         session.delete(existing)
         session.flush()
         existing = None
-    if existing is None:
-        if claimed.source_ref != row.nid_proceso:
-            logger.info(
-                "Re-publicación %s: adopto nid %s → %s en proceso id=%s (%s)",
-                row.nomenclatura,
-                claimed.source_ref,
-                row.nid_proceso,
-                claimed.id,
-                claimed.status.value if claimed.status else "?",
-            )
+    if existing is None and _nid_advances(claimed.source_ref, row.nid_proceso):
+        logger.info(
+            "Re-publicación %s: adopto nid %s → %s en proceso id=%s (%s)",
+            row.nomenclatura,
+            claimed.source_ref,
+            row.nid_proceso,
+            claimed.id,
+            claimed.status.value if claimed.status else "?",
+        )
         claimed.source_ref = row.nid_proceso
         claimed.nid_proceso = row.nid_proceso
         if row.reiniciado_desde:
@@ -232,12 +297,7 @@ class MultiEntityScanner:
         claimed = self.feed.claimed_for_entity(
             "seace", entity.id, _REPUBLICATION_CLAIMED_STATUSES
         )
-        mapping: dict[str, Process] = {}
-        for proc in claimed:
-            key = normalize_nomenclatura(proc.nomenclatura)
-            if key:
-                mapping[key] = proc
-        return mapping
+        return build_claimed_nomenclatura_map(claimed)
 
     def _needs_ficha_refresh(self, proc: Process) -> bool:
         if proc.status not in _FICHA_REFRESH_STATUSES:
