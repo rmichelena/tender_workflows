@@ -116,6 +116,73 @@ def test_apply_existing_only_selected_channel(tmp_path: Path):
         db.close()
 
 
+def test_apply_isolates_per_item_failure(tmp_path: Path, monkeypatch):
+    # Durabilidad batch (review nuevo, Medium): si falla la decisión de un proceso, las
+    # decisiones ya aplicadas al resto del lote deben persistir (savepoint por ítem).
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'ar4.db'}")
+    app = create_app(cfg)
+    db = session_factory()
+    try:
+        db.add(Entity(id=1, ruc="20100000001", nombre="Entidad SEACE", activa=True))
+        db.flush()
+        db.add_all(
+            [
+                Process(
+                    entity_id=1, anio=2026, source="seace", source_ref="s1",
+                    nid_proceso="s1", nomenclatura="LP-1",
+                    objeto="Servicio", descripcion="SERVICIO DE LIMPIEZA A",
+                    status=ProcessStatus.publicada,
+                ),
+                Process(
+                    entity_id=1, anio=2026, source="seace", source_ref="s3",
+                    nid_proceso="s3", nomenclatura="LP-3",
+                    objeto="Servicio", descripcion="SERVICIO DE LIMPIEZA B",
+                    status=ProcessStatus.publicada,
+                ),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    import seace_monitor.web.settings_autoreject as mod
+
+    real = mod.record_autoreject_decision
+
+    def flaky(session, proc, **kwargs):
+        if proc.nomenclatura == "LP-1":
+            raise RuntimeError("boom en LP-1")
+        return real(session, proc, **kwargs)
+
+    monkeypatch.setattr(mod, "record_autoreject_decision", flaky)
+
+    client = TestClient(app)
+    client.post(
+        "/settings/autoreject",
+        data={"rules_yaml": _RULES_YAML, "action": "save"},
+        follow_redirects=False,
+    )
+    resp = client.post(
+        "/settings/autoreject/apply",
+        data={"sources": ["seace"]},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/settings/autoreject?applied=1"
+
+    db = session_factory()
+    try:
+        # LP-1 falló y se revirtió su savepoint → sigue publicada, sin decisión overlay.
+        assert _status(db, "LP-1") == ProcessStatus.publicada
+        # LP-3 se aplicó y persiste pese al fallo del otro ítem.
+        assert _status(db, "LP-3") == ProcessStatus.autorejected
+        decisions = db.query(TenantFeedDecision).all()
+        assert {d.decision for d in decisions} == {"autorejected"}
+        assert len(decisions) == 1
+    finally:
+        db.close()
+
+
 def test_apply_with_no_channels_selected_is_noop(tmp_path: Path):
     cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'ar3.db'}")
     app = create_app(cfg)

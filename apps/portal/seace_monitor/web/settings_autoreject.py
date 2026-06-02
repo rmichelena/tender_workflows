@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import yaml
 from fastapi import Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -18,6 +20,8 @@ from ..config import AppConfig
 from ..db.models import Process, ProcessStatus
 from ..feed import record_autoreject_decision
 from ..ingest import get_adapter, registered_sources
+
+logger = logging.getLogger(__name__)
 
 
 def _rules_text(config: AppConfig) -> tuple[str, bool]:
@@ -106,14 +110,25 @@ def register_autoreject_settings_routes(app, config: AppConfig, render, _get_db)
                 )
                 .all()
             )
+            # Savepoint por proceso: el fallo en uno (p. ej. violación de constraint) no
+            # debe descartar las decisiones ya aplicadas al resto del lote.
             for proc in procesos:
-                match = apply_auto_reject_rules(proc, proc.entity, rules)
-                if match is not None:
-                    db.flush()
-                    record_autoreject_decision(
-                        db, proc, rule_id=match.id, reason=proc.auto_reject_reason
+                savepoint = db.begin_nested()
+                try:
+                    match = apply_auto_reject_rules(proc, proc.entity, rules)
+                    if match is not None:
+                        db.flush()
+                        record_autoreject_decision(
+                            db, proc, rule_id=match.id, reason=proc.auto_reject_reason
+                        )
+                        applied += 1
+                    savepoint.commit()
+                except Exception:
+                    savepoint.rollback()
+                    logger.exception(
+                        "Error aplicando autoreject a proceso id=%s", proc.id
                     )
-                    applied += 1
+            db.commit()
         return RedirectResponse(
             f"/settings/autoreject?applied={applied}", status_code=303
         )
