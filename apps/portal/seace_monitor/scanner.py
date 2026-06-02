@@ -200,6 +200,7 @@ class MultiEntityScanner:
         new_count = 0
         seen_nids: set[str] = set()
         claimed_by_nomenclatura = self._claimed_nomenclatura_map(entity)
+        publicada_by_nomenclatura = self._publicada_nomenclatura_map(entity)
 
         first_soup = None
         max_pages = self.config.max_pages
@@ -257,6 +258,26 @@ class MultiEntityScanner:
                     proc.last_seen_at = utcnow()
                     continue
 
+                # Dedupe del feed puro: re-publicación entre filas `publicada` (mismo UID
+                # de negocio, nid nuevo). Mantener un solo `publicada` adoptando el nid más
+                # reciente, en vez de dejar dos publicadas paralelas para la misma licitación.
+                pub = publicada_by_nomenclatura.get(
+                    normalize_nomenclatura(row.nomenclatura)
+                )
+                if pub is not None and pub is not proc:
+                    savepoint = self.session.begin_nested()
+                    try:
+                        adopt_republication(self.session, pub, proc, row)
+                        savepoint.commit()
+                    except Exception:
+                        savepoint.rollback()
+                        logger.exception(
+                            "Error dedup re-publicación publicada nid=%s nomenclatura=%s",
+                            row.nid_proceso,
+                            row.nomenclatura,
+                        )
+                    continue
+
                 savepoint = self.session.begin_nested()
                 try:
                     if proc is None:
@@ -264,6 +285,21 @@ class MultiEntityScanner:
                             entity, client, row, proc=None, options=options, list_page=page
                         ):
                             new_count += 1
+                        # Mantener el mapa de dedupe al día dentro del mismo escaneo: si
+                        # otra fila de este ciclo trae la misma nomenclatura con otro nid,
+                        # debe fusionarse en esta `publicada` recién creada, no duplicarla.
+                        created = self.feed.find_by_ref(
+                            "seace", entity.id, row.nid_proceso
+                        )
+                        if created is not None and created.status == ProcessStatus.publicada:
+                            key = normalize_nomenclatura(row.nomenclatura)
+                            prev = publicada_by_nomenclatura.get(key) if key else None
+                            if key and (
+                                prev is None
+                                or _nid_int(created.source_ref)
+                                >= _nid_int(prev.source_ref)
+                            ):
+                                publicada_by_nomenclatura[key] = created
                     elif proc.list_hash != list_hash:
                         self._upsert_from_ficha(
                             entity, client, row, proc=proc, options=options, list_page=page
@@ -298,6 +334,25 @@ class MultiEntityScanner:
             "seace", entity.id, _REPUBLICATION_CLAIMED_STATUSES
         )
         return build_claimed_nomenclatura_map(claimed)
+
+    def _publicada_nomenclatura_map(self, entity: Entity) -> dict[str, Process]:
+        """Mapa nomenclatura-normalizada → `publicada` preferida (nid más reciente).
+
+        Permite deduplicar re-publicaciones dentro del feed puro: si la misma licitación
+        aparece dos veces como `publicada` (nid reasignado), conservamos una sola fila.
+        """
+        rows = self.feed.by_status_for_entity(
+            "seace", entity.id, (ProcessStatus.publicada,)
+        )
+        mapping: dict[str, Process] = {}
+        for proc in rows:
+            key = normalize_nomenclatura(proc.nomenclatura)
+            if not key:
+                continue
+            current = mapping.get(key)
+            if current is None or _nid_int(proc.source_ref) > _nid_int(current.source_ref):
+                mapping[key] = proc
+        return mapping
 
     def _needs_ficha_refresh(self, proc: Process) -> bool:
         if proc.status not in _FICHA_REFRESH_STATUSES:
@@ -374,7 +429,14 @@ class MultiEntityScanner:
         proc.content_hash = ficha.content_hash()
         proc.last_seen_at = utcnow()
         proc.updated_at = datetime.now(timezone.utc)
-        match = apply_auto_reject_rules(proc, entity, self.auto_reject_rules)
+        # Autoreject solo en el alta del proceso. Los cambios de reglas NO se aplican
+        # automática ni silenciosamente a publicaciones existentes; eso se hace de forma
+        # explícita y por canal desde el editor de reglas (Settings → autoreject).
+        match = (
+            apply_auto_reject_rules(proc, entity, self.auto_reject_rules)
+            if is_new
+            else None
+        )
         self.session.flush()
         if match is not None:
             record_autoreject_decision(

@@ -23,6 +23,38 @@
     <pre class="code-sample">objeto:servicio ("transporte de personal" OR "traslado de personal") -entidad:corpac</pre>
   </section>
 
+  {% if applied is not none %}
+  <section class="detail-box detail-box-wide">
+    <p class="muted">
+      {% if applied > 0 %}
+      Reglas aplicadas a <strong>{{ applied }}</strong> publicación(es) existente(s) (ahora autorechazadas).
+      {% else %}
+      No se autorechazó ninguna publicación existente con las reglas vigentes.
+      {% endif %}
+    </p>
+  </section>
+  {% endif %}
+
+  {% if saved and channels %}
+  <section class="detail-box detail-box-wide">
+    <h3>¿Aplicar a publicaciones existentes?</h3>
+    <p class="muted">Las reglas se guardaron. Por defecto solo afectan a publicaciones <em>nuevas</em>. Si quieres aplicarlas también a las publicaciones ya existentes (en estado <code>publicada</code>, sin exención manual), elige los canales:</p>
+    <form method="post" action="/settings/autoreject/apply" class="settings-form">
+      <div class="autoreject-channels">
+        {% for channel in channels %}
+        <label class="autoreject-channel">
+          <input type="checkbox" name="sources" value="{{ channel.source }}" checked/>
+          {{ channel.label }}
+        </label>
+        {% endfor %}
+      </div>
+      <div class="settings-footer-actions">
+        <button type="submit" class="btn btn-primary">Aplicar a publicaciones existentes</button>
+      </div>
+    </form>
+  </section>
+  {% endif %}
+
   <form method="post" action="/settings/autoreject" class="settings-form">
     <input type="hidden" name="action" value="save"/>
     <textarea name="rules_yaml" class="rules-editor" spellcheck="false">{{ rules_yaml }}</textarea>

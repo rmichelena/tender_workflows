@@ -207,6 +207,129 @@ def test_build_claimed_map_breaks_status_tie_by_newer_nid():
     assert build_claimed_nomenclatura_map([new, old])[NOM] is new
 
 
+def test_publicada_map_picks_newest_nid_per_nomenclatura():
+    # (5) Dedupe del feed puro: dos `publicada` con misma nomenclatura → el mapa elige la
+    # de nid más reciente, para fusionar la otra en ella.
+    from .config import AppConfig
+    from .scanner import MultiEntityScanner
+
+    session = _session()
+    entity = _entity(session)
+    old = _proc(entity, source_ref="100", nid="100", nomenclatura=NOM,
+                status=ProcessStatus.publicada)
+    new = _proc(entity, source_ref="200", nid="200", nomenclatura=NOM,
+                status=ProcessStatus.publicada)
+    other = _proc(entity, source_ref="9", nid="9", nomenclatura="OTRA",
+                  status=ProcessStatus.publicada)
+    session.add_all([old, new, other])
+    session.commit()
+
+    scanner = MultiEntityScanner(AppConfig(), session)
+    mapping = scanner._publicada_nomenclatura_map(entity)
+
+    from .seace_search import normalize_nomenclatura
+
+    assert mapping[normalize_nomenclatura(NOM)] is new
+    assert mapping[normalize_nomenclatura("OTRA")] is other
+
+
+def test_adopt_merges_two_publicada_deleting_older_duplicate():
+    # Caso legacy: existen dos `publicada` (nid viejo y nuevo). Al escanear la fila vieja,
+    # se elimina el duplicado viejo conservando la `publicada` con nid más reciente.
+    session = _session()
+    entity = _entity(session)
+    new = _proc(entity, source_ref="200", nid="200", nomenclatura=NOM,
+                status=ProcessStatus.publicada)
+    old = _proc(entity, source_ref="100", nid="100", nomenclatura=NOM,
+                status=ProcessStatus.publicada)
+    session.add_all([new, old])
+    session.commit()
+    old_id = old.id
+
+    # `pub` (preferida) = new; `proc` hallado por nid viejo = old (duplicado borrable).
+    adopt_republication(session, new, old, _row("100", NOM))
+    session.commit()
+
+    assert session.get(Process, old_id) is None  # duplicado viejo eliminado
+    assert new.source_ref == "200"  # no regresa a nid viejo
+
+
+def test_adopt_fresh_publicada_republication_adopts_new_nid():
+    # Re-publicación fresca: solo existe la `publicada` vieja; aparece el nid nuevo (no en
+    # BD). Se adopta el nid nuevo en la fila existente, sin crear un segundo `publicada`.
+    session = _session()
+    entity = _entity(session)
+    pub = _proc(entity, source_ref="100", nid="100", nomenclatura=NOM,
+                status=ProcessStatus.publicada)
+    session.add(pub)
+    session.commit()
+
+    adopt_republication(session, pub, None, _row("200", NOM))
+    session.commit()
+
+    assert pub.source_ref == "200"
+    assert pub.nid_proceso == "200"
+
+
+def test_scan_dedupes_publicada_within_single_scan(monkeypatch):
+    # Review #1 (este turno): el mapa de dedupe debe mantenerse al día DENTRO del mismo
+    # escaneo. Dos filas con la misma nomenclatura y nids distintos en un solo ciclo deben
+    # producir una sola `publicada` (adoptando el nid más reciente), no dos paralelas.
+    from .client import FichaResult
+    from .config import AppConfig
+    from .parser import FichaData
+    from .scan_options import ScanOptions
+    from .scanner import MultiEntityScanner
+
+    session = _session()
+    entity = _entity(session)
+    session.commit()
+
+    rows = [_row("100", NOM), _row("200", NOM)]
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def fetch_list_page(self, page):
+            return (None, page)
+
+        def parse_rows(self, soup):
+            return rows if soup == 0 else []
+
+        def total_pages(self, soup):
+            return 1
+
+        def open_ficha(self, row):
+            return FichaResult(
+                ficha_id=f"f{row.nid_proceso}", html="<html>", url="http://x"
+            )
+
+        def refresh_list_page_state(self, page):
+            return None
+
+    monkeypatch.setattr("seace_monitor.scanner.SeaceClient", _FakeClient)
+    monkeypatch.setattr(
+        "seace_monitor.scanner.parse_ficha",
+        lambda html, ficha_id, nid: FichaData(
+            ficha_id=ficha_id,
+            nid_proceso=nid,
+            nomenclatura=NOM,
+            descripcion="x",
+            objeto="Servicio",
+            fecha_publicacion="01/06/2026",
+        ),
+    )
+
+    scanner = MultiEntityScanner(AppConfig(), session)
+    scanner._scan_entity(entity, ScanOptions())
+    session.commit()
+
+    procs = session.query(Process).filter(Process.nomenclatura == NOM).all()
+    assert len(procs) == 1  # una sola publicada pese a dos nids en el mismo scan
+    assert procs[0].source_ref == "200"  # adopta el nid más reciente
+
+
 def test_claimed_for_entity_only_returns_claimed_statuses():
     session = _session()
     entity = _entity(session)

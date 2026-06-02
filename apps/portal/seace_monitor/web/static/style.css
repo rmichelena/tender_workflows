@@ -319,6 +319,19 @@ table.data td.status-cell { vertical-align: top; white-space: nowrap; }
   grid-column: 1 / -1;
 }
 
+.autoreject-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  margin: 0.75rem 0;
+}
+.autoreject-channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
 .detail-split {
   display: grid;
   grid-template-columns: 2fr 1fr;

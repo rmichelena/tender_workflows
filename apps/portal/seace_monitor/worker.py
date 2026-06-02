@@ -126,21 +126,30 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
         session = session_factory()
         scan_counts: dict[str, int] = {}
         watch_counts: dict[str, int] = {}
-        ran_any = False
         try:
             # Escaneos primero (en orden de prioridad), luego watchlists.
+            # Cada adapter commitea/rollbackea por separado: el fallo de una fuente no
+            # debe descartar el trabajo ya confirmado de otra.
             for adapter in adapters:
                 if now >= next_scan_at[adapter.source]:
-                    scan_counts[adapter.source] = adapter.scan(cfg, session)
-                    next_scan_at[adapter.source] = now + adapter.scan_interval_seconds(cfg)
-                    ran_any = True
+                    try:
+                        scan_counts[adapter.source] = adapter.scan(cfg, session)
+                        session.commit()
+                        next_scan_at[adapter.source] = now + adapter.scan_interval_seconds(cfg)
+                    except Exception:
+                        session.rollback()
+                        next_scan_at[adapter.source] = now + adapter.scan_interval_seconds(cfg)
+                        logger.exception("Error escaneando fuente %s", adapter.source)
             for adapter in adapters:
                 if now >= next_watch_at[adapter.source]:
-                    watch_counts[adapter.source] = adapter.refresh_watchlist(cfg, session)
-                    next_watch_at[adapter.source] = now + adapter.watch_interval_seconds(cfg)
-                    ran_any = True
-            if ran_any:
-                session.commit()
+                    try:
+                        watch_counts[adapter.source] = adapter.refresh_watchlist(cfg, session)
+                        session.commit()
+                        next_watch_at[adapter.source] = now + adapter.watch_interval_seconds(cfg)
+                    except Exception:
+                        session.rollback()
+                        next_watch_at[adapter.source] = now + adapter.watch_interval_seconds(cfg)
+                        logger.exception("Error en watchlist de fuente %s", adapter.source)
             if any(scan_counts.values()) or any(watch_counts.values()):
                 summary = "; ".join(
                     f"{source} {scan_counts.get(source, 0)} nuevo(s)/"
@@ -148,9 +157,6 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
                     for source in sorted(set(scan_counts) | set(watch_counts))
                 )
                 logger.info("Ciclo completado: %s", summary)
-        except Exception:
-            session.rollback()
-            logger.exception("Error en ciclo de escaneo/watchlist")
         finally:
             session.close()
 
