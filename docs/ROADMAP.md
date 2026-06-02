@@ -259,6 +259,7 @@ Items de robustez no productizados; abordar cuando toque el área:
 | M5 | Warning si SEACE tiene más páginas que `max_pages` |
 | 1.2b | Gemini real para planos (hoy `auto_leave`) |
 | H2 | ✅ Mitigado con `ficha_refresh_interval`; revisar TTL |
+| W1 | **Watchlist TTL adaptativo:** hoy refresh fijo cada 3h por proceso (`watchlist_refresh_seconds`). Refrescar más seguido (p. ej. 30–60m) los procesos con hitos de cronograma cercanos (fin consultas/presentación/otorgamiento en las próximas 24–48h) y dejar 3h+ para el resto. Evita latencia de hasta 3h para captar documentos publicados en etapas críticas (caso CORPAC: docs publicados 1 min después del último refresh, vistos 3h+ después). |
 
 Ver [apps/REVIEW.md](../apps/REVIEW.md).
 
