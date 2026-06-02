@@ -14,7 +14,10 @@ from typing import TYPE_CHECKING
 from .base import IngestCapabilities
 
 if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
     from ..analysis.runner import AnalysisRunner
+    from ..config import AppConfig
     from ..db.models import Process
 
 ADP_PORTAL_URL = "https://www.adp.com.pe/"
@@ -26,6 +29,7 @@ class AdpIngestAdapter:
     label: str = "ADP Portal"
     view_label: str = "ADP"
     portal_url: str | None = ADP_PORTAL_URL  # ADP no tiene deep-link por item.
+    scan_priority: int = 10  # tras SEACE.
     capabilities: IngestCapabilities = IngestCapabilities(
         scan_listings=True,
         fetch_by_reference=False,
@@ -46,6 +50,25 @@ class AdpIngestAdapter:
     ) -> None:
         # ADP descarga vía HTTP directo; no hay archivos comprimidos que extraer.
         runner._fetch_adp_documents(docs, docs_dir)
+
+    def scan_enabled(self, config: "AppConfig") -> bool:
+        return config.adp.enabled
+
+    def scan_interval_seconds(self, config: "AppConfig") -> int:
+        return config.adp.poll_interval_seconds
+
+    def watch_interval_seconds(self, config: "AppConfig") -> int:
+        return config.watchlist_refresh_seconds
+
+    def scan(self, config: "AppConfig", session: "Session") -> int:
+        from ..adp_scanner import AdpScanner
+
+        return AdpScanner(config, session).run_once()
+
+    def refresh_watchlist(self, config: "AppConfig", session: "Session") -> int:
+        from ..adp_watchlist import refresh_adp_watchlist
+
+        return refresh_adp_watchlist(config, session)
 
 
 ADP_ADAPTER = AdpIngestAdapter()

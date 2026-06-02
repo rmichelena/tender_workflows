@@ -219,6 +219,101 @@ def test_can_open_negative_cases_for_registered_sources():
     assert can_open_source(adp_sin_ref) is False
 
 
+def _fake_worker_config(adp_enabled: bool = True):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        poll_interval_seconds=321,
+        watchlist_refresh_seconds=654,
+        adp=SimpleNamespace(enabled=adp_enabled, poll_interval_seconds=987),
+    )
+
+
+def test_adapter_scan_contract_reads_config():
+    from .ingest import get_adapter
+
+    cfg = _fake_worker_config(adp_enabled=True)
+
+    seace = get_adapter("seace")
+    assert seace.scan_enabled(cfg) is True
+    assert seace.scan_interval_seconds(cfg) == 321
+    assert seace.watch_interval_seconds(cfg) == 654
+
+    adp = get_adapter("adp_portal")
+    assert adp.scan_enabled(cfg) is True
+    assert adp.scan_interval_seconds(cfg) == 987
+    assert adp.watch_interval_seconds(cfg) == 654
+
+    cfg.adp.enabled = False
+    assert adp.scan_enabled(cfg) is False
+
+
+def test_active_scan_adapters_orders_by_priority_and_respects_adp_flag():
+    from .worker import _active_scan_adapters
+
+    on = [a.source for a in _active_scan_adapters(_fake_worker_config(True))]
+    assert on == ["seace", "adp_portal"]  # SEACE primero por scan_priority
+
+    off = [a.source for a in _active_scan_adapters(_fake_worker_config(False))]
+    assert off == ["seace"]  # ADP deshabilitado queda fuera del worker
+
+
+def test_seace_adapter_scan_and_watch_delegate(monkeypatch):
+    from . import scanner as scanner_mod
+    from . import watchlist as watchlist_mod
+    from .ingest import get_adapter
+
+    calls: dict[str, object] = {}
+
+    class FakeScanner:
+        def __init__(self, cfg, session):
+            calls["scan_init"] = (cfg, session)
+
+        def run_once(self):
+            return 5
+
+    def fake_watch(cfg, session):
+        calls["watch"] = (cfg, session)
+        return 3
+
+    monkeypatch.setattr(scanner_mod, "MultiEntityScanner", FakeScanner)
+    monkeypatch.setattr(watchlist_mod, "refresh_watchlist_processes", fake_watch)
+
+    adapter = get_adapter("seace")
+    assert adapter.scan("CFG", "SES") == 5
+    assert calls["scan_init"] == ("CFG", "SES")
+    assert adapter.refresh_watchlist("CFG", "SES") == 3
+    assert calls["watch"] == ("CFG", "SES")
+
+
+def test_adp_adapter_scan_and_watch_delegate(monkeypatch):
+    from . import adp_scanner as adp_scanner_mod
+    from . import adp_watchlist as adp_watchlist_mod
+    from .ingest import get_adapter
+
+    calls: dict[str, object] = {}
+
+    class FakeAdpScanner:
+        def __init__(self, cfg, session):
+            calls["scan_init"] = (cfg, session)
+
+        def run_once(self):
+            return 2
+
+    def fake_watch(cfg, session):
+        calls["watch"] = (cfg, session)
+        return 1
+
+    monkeypatch.setattr(adp_scanner_mod, "AdpScanner", FakeAdpScanner)
+    monkeypatch.setattr(adp_watchlist_mod, "refresh_adp_watchlist", fake_watch)
+
+    adapter = get_adapter("adp_portal")
+    assert adapter.scan("CFG", "SES") == 2
+    assert calls["scan_init"] == ("CFG", "SES")
+    assert adapter.refresh_watchlist("CFG", "SES") == 1
+    assert calls["watch"] == ("CFG", "SES")
+
+
 def test_non_seace_process_persists_without_nid_proceso():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

@@ -14,7 +14,10 @@ from typing import TYPE_CHECKING
 from .base import IngestCapabilities
 
 if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
     from ..analysis.runner import AnalysisRunner
+    from ..config import AppConfig
     from ..db.models import Process
 
 
@@ -24,6 +27,7 @@ class SeaceIngestAdapter:
     label: str = "SEACE"
     view_label: str = "SEACE"
     portal_url: str | None = None  # SEACE se abre vía proxy interno, no URL absoluta.
+    scan_priority: int = 0  # SEACE primero (commitea por entidad).
     capabilities: IngestCapabilities = IngestCapabilities(
         scan_listings=True,
         fetch_by_reference=True,
@@ -47,6 +51,25 @@ class SeaceIngestAdapter:
 
         runner._fetch_documents(docs, docs_dir)
         extract_archives(docs_dir)
+
+    def scan_enabled(self, config: "AppConfig") -> bool:
+        return True
+
+    def scan_interval_seconds(self, config: "AppConfig") -> int:
+        return config.poll_interval_seconds
+
+    def watch_interval_seconds(self, config: "AppConfig") -> int:
+        return config.watchlist_refresh_seconds
+
+    def scan(self, config: "AppConfig", session: "Session") -> int:
+        from ..scanner import MultiEntityScanner
+
+        return MultiEntityScanner(config, session).run_once()
+
+    def refresh_watchlist(self, config: "AppConfig", session: "Session") -> int:
+        from ..watchlist import refresh_watchlist_processes
+
+        return refresh_watchlist_processes(config, session)
 
 
 SEACE_ADAPTER = SeaceIngestAdapter()
