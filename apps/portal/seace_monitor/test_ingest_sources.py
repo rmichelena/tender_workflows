@@ -314,6 +314,80 @@ def test_adp_adapter_scan_and_watch_delegate(monkeypatch):
     assert calls["watch"] == ("CFG", "SES")
 
 
+def test_run_worker_runs_all_scans_before_watches_with_single_commit(tmp_path, monkeypatch):
+    """Paridad del loop: scans (por prioridad) → watches → un único commit."""
+    from types import SimpleNamespace
+
+    from . import worker as worker_mod
+
+    order: list[str] = []
+
+    def make_adapter(name: str, priority: int):
+        return SimpleNamespace(
+            source=name,
+            scan_priority=priority,
+            scan_interval_seconds=lambda cfg: 300,
+            watch_interval_seconds=lambda cfg: 600,
+            scan=lambda cfg, session, _n=name: (order.append(f"scan:{_n}"), 1)[1],
+            refresh_watchlist=lambda cfg, session, _n=name: (
+                order.append(f"watch:{_n}"),
+                0,
+            )[1],
+        )
+
+    adapters = [make_adapter("seace", 0), make_adapter("adp_portal", 10)]
+
+    class FakeSession:
+        def __init__(self):
+            self.commits = 0
+            self.closed = 0
+
+        def commit(self):
+            order.append("commit")
+            self.commits += 1
+
+        def rollback(self):
+            order.append("rollback")
+
+        def close(self):
+            self.closed += 1
+
+    sessions: list[FakeSession] = []
+
+    def fake_session_factory():
+        s = FakeSession()
+        sessions.append(s)
+        return s
+
+    monkeypatch.setattr(worker_mod, "_acquire_worker_lock", lambda data_dir: None)
+    monkeypatch.setattr(worker_mod, "init_db", lambda url: None)
+    monkeypatch.setattr(worker_mod, "_bootstrap_catalog", lambda s, c: None)
+    monkeypatch.setattr(worker_mod, "write_worker_heartbeat", lambda *a, **k: None)
+    monkeypatch.setattr(worker_mod, "session_factory", fake_session_factory)
+    monkeypatch.setattr(worker_mod, "_active_scan_adapters", lambda cfg: adapters)
+
+    cfg = SimpleNamespace(
+        data_dir=str(tmp_path),
+        database_url="sqlite:///:memory:",
+        poll_interval_seconds=300,
+        tenant_id="default",
+    )
+
+    worker_mod.run_worker(cfg, once=True)
+
+    assert order == [
+        "scan:seace",
+        "scan:adp_portal",
+        "watch:seace",
+        "watch:adp_portal",
+        "commit",
+    ]
+    loop_session = sessions[-1]  # la última es la del ciclo de trabajo
+    assert loop_session.commits == 1
+    assert loop_session.closed == 1
+    assert all(s.closed == 1 for s in sessions)  # toda sesión se cierra
+
+
 def test_non_seace_process_persists_without_nid_proceso():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
