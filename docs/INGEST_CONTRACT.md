@@ -310,9 +310,35 @@ Cada paso actualiza los docs relacionados en el mismo PR.
 
 ## 8. Decisiones abiertas
 
-- Formato exacto de `dedup_key` por fuente (SEACE: nomenclatura normalizada; email: hash).
-- ¿Documentos públicos descargados se comparten entre tenants (content-addressed store)
-  o se copian por tenant? Inicialmente copia por tenant (aislamiento simple).
-- Materializar el overlay de autoreject siempre vs computarlo al vuelo (rendimiento del inbox).
-- Calendario del renombre `Process` → `FeedItem`/`PipelineItem`.
-- Formato de `manifest.json` por paquete documental y cuándo formalizar `DocumentPackage`.
+- **`dedup_key` por fuente — decidido:** lo encapsula `adapter` (SEACE = nomenclatura
+  normalizada, ya es el UID de facto al mergear re-publicaciones; ADP = clave de su
+  scanner; email = hash de msgid+asunto+fecha).
+- **Docs públicos entre tenants — decidido (inicial):** copia por tenant (aislamiento
+  simple); content-addressed store queda como optimización futura.
+- **Overlay de autoreject materializar vs al vuelo — decidido:** **materializar**
+  (`TenantFeedDecision`), por paridad con el comportamiento actual (status persistido) y
+  rendimiento del inbox; computar al vuelo queda como optimización futura.
+- **Rename `Process` — decidido:** **no** renombrar la tabla física en el paso 3; se
+  introducen seams sobre `processes` y el split físico es el último sub-paso (gated).
+- Formato de `manifest.json` por paquete documental y cuándo formalizar `DocumentPackage`
+  (sigue abierto).
+
+---
+
+## 9. Plan detallado del paso 3 — split Feed/Pipeline (roadmap 0.3)
+
+Cada sub-paso es un PR/commit independiente, deploy-safe y deja el sistema funcionando
+con tenant `default`. Se valida con suite verde local (ignorando la falla pre-existente
+`test_migrate_process_identity_schema_relaxes_legacy_sqlite_nid`) y, en los sub-pasos con
+riesgo de comportamiento, comparando conteos por estado/lista en el VPS antes/después.
+
+| Sub-paso | Qué | Riesgo | Notas |
+|----------|-----|--------|-------|
+| **0.3a** | **Seam feed (sin cambio físico):** módulo `feed/repository.py` con API conceptual `FeedItem` (`upsert_discovered`, `mark_seen/promoted`, `query_inbox(source, …)`) operando sobre `processes`. Scanner y list views pasan a usarlo. | Bajo (behavior-preserving) | No toca la BD. Tests de paridad. **Punto de arranque.** |
+| **0.3b** | **Overlay `TenantFeedDecision` (aditivo):** tabla `(tenant_id, feed_item_id, decision, rule_id, reason, created_at)` con `tenant_id='default'`. Backfill desde `status=autorejected`→`autorejected` y `auto_reject_exempt=True`→`exempt`. Doble escritura transitoria. | Bajo (solo CREATE TABLE) | Backup antes. Reversible. |
+| **0.3c** | **Mover autoreject del scanner al overlay:** `apply_auto_reject_rules` deja de mutar `process.status`; escribe `TenantFeedDecision`. Scanner solo registra item crudo. Listas de descartados/exempt leen del overlay. | **Medio** (comportamiento) | Tests exhaustivos + verificación de conteos en VPS. |
+| **0.3d** | **Promoción explícita feed→pipeline (lógica):** acción positiva (descargar/analizar/watchlist/interés) marca `feed.status='promoted'` y consolida snapshot curado. Con `Process` aún única, "promoción" = flags/columnas. | Bajo–medio | Prepara la copia sin FK del split físico. |
+| **0.3e** | **Split físico (gated, opcional):** solo si 0.3a–d estables en VPS. Crear `pipeline_items` (migrar `promoted`), `processes`→`feed_items`. Copia sin FK. | **Alto** (destructivo) | Backup + ventana. Único paso irreversible. |
+
+**Decisiones resueltas que aplican aquí:** ver §8 (dedup_key vía adapter, overlay
+materializado, sin rename físico hasta 0.3e, copia de docs por tenant).
