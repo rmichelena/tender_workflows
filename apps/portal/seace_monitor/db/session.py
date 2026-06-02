@@ -21,6 +21,7 @@ _PROCESS_COLUMN_ADDITIONS = (
     ("source_ref", "VARCHAR(256)"),
     ("workflow_profile", "VARCHAR(64) DEFAULT 'public_tender'"),
     ("interest_status", "VARCHAR(32) DEFAULT 'none'"),
+    ("lifecycle_phase", "VARCHAR(32) DEFAULT 'licitacion'"),
     ("nid_convocatoria", "TEXT"),
     ("nid_sistema", "VARCHAR(8)"),
     ("link_id", "VARCHAR(128)"),
@@ -152,7 +153,10 @@ def _backfill_process_pipeline_fields(engine) -> None:
     existing = {col["name"] for col in insp.get_columns("processes")}
     if not {"workflow_profile", "interest_status"}.issubset(existing):
         return
-    if not _has_missing_values(engine, "processes", ("workflow_profile", "interest_status")):
+    targets = ("workflow_profile", "interest_status")
+    if "lifecycle_phase" in existing:
+        targets = targets + ("lifecycle_phase",)
+    if not _has_missing_values(engine, "processes", targets):
         return
     with engine.begin() as conn:
         conn.execute(
@@ -169,6 +173,14 @@ def _backfill_process_pipeline_fields(engine) -> None:
                 "WHERE interest_status IS NULL OR interest_status = ''"
             )
         )
+        if "lifecycle_phase" in existing:
+            conn.execute(
+                text(
+                    "UPDATE processes "
+                    "SET lifecycle_phase = 'licitacion' "
+                    "WHERE lifecycle_phase IS NULL OR lifecycle_phase = ''"
+                )
+            )
 
 
 def _process_identity_index_names(engine) -> set[str]:
@@ -202,6 +214,7 @@ def _process_migration_copy_defaults() -> dict[str, str]:
         "source": "'seace'",
         "workflow_profile": "'public_tender'",
         "interest_status": "'none'",
+        "lifecycle_phase": "'licitacion'",
         "status": "'publicada'",
         "auto_reject_exempt": "0",
         "watch_unread": "0",
@@ -427,6 +440,7 @@ def _ensure_sqlite_indexes(engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_processes_source_ref ON processes (source_ref)",
         "CREATE INDEX IF NOT EXISTS ix_processes_workflow_profile ON processes (workflow_profile)",
         "CREATE INDEX IF NOT EXISTS ix_processes_interest_status ON processes (interest_status)",
+        "CREATE INDEX IF NOT EXISTS ix_processes_lifecycle_phase ON processes (lifecycle_phase)",
         "CREATE INDEX IF NOT EXISTS ix_processes_auto_reject_exempt ON processes (auto_reject_exempt)",
         "CREATE INDEX IF NOT EXISTS ix_processes_watch_unread ON processes (watch_unread)",
     )

@@ -47,6 +47,19 @@ class InterestStatus(str, enum.Enum):
     rejected = "rejected"
 
 
+class LifecyclePhase(str, enum.Enum):
+    """Fase comercial del objeto, ortogonal a `status` (portal) y `stage` (A–D).
+
+    El estudio de mercado no es un tipo de proceso separado, sino la fase previa
+    del mismo item, que puede transicionar a `licitacion` sin duplicarse.
+    """
+
+    estudio_mercado = "estudio_mercado"
+    licitacion = "licitacion"
+    adjudicacion = "adjudicacion"
+    ejecucion = "ejecucion"
+
+
 def _default_source_ref(context) -> str:
     params = context.get_current_parameters()
     return str(params.get("source_ref") or params.get("nid_proceso") or "")
@@ -101,6 +114,11 @@ class Process(Base):
     )
     interest_status: Mapped[InterestStatus] = mapped_column(
         Enum(InterestStatus, native_enum=False), default=InterestStatus.none, index=True
+    )
+    lifecycle_phase: Mapped[LifecyclePhase] = mapped_column(
+        Enum(LifecyclePhase, native_enum=False),
+        default=LifecyclePhase.licitacion,
+        index=True,
     )
 
     nid_proceso: Mapped[str | None] = mapped_column(String(32), index=True)

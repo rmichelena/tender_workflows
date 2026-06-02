@@ -105,6 +105,55 @@ def test_backfills_pipeline_fields_for_existing_process_rows(tmp_path: Path):
         assert row.interest_status == "none"
 
 
+def test_process_defaults_to_licitacion_lifecycle_phase():
+    from .db.models import LifecyclePhase
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    entity = Entity(ruc="20123456789", nombre="Entidad", activa=True)
+    session.add(entity)
+    session.flush()
+    proc = Process(
+        entity_id=entity.id, anio=2026, nid_proceso="1", nomenclatura="AS-SM-1-2026"
+    )
+    session.add(proc)
+    session.commit()
+
+    assert session.query(Process).one().lifecycle_phase == LifecyclePhase.licitacion
+
+
+def test_backfills_lifecycle_phase_for_existing_process_rows(tmp_path: Path):
+    db_path = tmp_path / "legacy_lifecycle.sqlite3"
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE processes ("
+                "id INTEGER PRIMARY KEY, workflow_profile VARCHAR(64), "
+                "interest_status VARCHAR(32))"
+            )
+        )
+        conn.execute(text("INSERT INTO processes (id) VALUES (1)"))
+
+    _ensure_table_columns(
+        engine,
+        "processes",
+        (
+            ("workflow_profile", "VARCHAR(64) DEFAULT 'public_tender'"),
+            ("interest_status", "VARCHAR(32) DEFAULT 'none'"),
+            ("lifecycle_phase", "VARCHAR(32) DEFAULT 'licitacion'"),
+        ),
+    )
+    _backfill_process_pipeline_fields(engine)
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT lifecycle_phase FROM processes WHERE id = 1")
+        ).one()
+        assert row.lifecycle_phase == "licitacion"
+
+
 def test_seace_ingest_adapter_is_registered():
     from .ingest import get_adapter
 

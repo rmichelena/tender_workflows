@@ -169,6 +169,12 @@ No mezclar tres cosas que hoy se solapan:
 El **estudio de mercado no es un tipo de proceso separado**: es una `lifecycle_phase`
 temprana del mismo item, que puede transicionar a `licitacion` sin duplicarse.
 
+> **Implementado (aditivo, pre-split):** `LifecyclePhase`
+> (`estudio_mercado`/`licitacion`/`adjudicacion`/`ejecucion`) y la columna
+> `Process.lifecycle_phase` (default `licitacion`, índice + backfill, mismo patrón
+> que `workflow_profile`/`interest_status`). Vive en `Process` hasta el split, donde
+> migra a `PipelineItem`. Aún no se expone en UI ni hay transiciones automáticas.
+
 ### Promoción (feed → pipeline)
 
 Una **acción positiva** (descargar / analizar / marcar watchlist / marcar interés):

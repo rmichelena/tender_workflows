@@ -46,7 +46,7 @@ Roadmap del producto integrado (portal + ingesta + análisis + agentes).
 | 0.2 | **ADP al contrato:** colapsar `adp_scanner`/`adp_watchlist`/`adp_downloader` a un `AdpAdapter`; eliminar branching por `source` en worker/runner/UI | Alta |
 | 0.3 | **Split Feed/Pipeline (lógico):** `FeedItem` (compartido, autopurge >90d) + `PipelineItem` (promoción por snapshot sin FK); sacar autoreject del scanner | Alta |
 | 0.4 | **Identidad estable:** UUID interno + `ExternalRef` multi-canal; relajar `UniqueConstraint` atado a `source` | Media |
-| 0.5 | **`lifecycle_phase`:** `estudio_mercado` como fase, no tipo separado | Media |
+| 0.5 | **`lifecycle_phase`:** 🔄 columna aditiva en `Process` (enum `estudio_mercado`/`licitacion`/`adjudicacion`/`ejecucion`, default `licitacion`); falta exponer en UI y transiciones | Media |
 | 0.6 | **Multi-tenant (lógico):** `tenant_id` en pipeline/overlay; feed sin `tenant_id`; reglas y selección de entidades por tenant | Media |
 
 **Definition of done:** agregar una tercera fuente = implementar un adapter (client+parser+url), sin tocar worker/runner/UI; el feed se escanea una vez y cada tenant lo filtra con sus reglas.
