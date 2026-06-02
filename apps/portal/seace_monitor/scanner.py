@@ -13,7 +13,7 @@ from .auto_reject import AutoRejectRule, apply_auto_reject_rules, load_auto_reje
 from .client import ProcessRow, SeaceClient
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus, utcnow
-from .feed import FeedRepository
+from .feed import FeedRepository, record_autoreject_decision
 from .parser import extract_cronograma_fechas, parse_ficha, row_snapshot_hash
 from .scan_options import ScanOptions, passes_date_filter
 from .seace_search import normalize_nomenclatura
@@ -375,14 +375,17 @@ class MultiEntityScanner:
         proc.last_seen_at = utcnow()
         proc.updated_at = datetime.now(timezone.utc)
         match = apply_auto_reject_rules(proc, entity, self.auto_reject_rules)
+        self.session.flush()
         if match is not None:
+            record_autoreject_decision(
+                self.session, proc, rule_id=match.id, reason=proc.auto_reject_reason
+            )
             logger.info(
                 "Autorechazado %s por regla %s — %s",
                 row.nid_proceso,
                 match.id,
                 row.nomenclatura,
             )
-        self.session.flush()
 
         logger.info(
             "%s %s — %s",

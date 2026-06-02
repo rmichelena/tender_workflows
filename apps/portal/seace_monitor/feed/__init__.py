@@ -6,6 +6,18 @@ para que scanners y vistas no consulten el ORM directamente y se pueda evolucion
 `FeedItem`/`PipelineItem` separado sin tocar a los clientes.
 """
 
+from .decisions import (
+    DEFAULT_TENANT_ID,
+    clear_feed_decision,
+    record_autoreject_decision,
+    record_exempt_decision,
+)
 from .repository import FeedRepository
 
-__all__ = ["FeedRepository"]
+__all__ = [
+    "FeedRepository",
+    "DEFAULT_TENANT_ID",
+    "clear_feed_decision",
+    "record_autoreject_decision",
+    "record_exempt_decision",
+]

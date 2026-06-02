@@ -28,6 +28,7 @@ from ..db.maintenance import (
 )
 from ..db.models import AnalysisResult, Entity, InterestStatus, Process, ProcessStatus
 from ..db.session import init_db, session_factory
+from ..feed import clear_feed_decision, record_exempt_decision
 from ..process_storage import (
     clear_process_download_metadata,
     delete_process_analysis,
@@ -519,6 +520,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if was_autorejected:
             proc.auto_reject_exempt = True
             proc.auto_reject_reason = None
+            record_exempt_decision(db, proc)
         proc.status = new_status
         return _descartados_redirect(estado)
 
@@ -537,6 +539,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             raise HTTPException(400, "Solo autorejected puede descartarse desde Descartados")
         proc.status = ProcessStatus.descartada
         proc.auto_reject_reason = None
+        clear_feed_decision(db, proc)
         return _descartados_redirect(estado)
 
     @app.get("/archivados", response_class=HTMLResponse)

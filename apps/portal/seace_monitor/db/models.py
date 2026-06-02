@@ -201,3 +201,34 @@ class AnalysisResult(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     process: Mapped[Process] = relationship(back_populates="analysis")
+
+
+class TenantFeedDecision(Base):
+    """Overlay por tenant sobre el feed: decisiones de autoreject/exempt.
+
+    Paso 0.3b del split feed/pipeline (`docs/INGEST_CONTRACT.md` §4/§9). El feed es
+    compartido (sin `tenant_id`); las decisiones de cada tenant viven aquí. Hoy el feed
+    se materializa sobre `processes`, así que `feed_item_id` referencia `processes.id`
+    **sin foreign key** (para no acoplar al futuro purgado/separación del feed). Una
+    decisión por `(tenant_id, feed_item_id)`; `exempt` supersede a `autorejected`.
+    """
+
+    __tablename__ = "tenant_feed_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "feed_item_id", name="uq_tenant_feed_decision"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), default="default", index=True)
+    feed_item_id: Mapped[int] = mapped_column(Integer, index=True)
+    decision: Mapped[str] = mapped_column(String(32))  # autorejected | exempt
+    rule_id: Mapped[str | None] = mapped_column(String(128))
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

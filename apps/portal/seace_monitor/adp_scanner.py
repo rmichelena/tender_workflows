@@ -19,7 +19,7 @@ from .adp_parser import AdpProcess, parse_adp_html
 from .auto_reject import AutoRejectRule, apply_auto_reject_rules, load_auto_reject_rules
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus, utcnow
-from .feed import FeedRepository
+from .feed import FeedRepository, record_autoreject_decision
 
 logger = logging.getLogger(__name__)
 
@@ -181,16 +181,17 @@ class AdpScanner:
             proc.anio = anio
 
         # Auto-reject (solo si está en publicada y es nuevo)
-        if is_new:
-            match = apply_auto_reject_rules(proc, entity, self.auto_reject_rules)
-            if match:
-                logger.info(
-                    "ADP autorechazado %s por regla %s",
-                    adp_proc.code,
-                    match.id,
-                )
-
+        match = apply_auto_reject_rules(proc, entity, self.auto_reject_rules) if is_new else None
         self.session.flush()
+        if match is not None:
+            record_autoreject_decision(
+                self.session, proc, rule_id=match.id, reason=proc.auto_reject_reason
+            )
+            logger.info(
+                "ADP autorechazado %s por regla %s",
+                adp_proc.code,
+                match.id,
+            )
         action = "Nuevo" if is_new else "Actualizado"
         logger.info("ADP %s: %s", action, adp_proc.code)
         return is_new
