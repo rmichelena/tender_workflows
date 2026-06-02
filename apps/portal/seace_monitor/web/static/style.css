@@ -230,6 +230,23 @@ table.data tr:hover td { background: #f8fafc; }
   vertical-align: middle;
 }
 
+.doc-removed-tag {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #fef3c7;
+  color: #92400e;
+  vertical-align: middle;
+  cursor: help;
+}
+.doc-item-removed .doc-name,
+.doc-item-removed .doc-name a {
+  color: var(--muted);
+}
+
 .btn {
   display: inline-block;
   padding: 0.35rem 0.7rem;

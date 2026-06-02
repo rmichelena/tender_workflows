@@ -249,6 +249,61 @@ def _repair_document_metadata(process: Process) -> bool:
     return True
 
 
+def _partition_preserved_removed(
+    old_documentos_json: str | None,
+    ficha_docs: list[dict],
+    docs_dir: Path | None,
+) -> tuple[list[dict], str]:
+    """Separa documentos previos en (preservados, vivos) frente a la ficha actual.
+
+    Cuando SEACE re-publica un proceso (misma nomenclatura) y la ficha nueva ya
+    no incluye documentos que sí habíamos descargado (p. ej. Acta de Buena Pro
+    tras una nulidad), se conservan como histórico marcados ``seace_removed``.
+
+    Returns:
+        ``(preserved, effective_old_json)`` donde ``preserved`` son los docs a
+        re-anexar (marcados) y ``effective_old_json`` son los docs "vivos"
+        previos (excluye los ya marcados) para comparar contra la ficha sin
+        re-disparar cambios en cada ciclo.
+    """
+    try:
+        old_docs = json.loads(old_documentos_json or "[]")
+    except json.JSONDecodeError:
+        old_docs = []
+    if not isinstance(old_docs, list):
+        old_docs = []
+
+    ficha_uuids = {
+        str(d.get("uuid", "")).strip()
+        for d in ficha_docs
+        if isinstance(d, dict) and str(d.get("uuid", "")).strip()
+    }
+    now_iso = datetime.now(timezone.utc).isoformat()
+    preserved: list[dict] = []
+    effective_old: list[dict] = []
+    for doc in old_docs:
+        if not isinstance(doc, dict):
+            continue
+        uuid = str(doc.get("uuid", "")).strip()
+        in_ficha = uuid in ficha_uuids
+        if doc.get("seace_removed"):
+            # Ya era histórico: si reaparece en la ficha, la ficha manda; si
+            # sigue ausente, se mantiene marcado. En ambos casos queda fuera de
+            # `effective_old` para no re-registrar el cambio.
+            if not in_ficha:
+                preserved.append(doc)
+            continue
+        effective_old.append(doc)
+        if not in_ficha and docs_dir is not None and docs_dir.is_dir():
+            # Desapareció ahora: preservar solo si tenemos el archivo en disco.
+            if resolve_existing_download(docs_dir, doc) is not None:
+                marked = dict(doc)
+                marked["seace_removed"] = True
+                marked["seace_removed_at"] = now_iso
+                preserved.append(marked)
+    return preserved, json.dumps(effective_old, ensure_ascii=False)
+
+
 def _refresh_watchlist_process(
     config: AppConfig, session: Session, process: Process
 ) -> bool:
@@ -289,12 +344,21 @@ def _refresh_watchlist_process(
     new_cron_json = json.dumps(
         [asdict(c) for c in ficha.cronograma], ensure_ascii=False
     )
-    new_docs_json = json.dumps(
-        [asdict(d) for d in ficha.documentos], ensure_ascii=False
+    ficha_docs = [asdict(d) for d in ficha.documentos]
+
+    docs_dir = Path(process.data_dir) / "documentos" if process.data_dir else None
+    # Conservamos como histórico los documentos que SEACE retiró tras una
+    # re-publicación/anulación pero que ya habíamos descargado. `effective_old`
+    # son los documentos "vivos" previos (sin los ya marcados): se comparan
+    # contra la ficha para detectar cambios sin generar churn.
+    preserved_docs, effective_old_json = _partition_preserved_removed(
+        process.documentos_json, ficha_docs, docs_dir
     )
+
+    new_docs_json = json.dumps(ficha_docs, ensure_ascii=False)
     old_fp = watchlist_fingerprint(
         cronograma_json=process.cronograma_json,
-        documentos_json=process.documentos_json,
+        documentos_json=effective_old_json,
         fecha_publicacion=process.fecha_publicacion,
     )
     new_fp = watchlist_fingerprint(
@@ -304,7 +368,7 @@ def _refresh_watchlist_process(
     )
     cron_changed, docs_changed = watchlist_content_changed(
         cronograma_json=process.cronograma_json,
-        documentos_json=process.documentos_json,
+        documentos_json=effective_old_json,
         new_cronograma_json=new_cron_json,
         new_documentos_json=new_docs_json,
     )
@@ -315,25 +379,31 @@ def _refresh_watchlist_process(
     if old_fp == new_fp or (not cron_changed and not docs_changed and not fecha_changed):
         return False
 
-    new_docs = json.loads(new_docs_json)
+    new_docs = ficha_docs
 
     if docs_changed and process.data_dir:
         _download_new_documents(
             config,
             process,
             new_docs,
-            old_documentos_json=process.documentos_json,
+            old_documentos_json=effective_old_json,
         )
-        new_docs_json = json.dumps(new_docs, ensure_ascii=False)
     else:
         new_docs = _merge_parsed_docs_with_storage(new_docs, process.documentos_json)
-        new_docs_json = json.dumps(new_docs, ensure_ascii=False)
+
+    ficha_only_json = json.dumps(new_docs, ensure_ascii=False)
+    # Persistimos la ficha viva + los documentos preservados (histórico).
+    final_docs = new_docs + preserved_docs
+    new_docs_json = json.dumps(final_docs, ensure_ascii=False)
+    if docs_dir is not None and docs_dir.is_dir() and preserved_docs:
+        # build_document_tree itera el manifest; mantener los preservados ahí.
+        write_manifest(docs_dir, final_docs)
 
     changelog_entry = build_watchlist_changelog_entry(
         old_cronograma_json=process.cronograma_json,
         new_cronograma_json=new_cron_json,
-        old_documentos_json=process.documentos_json,
-        new_documentos_json=new_docs_json,
+        old_documentos_json=effective_old_json,
+        new_documentos_json=ficha_only_json,
         old_fecha_publicacion=process.fecha_publicacion,
         new_fecha_publicacion=new_fecha_publicacion,
     )
