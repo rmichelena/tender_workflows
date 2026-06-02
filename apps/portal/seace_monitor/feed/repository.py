@@ -56,3 +56,24 @@ class FeedRepository:
         if source is not None:
             query = query.filter(Process.source == source)
         return query
+
+    def claimed_for_entity(
+        self,
+        source: str,
+        entity_id: int,
+        statuses: Iterable[ProcessStatus],
+    ) -> list[Process]:
+        """Items "reclamados" (descargados/analizados/…) de una entidad y fuente.
+
+        Sirve para reconciliar re-publicaciones por UID de negocio (nomenclatura) sin
+        depender del `source_ref`/nid, que SEACE reasigna al re-publicar un proceso.
+        """
+        return (
+            self.session.query(Process)
+            .filter(
+                Process.source == source,
+                Process.entity_id == entity_id,
+                Process.status.in_(list(statuses)),
+            )
+            .all()
+        )
