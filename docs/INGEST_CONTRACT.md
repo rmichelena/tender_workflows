@@ -359,6 +359,18 @@ El paso 0.3c (mover autoreject al overlay) se ejecuta en micro-pasos deploy-safe
   manda, fallback al `status` legacy). Behavior-preserving con doble escritura activa;
   forward-compatible con el flip de 0.3c-3 (item autorejected queda en `status=publicada`
   con decisión en el overlay). Tests simulan ambos regímenes.
+**Plan de transición de los campos legacy de autoreject (`status=autorejected`,
+`auto_reject_reason`, `auto_reject_exempt`):** la fuente de verdad es el overlay
+(`TenantFeedDecision`). Tras 0.3c-3, `status=autorejected` deja de escribirse y el flip
+one-shot lo retira del feed. `auto_reject_reason` y `auto_reject_exempt` siguen en
+**doble escritura** durante 0.3c–0.3d como red de display/guards (las lecturas ya
+prefieren el overlay con fallback). Se **eliminan** en **0.3e** (split físico
+feed/pipeline): el `FeedItem` no llevará campos de decisión de tenant; `auto_reject_exempt`
+pasa a ser exclusivamente la decisión `exempt` del overlay. Hasta entonces, el guard de
+`apply_auto_reject_rules` puede leer el campo legacy porque la doble escritura lo mantiene
+coherente, y `record_autoreject_decision` respeta el supersede de `exempt` para evitar la
+carrera restaurar↔scanner.
+
 - **0.3c-3** ✅ (pend. deploy) — *Flip del scanner*: `apply_auto_reject_rules` es ahora
   un **predicado puro** (no muta `process.status` ni `auto_reject_reason`); los callers
   (scanner SEACE/ADP, apply del editor) registran la decisión en el overlay con el motivo

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Iterable
 
+from sqlalchemy import and_, or_
+
 from ..db.models import Process, ProcessStatus, TenantFeedDecision
 from .decisions import DECISION_AUTOREJECTED, DECISION_EXEMPT, DEFAULT_TENANT_ID
 
@@ -145,19 +147,34 @@ class FeedRepository:
     def effective_autorejected_ids(
         self, tenant_id: str = DEFAULT_TENANT_ID
     ) -> set[int]:
-        """ids efectivamente autorejected (overlay manda; fallback a `status` legacy)."""
-        decisions = self.decisions_for_tenant(tenant_id)
-        overlay = {
-            fid for fid, d in decisions.items() if d == DECISION_AUTOREJECTED
-        }
-        legacy = {
-            row[0]
-            for row in self.session.query(Process.id)
-            .filter(Process.status == ProcessStatus.autorejected)
+        """ids efectivamente autorejected (overlay manda; fallback a `status` legacy).
+
+        Una sola query (outer join con el overlay del tenant): un item cuenta si su
+        decisión de overlay es ``autorejected``, o —sin decisión en el overlay— si su
+        `status` legacy es ``autorejected``. Una decisión ``exempt`` lo excluye.
+        """
+        decision = TenantFeedDecision
+        rows = (
+            self.session.query(Process.id)
+            .outerjoin(
+                decision,
+                and_(
+                    decision.feed_item_id == Process.id,
+                    decision.tenant_id == tenant_id,
+                ),
+            )
+            .filter(
+                or_(
+                    decision.decision == DECISION_AUTOREJECTED,
+                    and_(
+                        Process.status == ProcessStatus.autorejected,
+                        decision.feed_item_id.is_(None),
+                    ),
+                )
+            )
             .all()
-            if row[0] not in decisions  # el overlay tiene prioridad si opinó
-        }
-        return overlay | legacy
+        )
+        return {row[0] for row in rows}
 
     def autoreject_reasons(
         self, tenant_id: str = DEFAULT_TENANT_ID

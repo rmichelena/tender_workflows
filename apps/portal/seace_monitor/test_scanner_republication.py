@@ -436,6 +436,33 @@ def test_publicada_map_excludes_autorejected(monkeypatch):
     assert claimed_map[normalize_nomenclatura(NOM)] is auto
 
 
+def test_claimed_map_dedups_claimed_item_with_stale_autoreject_overlay():
+    # High: un item con status reclamado (analizada) y overlay autorejected stale entra en
+    # effective_autorejected_ids; NO debe añadirse dos veces al mapa de reclamados.
+    from .config import AppConfig
+    from .feed import record_autoreject_decision
+    from .scanner import MultiEntityScanner
+
+    session = _session()
+    entity = _entity(session)
+    analizada = _proc(entity, source_ref="100", nid="100", nomenclatura=NOM,
+                      status=ProcessStatus.analizada, data_dir="/d")
+    session.add(analizada)
+    session.flush()
+    record_autoreject_decision(session, analizada, rule_id="r", reason="r: stale")
+    session.commit()
+
+    scanner = MultiEntityScanner(AppConfig(), session)
+    autorejected_ids = scanner.feed.effective_autorejected_ids()
+    assert analizada.id in autorejected_ids  # la decisión stale lo incluye
+
+    from .seace_search import normalize_nomenclatura
+
+    claimed_map = scanner._claimed_nomenclatura_map(entity, autorejected_ids)
+    # Sigue mapeando al item analizada una sola vez (sin duplicar / sin romper).
+    assert claimed_map[normalize_nomenclatura(NOM)] is analizada
+
+
 def test_claimed_for_entity_only_returns_claimed_statuses():
     session = _session()
     entity = _entity(session)

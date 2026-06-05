@@ -377,12 +377,16 @@ class MultiEntityScanner:
             )
         )
         if autorejected_ids:
+            # Dedup por id: un item con status reclamado (p. ej. analizada) puede tener una
+            # decisión autorejected stale en el overlay y entraría en `autorejected_ids`;
+            # no debe añadirse dos veces al mapa de reclamados.
+            seen = {proc.id for proc in claimed}
             claimed += [
                 proc
                 for proc in self.feed.by_status_for_entity(
                     "seace", entity.id, (ProcessStatus.publicada,)
                 )
-                if proc.id in autorejected_ids
+                if proc.id in autorejected_ids and proc.id not in seen
             ]
         return build_claimed_nomenclatura_map(claimed)
 

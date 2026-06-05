@@ -121,6 +121,54 @@ def test_clear_all_feed_decisions_removes_every_tenant():
     assert session.query(TenantFeedDecision).filter_by(feed_item_id=proc.id).count() == 0
 
 
+def test_record_autoreject_does_not_overwrite_exempt():
+    # Race restaurar↔scanner: una exención explícita del usuario no debe ser pisada por un
+    # autoreject automático posterior.
+    _, session, entity = _setup()
+    proc = _proc(entity, ref="50", status=ProcessStatus.publicada, exempt=True)
+    session.add(proc)
+    session.flush()
+    record_exempt_decision(session, proc)
+    session.flush()
+    assert _decisions(session)[proc.id].decision == "exempt"
+
+    record_autoreject_decision(session, proc, rule_id="r", reason="r: x")
+    session.flush()
+    # Sigue exento (exempt supersede a autorejected).
+    assert _decisions(session)[proc.id].decision == "exempt"
+
+
+def test_record_exempt_overwrites_autorejected():
+    # En sentido inverso sí: restaurar (exempt) supersede a un autorejected previo.
+    _, session, entity = _setup()
+    proc = _proc(entity, ref="51", status=ProcessStatus.autorejected, reason="r: x")
+    session.add(proc)
+    session.flush()
+    record_autoreject_decision(session, proc, rule_id="r", reason="r: x")
+    session.flush()
+    record_exempt_decision(session, proc)
+    session.flush()
+    assert _decisions(session)[proc.id].decision == "exempt"
+
+
+def test_flip_moves_autorejected_with_exempt_overlay_to_publicada():
+    # Medium: un item status=autorejected legacy con overlay=exempt quedaba atrapado
+    # (invisible en UI). El flip debe devolverlo a publicada (la decisión vive en overlay).
+    engine, session, entity = _setup()
+    proc = _proc(entity, ref="60", status=ProcessStatus.autorejected)
+    session.add(proc)
+    session.flush()
+    record_exempt_decision(session, proc)
+    session.commit()
+
+    flipped = _flip_autorejected_status_to_overlay(engine)
+    session.expire_all()
+
+    assert flipped == 1
+    assert session.get(Process, proc.id).status == ProcessStatus.publicada
+    assert _decisions(session)[proc.id].decision == "exempt"
+
+
 def test_flip_autorejected_status_moves_to_publicada_idempotently():
     # 0.3c-3: el flip one-shot devuelve a `publicada` los items con status=autorejected
     # legacy que ya tienen su decisión en el overlay; idempotente y no toca otros estados.

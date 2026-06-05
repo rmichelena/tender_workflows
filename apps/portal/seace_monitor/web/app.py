@@ -28,7 +28,11 @@ from ..db.maintenance import (
 )
 from ..db.models import AnalysisResult, Entity, InterestStatus, Process, ProcessStatus
 from ..db.session import init_db, session_factory
-from ..feed import FeedRepository, clear_feed_decision, record_exempt_decision
+from ..feed import (
+    FeedRepository,
+    clear_all_feed_decisions,
+    record_exempt_decision,
+)
 from ..process_storage import (
     clear_process_download_metadata,
     delete_process_analysis,
@@ -571,7 +575,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             raise HTTPException(400, "Solo autorejected puede descartarse desde Descartados")
         proc.status = ProcessStatus.descartada
         proc.auto_reject_reason = None
-        clear_feed_decision(db, proc)
+        proc.auto_reject_exempt = False
+        # `status=descartada` es un campo del feed compartido; al descartar limpiamos la
+        # decisión de TODOS los tenants para no dejar overlay incoherente con el status.
+        clear_all_feed_decisions(db, proc)
         return _descartados_redirect(estado)
 
     @app.get("/archivados", response_class=HTMLResponse)

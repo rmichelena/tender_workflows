@@ -564,6 +564,38 @@ def test_overlay_autorejected_descargar_redirects(tmp_path: Path):
         db.close()
 
 
+def test_descartar_autorejected_clears_all_tenant_overlay(tmp_path: Path):
+    # Medium/Low: descartar (status compartido) limpia overlay de TODOS los tenants y
+    # resetea auto_reject_exempt.
+    from .db.models import TenantFeedDecision
+
+    app, pid = _seed_overlay_autorejected(tmp_path, "ov_desc_all.db")
+    db = session_factory()
+    try:
+        db.add(
+            TenantFeedDecision(tenant_id="otro", feed_item_id=pid, decision="exempt")
+        )
+        db.commit()
+        assert db.query(TenantFeedDecision).filter_by(feed_item_id=pid).count() == 2
+    finally:
+        db.close()
+
+    resp = TestClient(app).post(
+        f"/descartados/{pid}/descartar",
+        data={"estado": "autorejected"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    db = session_factory()
+    try:
+        proc = db.get(Process, pid)
+        assert proc.status == ProcessStatus.descartada
+        assert proc.auto_reject_exempt is False
+        assert db.query(TenantFeedDecision).filter_by(feed_item_id=pid).count() == 0
+    finally:
+        db.close()
+
+
 def test_overlay_autorejected_restore_sets_exempt(tmp_path: Path):
     app, pid = _seed_overlay_autorejected(tmp_path, "ov_restore.db")
     resp = TestClient(app).post(

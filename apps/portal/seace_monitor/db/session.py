@@ -271,22 +271,29 @@ def _flip_autorejected_status_to_overlay(engine) -> int:
 
     Tras mover el autoreject al overlay, el `status=autorejected` legacy queda como
     artefacto: lo devolvemos a `publicada` para que el feed no codifique la decisión del
-    tenant. Solo se tocan los items que YA tienen su decisión en el overlay (garantizado
-    por el backfill previo), de modo que las lecturas efectivas no cambian de resultado.
-    Idempotente: tras correr no quedan `status=autorejected`. El motivo legacy
-    (`auto_reject_reason`) se conserva como red de seguridad de display.
+    tenant. Se flipea cualquier `status=autorejected` que tenga decisión en el overlay,
+    sea `autorejected` o `exempt` (un item exento no debe quedar atrapado en
+    `status=autorejected`, invisible en la UI). Los que NO tienen respaldo en el overlay
+    se conservan (no perder la marca sin red). Las lecturas efectivas no cambian de
+    resultado. Idempotente: tras correr no quedan `status=autorejected` con overlay. El
+    motivo legacy (`auto_reject_reason`) se conserva como red de display.
     """
     insp = inspect(engine)
     tables = insp.get_table_names()
     if "tenant_feed_decisions" not in tables or "processes" not in tables:
         return 0
     with engine.begin() as conn:
+        # Guard: evita correr el UPDATE en cada arranque si ya no queda nada que flipear.
+        pending = conn.execute(
+            text("SELECT 1 FROM processes WHERE status = 'autorejected' LIMIT 1")
+        ).first()
+        if pending is None:
+            return 0
         result = conn.execute(
             text(
                 "UPDATE processes SET status = 'publicada' "
                 "WHERE status = 'autorejected' AND id IN ("
-                "  SELECT feed_item_id FROM tenant_feed_decisions "
-                "  WHERE decision = 'autorejected'"
+                "  SELECT feed_item_id FROM tenant_feed_decisions"
                 ")"
             )
         )

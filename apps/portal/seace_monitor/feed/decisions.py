@@ -57,10 +57,14 @@ def _upsert_decision(
                 reason=reason,
             )
         )
-    else:
-        existing.decision = decision
-        existing.rule_id = rule_id
-        existing.reason = reason
+        return
+    # `exempt` (decisión explícita del usuario) supersede a `autorejected`: un autoreject
+    # automático nunca debe pisar una exención. Evita la carrera restaurar↔scanner.
+    if decision == DECISION_AUTOREJECTED and existing.decision == DECISION_EXEMPT:
+        return
+    existing.decision = decision
+    existing.rule_id = rule_id
+    existing.reason = reason
 
 
 def record_autoreject_decision(
