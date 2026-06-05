@@ -330,6 +330,36 @@ def test_scan_dedupes_publicada_within_single_scan(monkeypatch):
     assert procs[0].source_ref == "200"  # adopta el nid más reciente
 
 
+def test_adopt_clears_overlay_decision_of_deleted_duplicate():
+    # El duplicado borrable puede tener una decisión en el overlay (autoreject/exempt);
+    # al eliminarlo debe limpiarse la fila del overlay para no dejarla huérfana.
+    from .db.models import TenantFeedDecision
+    from .feed import record_autoreject_decision
+
+    session = _session()
+    entity = _entity(session)
+    claimed = _proc(
+        entity, source_ref="1001133", nid="1001133", nomenclatura=NOM,
+        status=ProcessStatus.analizada, data_dir="/data/x",
+    )
+    dup = _proc(
+        entity, source_ref="1018219", nid="1018219", nomenclatura=NOM,
+        status=ProcessStatus.publicada,
+    )
+    session.add_all([claimed, dup])
+    session.flush()
+    record_autoreject_decision(session, dup, rule_id="r", reason="r: y")
+    session.commit()
+    dup_id = dup.id
+    assert session.query(TenantFeedDecision).filter_by(feed_item_id=dup_id).count() == 1
+
+    adopt_republication(session, claimed, dup, _row("1018219", NOM))
+    session.commit()
+
+    assert session.get(Process, dup_id) is None
+    assert session.query(TenantFeedDecision).filter_by(feed_item_id=dup_id).count() == 0
+
+
 def test_claimed_for_entity_only_returns_claimed_statuses():
     session = _session()
     entity = _entity(session)

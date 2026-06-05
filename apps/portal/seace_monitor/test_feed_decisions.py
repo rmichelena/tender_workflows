@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from .db.models import Base, Entity, Process, ProcessStatus, TenantFeedDecision
-from .db.session import _backfill_tenant_feed_decisions
+from .db.session import _backfill_tenant_feed_decisions, _purge_orphan_feed_decisions
 from .feed import (
     clear_feed_decision,
     record_autoreject_decision,
@@ -119,3 +119,32 @@ def test_backfill_from_legacy_process_fields_is_idempotent():
     assert normal.id not in decisions
     # Idempotencia: una sola fila por proceso.
     assert session.query(TenantFeedDecision).count() == 2
+
+
+def test_purge_orphan_feed_decisions_removes_only_dangling_rows():
+    engine, session, entity = _setup()
+    alive = _proc(entity, ref="20", status=ProcessStatus.autorejected, reason="r: y")
+    session.add(alive)
+    session.flush()
+    record_autoreject_decision(session, alive, rule_id="r", reason="r: y")
+    session.commit()
+
+    # Decisión huérfana: feed_item_id que no existe en `processes`.
+    session.add(
+        TenantFeedDecision(
+            tenant_id="default",
+            feed_item_id=99999,
+            decision="exempt",
+        )
+    )
+    session.commit()
+    assert session.query(TenantFeedDecision).count() == 2
+
+    removed = _purge_orphan_feed_decisions(engine)
+    removed_again = _purge_orphan_feed_decisions(engine)  # idempotente
+    session.expire_all()
+
+    assert removed == 1
+    assert removed_again == 0
+    remaining = {d.feed_item_id for d in session.query(TenantFeedDecision)}
+    assert remaining == {alive.id}

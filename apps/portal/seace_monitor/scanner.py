@@ -13,7 +13,7 @@ from .auto_reject import AutoRejectRule, apply_auto_reject_rules, load_auto_reje
 from .client import ProcessRow, SeaceClient
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus, utcnow
-from .feed import FeedRepository, record_autoreject_decision
+from .feed import FeedRepository, clear_feed_decision, record_autoreject_decision
 from .parser import extract_cronograma_fechas, parse_ficha, row_snapshot_hash
 from .scan_options import ScanOptions, passes_date_filter
 from .seace_search import normalize_nomenclatura
@@ -128,6 +128,9 @@ def adopt_republication(
     nomenclatura y preserva docs/changelog.
     """
     if existing is not None and is_removable_publicada_duplicate(existing):
+        # Limpia la decisión del overlay antes de borrar el feed item, para no dejar
+        # filas huérfanas en `tenant_feed_decisions` apuntando a un id inexistente.
+        clear_feed_decision(session, existing)
         session.delete(existing)
         session.flush()
         existing = None

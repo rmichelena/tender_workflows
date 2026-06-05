@@ -245,6 +245,27 @@ def _backfill_tenant_feed_decisions(engine) -> None:
             )
 
 
+def _purge_orphan_feed_decisions(engine) -> int:
+    """Elimina decisiones del overlay que referencian un `Process` inexistente.
+
+    El feed (hoy `processes`) puede borrar items (p. ej. el duplicado que elimina
+    `adopt_republication`); como `feed_item_id` no tiene foreign key, esas decisiones
+    quedarían huérfanas. Idempotente; se ejecuta en `init_db`.
+    """
+    insp = inspect(engine)
+    tables = insp.get_table_names()
+    if "tenant_feed_decisions" not in tables or "processes" not in tables:
+        return 0
+    with engine.begin() as conn:
+        result = conn.execute(
+            text(
+                "DELETE FROM tenant_feed_decisions WHERE feed_item_id NOT IN "
+                "(SELECT id FROM processes)"
+            )
+        )
+        return result.rowcount or 0
+
+
 def _process_identity_index_names(engine) -> set[str]:
     insp = inspect(engine)
     names: set[str] = set()
@@ -482,6 +503,7 @@ def init_db(database_url: str) -> None:
     _backfill_process_pipeline_fields(_engine)
     _migrate_process_identity_schema(_engine)
     _backfill_tenant_feed_decisions(_engine)
+    _purge_orphan_feed_decisions(_engine)
     if _SessionLocal is not None:
         from ..list_order import backfill_list_ranks
 
