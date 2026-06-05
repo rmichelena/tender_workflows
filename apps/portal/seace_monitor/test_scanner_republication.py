@@ -364,6 +364,78 @@ def test_adopt_clears_overlay_decision_of_deleted_duplicate():
     assert session.query(TenantFeedDecision).filter_by(feed_item_id=dup_id).count() == 0
 
 
+def test_adopt_does_not_delete_autorejected_publicada_duplicate():
+    # Regresión 0.3c-3 (review crítico): tras el flip, un autorechazado vive en
+    # status=publicada con decisión en overlay. El dedupe NO debe borrarlo aunque parezca
+    # un duplicado publicada sin datos: se perdería la decisión de autoreject.
+    from .db.models import TenantFeedDecision
+    from .feed import record_autoreject_decision
+
+    session = _session()
+    entity = _entity(session)
+    # `pub` (preferida, nid mayor) sin overlay; `auto` autorechazada (nid menor).
+    pub = _proc(entity, source_ref="200", nid="200", nomenclatura=NOM,
+                status=ProcessStatus.publicada)
+    auto = _proc(entity, source_ref="100", nid="100", nomenclatura=NOM,
+                 status=ProcessStatus.publicada)
+    session.add_all([pub, auto])
+    session.flush()
+    record_autoreject_decision(session, auto, rule_id="r", reason="r: x")
+    session.commit()
+    auto_id = auto.id
+
+    # Sin protección, `auto` sería borrable; con autorejected_ids debe conservarse.
+    adopt_republication(session, pub, auto, _row("100", NOM), {auto_id})
+    session.commit()
+
+    assert session.get(Process, auto_id) is not None  # NO se borró
+    assert (
+        session.query(TenantFeedDecision).filter_by(feed_item_id=auto_id).count() == 1
+    )
+
+
+def test_is_removable_skips_autorejected_ids():
+    session = _session()
+    entity = _entity(session)
+    auto = _proc(entity, source_ref="1", nid="1", nomenclatura=NOM,
+                 status=ProcessStatus.publicada)
+    plain = _proc(entity, source_ref="2", nid="2", nomenclatura=NOM,
+                  status=ProcessStatus.publicada)
+    session.add_all([auto, plain])
+    session.commit()
+
+    assert is_removable_publicada_duplicate(auto, {auto.id}) is False
+    assert is_removable_publicada_duplicate(plain, {auto.id}) is True
+
+
+def test_publicada_map_excludes_autorejected(monkeypatch):
+    from .config import AppConfig
+    from .feed import record_autoreject_decision
+    from .scanner import MultiEntityScanner
+
+    session = _session()
+    entity = _entity(session)
+    auto = _proc(entity, source_ref="200", nid="200", nomenclatura=NOM,
+                 status=ProcessStatus.publicada)
+    plain = _proc(entity, source_ref="100", nid="100", nomenclatura=NOM,
+                  status=ProcessStatus.publicada)
+    session.add_all([auto, plain])
+    session.flush()
+    record_autoreject_decision(session, auto, rule_id="r", reason="r: x")
+    session.commit()
+
+    scanner = MultiEntityScanner(AppConfig(), session)
+    autorejected_ids = scanner.feed.effective_autorejected_ids()
+    from .seace_search import normalize_nomenclatura
+
+    pub_map = scanner._publicada_nomenclatura_map(entity, autorejected_ids)
+    # El autorechazado (nid mayor) se excluye; gana `plain` pese a nid menor.
+    assert pub_map[normalize_nomenclatura(NOM)] is plain
+    # Y aparece como reclamado para fusionar sus re-publicaciones.
+    claimed_map = scanner._claimed_nomenclatura_map(entity, autorejected_ids)
+    assert claimed_map[normalize_nomenclatura(NOM)] is auto
+
+
 def test_claimed_for_entity_only_returns_claimed_statuses():
     session = _session()
     entity = _entity(session)

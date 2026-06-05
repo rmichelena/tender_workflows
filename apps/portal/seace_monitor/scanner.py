@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Collection
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
@@ -73,8 +74,17 @@ def _nid_advances(current: str | None, new: str | None) -> bool:
     return cur_n < 0 or new_n > cur_n
 
 
-def is_removable_publicada_duplicate(proc: Process) -> bool:
-    """¿`proc` es un duplicado `publicada` sin datos propios (seguro de borrar)?"""
+def is_removable_publicada_duplicate(
+    proc: Process, autorejected_ids: "Collection[int]" = ()
+) -> bool:
+    """¿`proc` es un duplicado `publicada` sin datos propios (seguro de borrar)?
+
+    Tras el flip 0.3c-3 un item autorechazado vive en `status=publicada` con la decisión
+    en el overlay; NO es un duplicado descartable: borrarlo perdería la decisión. Por eso
+    se excluyen los `autorejected_ids` (decisión efectiva de autoreject).
+    """
+    if proc.id in autorejected_ids:
+        return False
     return (
         proc.status == ProcessStatus.publicada
         and not proc.data_dir
@@ -121,7 +131,11 @@ def _claimed_is_preferred(candidate: Process, current: Process) -> bool:
 
 
 def adopt_republication(
-    session, claimed: Process, existing: Process | None, row
+    session,
+    claimed: Process,
+    existing: Process | None,
+    row,
+    autorejected_ids: "Collection[int]" = (),
 ) -> None:
     """Fusiona una re-publicación en el item ya reclamado `claimed`.
 
@@ -130,9 +144,12 @@ def adopt_republication(
     identidad queda libre (o no existía) y el nid **avanza** (no regresar a un nid ya
     superado en el mismo scan), se adopta el nuevo nid en `claimed`. El refresco de
     contenido (cronograma/documentos) lo sigue gobernando el watchlist, que resuelve por
-    nomenclatura y preserva docs/changelog.
+    nomenclatura y preserva docs/changelog. `autorejected_ids` protege de borrado a los
+    items con decisión de autoreject en el overlay (que tras el flip son `publicada`).
     """
-    if existing is not None and is_removable_publicada_duplicate(existing):
+    if existing is not None and is_removable_publicada_duplicate(
+        existing, autorejected_ids
+    ):
         # Limpia las decisiones del overlay (de cualquier tenant) antes de borrar el feed
         # item compartido, para no dejar filas huérfanas en `tenant_feed_decisions`.
         clear_all_feed_decisions(session, existing)
@@ -207,8 +224,15 @@ class MultiEntityScanner:
         )
         new_count = 0
         seen_nids: set[str] = set()
-        claimed_by_nomenclatura = self._claimed_nomenclatura_map(entity)
-        publicada_by_nomenclatura = self._publicada_nomenclatura_map(entity)
+        # Decisión efectiva de autoreject (overlay): tras el flip 0.3c-3 esos items son
+        # `publicada`; se usan para tratarlos como reclamados y no borrarlos en el dedupe.
+        autorejected_ids = self.feed.effective_autorejected_ids()
+        claimed_by_nomenclatura = self._claimed_nomenclatura_map(
+            entity, autorejected_ids
+        )
+        publicada_by_nomenclatura = self._publicada_nomenclatura_map(
+            entity, autorejected_ids
+        )
 
         first_soup = None
         max_pages = self.config.max_pages
@@ -248,7 +272,9 @@ class MultiEntityScanner:
                     # Re-publicación de un proceso ya reclamado: fusionar, no duplicar.
                     savepoint = self.session.begin_nested()
                     try:
-                        adopt_republication(self.session, claimed, proc, row)
+                        adopt_republication(
+                            self.session, claimed, proc, row, autorejected_ids
+                        )
                         savepoint.commit()
                     except Exception:
                         savepoint.rollback()
@@ -275,7 +301,9 @@ class MultiEntityScanner:
                 if pub is not None and pub is not proc:
                     savepoint = self.session.begin_nested()
                     try:
-                        adopt_republication(self.session, pub, proc, row)
+                        adopt_republication(
+                            self.session, pub, proc, row, autorejected_ids
+                        )
                         savepoint.commit()
                     except Exception:
                         savepoint.rollback()
@@ -332,28 +360,49 @@ class MultiEntityScanner:
 
         return new_count
 
-    def _claimed_nomenclatura_map(self, entity: Entity) -> dict[str, Process]:
+    def _claimed_nomenclatura_map(
+        self, entity: Entity, autorejected_ids: Collection[int] = ()
+    ) -> dict[str, Process]:
         """Mapa nomenclatura-normalizada → proceso reclamado de la entidad.
 
         Permite contrastar cada fila escaneada por UID de negocio (nomenclatura) contra
         los procesos ya descargados/analizados, en vez de por el nid que SEACE reasigna.
+        Tras el flip 0.3c-3, los autorechazados viven en `publicada` con la decisión en el
+        overlay; se tratan como reclamados para fusionar sus re-publicaciones en la misma
+        fila (preservando la decisión) en vez de duplicarlas.
         """
-        claimed = self.feed.claimed_for_entity(
-            "seace", entity.id, _REPUBLICATION_CLAIMED_STATUSES
+        claimed = list(
+            self.feed.claimed_for_entity(
+                "seace", entity.id, _REPUBLICATION_CLAIMED_STATUSES
+            )
         )
+        if autorejected_ids:
+            claimed += [
+                proc
+                for proc in self.feed.by_status_for_entity(
+                    "seace", entity.id, (ProcessStatus.publicada,)
+                )
+                if proc.id in autorejected_ids
+            ]
         return build_claimed_nomenclatura_map(claimed)
 
-    def _publicada_nomenclatura_map(self, entity: Entity) -> dict[str, Process]:
+    def _publicada_nomenclatura_map(
+        self, entity: Entity, autorejected_ids: Collection[int] = ()
+    ) -> dict[str, Process]:
         """Mapa nomenclatura-normalizada → `publicada` preferida (nid más reciente).
 
         Permite deduplicar re-publicaciones dentro del feed puro: si la misma licitación
         aparece dos veces como `publicada` (nid reasignado), conservamos una sola fila.
+        Excluye los autorechazados (los gestiona el mapa de reclamados, no el de publicada
+        pura) para no borrarlos ni perder su decisión del overlay.
         """
         rows = self.feed.by_status_for_entity(
             "seace", entity.id, (ProcessStatus.publicada,)
         )
         mapping: dict[str, Process] = {}
         for proc in rows:
+            if proc.id in autorejected_ids:
+                continue
             key = normalize_nomenclatura(proc.nomenclatura)
             if not key:
                 continue

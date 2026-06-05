@@ -476,6 +476,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             return _filter_redirect(
                 entidad=entidad, objeto=objeto, sort=sort, dir=dir, scroll=scroll
             )
+        # Bi-régimen (0.3c-3): un autorechazado efectivo está en status=publicada pero no
+        # se muestra en Publicaciones; pertenece a Descartados.
+        if FeedRepository(db).is_effectively_autorejected(proc):
+            return RedirectResponse("/descartados?estado=autorejected", status_code=303)
         if proc.status == ProcessStatus.descargando:
             raise HTTPException(409, "Descarga en curso")
         if proc.status != ProcessStatus.publicada:
@@ -629,6 +633,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         proc = get_process_or_404(db, process_id)
         if proc.status == ProcessStatus.descargada:
             return RedirectResponse(f"/descargados/{process_id}", status_code=303)
+        # Bi-régimen (0.3c-3): no descargar un autorechazado efectivo (status=publicada
+        # pero oculto de Publicaciones).
+        if FeedRepository(db).is_effectively_autorejected(proc):
+            return RedirectResponse("/descartados?estado=autorejected", status_code=303)
         if proc.status == ProcessStatus.descargando:
             return _filter_redirect(
                 entidad=entidad,

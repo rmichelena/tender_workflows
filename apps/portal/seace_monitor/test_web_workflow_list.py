@@ -533,6 +533,37 @@ def test_overlay_autorejected_can_be_restored_and_discarded(tmp_path: Path):
         db.close()
 
 
+def test_overlay_autorejected_descartar_from_publicaciones_redirects(tmp_path: Path):
+    # Guard 0.3c-3: descartar desde Publicaciones un autorechazado efectivo (status=
+    # publicada, oculto) no debe marcarlo descartada; redirige a Descartados.
+    app, pid = _seed_overlay_autorejected(tmp_path, "ov_desc_guard.db")
+    resp = TestClient(app).post(
+        f"/publicaciones/{pid}/descartar", data={}, follow_redirects=False
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/descartados?estado=autorejected"
+    db = session_factory()
+    try:
+        assert db.get(Process, pid).status == ProcessStatus.publicada
+    finally:
+        db.close()
+
+
+def test_overlay_autorejected_descargar_redirects(tmp_path: Path):
+    app, pid = _seed_overlay_autorejected(tmp_path, "ov_dl_guard.db")
+    resp = TestClient(app).post(
+        f"/publicaciones/{pid}/descargar", data={}, follow_redirects=False
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/descartados?estado=autorejected"
+    db = session_factory()
+    try:
+        # No entra al pipeline de descarga.
+        assert db.get(Process, pid).status == ProcessStatus.publicada
+    finally:
+        db.close()
+
+
 def test_overlay_autorejected_restore_sets_exempt(tmp_path: Path):
     app, pid = _seed_overlay_autorejected(tmp_path, "ov_restore.db")
     resp = TestClient(app).post(
