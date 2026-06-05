@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from .db.models import Base, Entity, Process, ProcessStatus
-from .feed import FeedRepository
+from .feed import FeedRepository, record_autoreject_decision, record_exempt_decision
 
 
 def _session():
@@ -69,3 +69,64 @@ def test_query_by_status_filters_status_and_optional_source():
         [ProcessStatus.publicada], source="seace"
     ).all()
     assert seace_only == [seace_pub]
+
+
+def _proc(session, entity, *, ref, status, exempt=False):
+    proc = Process(
+        entity_id=entity.id, anio=2026, source="seace", source_ref=ref,
+        nid_proceso=ref, nomenclatura=f"LP-{ref}", status=status,
+        auto_reject_exempt=exempt,
+    )
+    session.add(proc)
+    session.flush()
+    return proc
+
+
+def test_overlay_readers_return_decisions_per_tenant():
+    session = _session()
+    entity = _entity(session)
+    rej = _proc(session, entity, ref="1", status=ProcessStatus.autorejected)
+    exe = _proc(session, entity, ref="2", status=ProcessStatus.publicada, exempt=True)
+    plain = _proc(session, entity, ref="3", status=ProcessStatus.publicada)
+    record_autoreject_decision(session, rej, rule_id="limpieza", reason="limpieza: x")
+    record_exempt_decision(session, exe)
+    session.commit()
+
+    repo = FeedRepository(session)
+    assert repo.autorejected_feed_ids() == {rej.id}
+    assert repo.exempt_feed_ids() == {exe.id}
+    assert repo.decisions_for_tenant() == {
+        rej.id: "autorejected",
+        exe.id: "exempt",
+    }
+    assert plain.id not in repo.decisions_for_tenant()
+    # Otro tenant no ve las decisiones del default.
+    assert repo.autorejected_feed_ids(tenant_id="otro") == set()
+
+
+def test_overlay_readers_match_legacy_status_fields():
+    # Paridad 0.3c-1: con dual-write activo, el overlay refleja exactamente los campos
+    # legacy de `Process` (autorejected ≡ status; exempt ≡ auto_reject_exempt).
+    session = _session()
+    entity = _entity(session)
+    procs = [
+        _proc(session, entity, ref="10", status=ProcessStatus.autorejected),
+        _proc(session, entity, ref="11", status=ProcessStatus.autorejected),
+        _proc(session, entity, ref="12", status=ProcessStatus.publicada, exempt=True),
+        _proc(session, entity, ref="13", status=ProcessStatus.descargada, exempt=True),
+        _proc(session, entity, ref="14", status=ProcessStatus.publicada),
+    ]
+    for p in procs:
+        if p.status == ProcessStatus.autorejected:
+            record_autoreject_decision(session, p, rule_id="r", reason="r: x")
+        elif p.auto_reject_exempt:
+            record_exempt_decision(session, p)
+    session.commit()
+
+    repo = FeedRepository(session)
+    legacy_rejected = {
+        p.id for p in procs if p.status == ProcessStatus.autorejected
+    }
+    legacy_exempt = {p.id for p in procs if p.auto_reject_exempt}
+    assert repo.autorejected_feed_ids() == legacy_rejected
+    assert repo.exempt_feed_ids() == legacy_exempt
