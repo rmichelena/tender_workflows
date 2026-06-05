@@ -166,6 +166,12 @@ class Process(Base):
     list_rank_descargados: Mapped[int | None] = mapped_column(Integer, nullable=True)
     list_rank_analizados: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Promoción feed→pipeline (0.3d): latch de un solo sentido. NULL = feed puro
+    # (descubrimiento ruidoso, purgable); set = trabajo curado (descarga/análisis/interés).
+    promoted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(

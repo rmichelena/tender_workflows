@@ -52,6 +52,7 @@ _PROCESS_COLUMN_ADDITIONS = (
     ("watch_changelog_json", "TEXT"),
     ("list_rank_descargados", "INTEGER"),
     ("list_rank_analizados", "INTEGER"),
+    ("promoted_at", "DATETIME"),
 )
 
 _ANALYSIS_COLUMN_ADDITIONS = (("run_id", "VARCHAR(36)"),)
@@ -513,6 +514,51 @@ def _migrate_process_identity_schema(engine) -> None:
             )
 
 
+# Estados que implican trabajo curado (promoción feed→pipeline, 0.3d).
+_PROMOTED_STATUSES = (
+    "descargando",
+    "descargada",
+    "descartando",
+    "analizada",
+    "portafolio",
+    "archivando",
+    "archivada",
+)
+
+
+def _backfill_promoted_at(engine) -> int:
+    """Backfill idempotente de `promoted_at` (0.3d): marca como promovidos los items con
+    trabajo curado histórico (status de pipeline, interés marcado, descarga o análisis).
+
+    Solo toca filas con `promoted_at IS NULL` que cumplen la condición de promoción, de
+    modo que es seguro correr en cada arranque. Usa `first_seen_at` como timestamp.
+    """
+    insp = inspect(engine)
+    if "processes" not in insp.get_table_names():
+        return 0
+    cols = {col["name"] for col in insp.get_columns("processes")}
+    if "promoted_at" not in cols:
+        return 0
+    has_analysis = "analysis_results" in insp.get_table_names()
+    status_list = ", ".join(f"'{s}'" for s in _PROMOTED_STATUSES)
+    conds = [
+        f"status IN ({status_list})",
+        "(interest_status IS NOT NULL AND interest_status NOT IN ('none', ''))",
+        "(data_dir IS NOT NULL AND data_dir != '')",
+    ]
+    if has_analysis:
+        conds.append("id IN (SELECT process_id FROM analysis_results)")
+    predicate = " OR ".join(conds)
+    with engine.begin() as conn:
+        result = conn.execute(
+            text(
+                "UPDATE processes SET promoted_at = first_seen_at "
+                f"WHERE promoted_at IS NULL AND ({predicate})"
+            )
+        )
+        return result.rowcount or 0
+
+
 def init_db(database_url: str) -> None:
     global _engine, _SessionLocal
     connect_args: dict[str, object] = {}
@@ -539,6 +585,7 @@ def init_db(database_url: str) -> None:
     _backfill_tenant_feed_decisions(_engine)
     _purge_orphan_feed_decisions(_engine)
     _flip_autorejected_status_to_overlay(_engine)
+    _backfill_promoted_at(_engine)
     if _SessionLocal is not None:
         from ..list_order import backfill_list_ranks
 
@@ -563,6 +610,7 @@ def _ensure_sqlite_indexes(engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_processes_lifecycle_phase ON processes (lifecycle_phase)",
         "CREATE INDEX IF NOT EXISTS ix_processes_auto_reject_exempt ON processes (auto_reject_exempt)",
         "CREATE INDEX IF NOT EXISTS ix_processes_watch_unread ON processes (watch_unread)",
+        "CREATE INDEX IF NOT EXISTS ix_processes_promoted_at ON processes (promoted_at)",
     )
     with engine.begin() as conn:
         for stmt in statements:
