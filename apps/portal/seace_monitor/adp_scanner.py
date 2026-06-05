@@ -16,7 +16,12 @@ from sqlalchemy.orm import Session
 
 from .adp_client import ALL_WORK_IDS, WORK_CATEGORIES, AdpClient
 from .adp_parser import AdpProcess, parse_adp_html
-from .auto_reject import AutoRejectRule, apply_auto_reject_rules, load_auto_reject_rules
+from .auto_reject import (
+    AutoRejectRule,
+    apply_auto_reject_rules,
+    autoreject_reason_text,
+    load_auto_reject_rules,
+)
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus, utcnow
 from .feed import FeedRepository, record_autoreject_decision
@@ -185,7 +190,10 @@ class AdpScanner:
         self.session.flush()
         if match is not None:
             record_autoreject_decision(
-                self.session, proc, rule_id=match.id, reason=proc.auto_reject_reason
+                self.session,
+                proc,
+                rule_id=match.id,
+                reason=autoreject_reason_text(match),
             )
             logger.info(
                 "ADP autorechazado %s por regla %s",

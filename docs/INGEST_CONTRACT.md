@@ -359,7 +359,11 @@ El paso 0.3c (mover autoreject al overlay) se ejecuta en micro-pasos deploy-safe
   manda, fallback al `status` legacy). Behavior-preserving con doble escritura activa;
   forward-compatible con el flip de 0.3c-3 (item autorejected queda en `status=publicada`
   con decisión en el overlay). Tests simulan ambos regímenes.
-- **0.3c-3** ⏳ — *Flip del scanner*: `apply_auto_reject_rules` deja de mutar
-  `process.status` (escribe solo overlay) + migración one-shot de
-  `status=autorejected` legacy → `publicada` + decisión en overlay. Verificación de
-  conteos en VPS antes/después.
+- **0.3c-3** ✅ (pend. deploy) — *Flip del scanner*: `apply_auto_reject_rules` es ahora
+  un **predicado puro** (no muta `process.status` ni `auto_reject_reason`); los callers
+  (scanner SEACE/ADP, apply del editor) registran la decisión en el overlay con el motivo
+  derivado de la regla (`autoreject_reason_text`). Migración one-shot idempotente
+  `_flip_autorejected_status_to_overlay` en `init_db`: devuelve a `publicada` los items
+  con `status=autorejected` legacy que ya tienen decisión en el overlay (guard: no flipea
+  sin respaldo). Las lecturas efectivas (0.3c-2) hacen que los conteos no cambien.
+  **Pendiente:** deploy + verificación de conteos en VPS antes/después.

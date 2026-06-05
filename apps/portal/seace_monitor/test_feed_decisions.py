@@ -6,7 +6,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from .db.models import Base, Entity, Process, ProcessStatus, TenantFeedDecision
-from .db.session import _backfill_tenant_feed_decisions, _purge_orphan_feed_decisions
+from .db.session import (
+    _backfill_tenant_feed_decisions,
+    _flip_autorejected_status_to_overlay,
+    _purge_orphan_feed_decisions,
+)
 from .feed import (
     clear_all_feed_decisions,
     clear_feed_decision,
@@ -115,6 +119,44 @@ def test_clear_all_feed_decisions_removes_every_tenant():
     clear_all_feed_decisions(session, proc)
     session.flush()
     assert session.query(TenantFeedDecision).filter_by(feed_item_id=proc.id).count() == 0
+
+
+def test_flip_autorejected_status_moves_to_publicada_idempotently():
+    # 0.3c-3: el flip one-shot devuelve a `publicada` los items con status=autorejected
+    # legacy que ya tienen su decisión en el overlay; idempotente y no toca otros estados.
+    engine, session, entity = _setup()
+    rejected = _proc(entity, ref="30", status=ProcessStatus.autorejected,
+                     reason="r: x")
+    descartada = _proc(entity, ref="31", status=ProcessStatus.descartada)
+    session.add_all([rejected, descartada])
+    session.commit()
+    _backfill_tenant_feed_decisions(engine)  # crea la decisión overlay del rejected
+
+    flipped = _flip_autorejected_status_to_overlay(engine)
+    flipped_again = _flip_autorejected_status_to_overlay(engine)  # idempotente
+    session.expire_all()
+
+    assert flipped == 1
+    assert flipped_again == 0
+    assert session.get(Process, rejected.id).status == ProcessStatus.publicada
+    assert session.get(Process, descartada.id).status == ProcessStatus.descartada
+    # La decisión del overlay se conserva (la fuente de verdad del autoreject).
+    assert _decisions(session)[rejected.id].decision == "autorejected"
+
+
+def test_flip_skips_autorejected_without_overlay_decision():
+    # Guard: si por alguna razón no hay decisión en el overlay, NO se flipea (evita
+    # perder la marca de autoreject sin respaldo).
+    engine, session, entity = _setup()
+    orphan = _proc(entity, ref="40", status=ProcessStatus.autorejected)
+    session.add(orphan)
+    session.commit()
+
+    flipped = _flip_autorejected_status_to_overlay(engine)
+    session.expire_all()
+
+    assert flipped == 0
+    assert session.get(Process, orphan.id).status == ProcessStatus.autorejected
 
 
 def test_backfill_from_legacy_process_fields_is_idempotent():

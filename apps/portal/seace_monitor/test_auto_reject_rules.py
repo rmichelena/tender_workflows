@@ -6,13 +6,14 @@ from sqlalchemy.orm import sessionmaker
 from .auto_reject import (
     AutoRejectRule,
     apply_auto_reject_rules,
+    autoreject_reason_text,
     evaluate_query,
     load_auto_reject_rules,
     validate_rules_yaml,
 )
 from .client import FichaResult, ProcessRow
 from .config import AppConfig
-from .db.models import Base, Entity, Process, ProcessStatus
+from .db.models import Base, Entity, Process, ProcessStatus, TenantFeedDecision
 from .parser import FichaData
 from .scan_options import ScanOptions
 from .scanner import MultiEntityScanner
@@ -126,10 +127,13 @@ def test_food_rule_still_matches_raciones_as_word():
     )
 
     assert apply_auto_reject_rules(proc, entity, [rule]) == rule
-    assert proc.status == ProcessStatus.autorejected
+    # 0.3c-3: el predicado no muta el feed; el item sigue publicada.
+    assert proc.status == ProcessStatus.publicada
 
 
-def test_apply_auto_reject_marks_public_process_and_stores_reason():
+def test_apply_auto_reject_is_a_pure_predicate():
+    # 0.3c-3: apply_auto_reject_rules no muta status ni escribe el motivo en el feed; la
+    # decisión la persiste el caller en el overlay. El motivo canónico se deriva de la regla.
     proc, entity = _process(
         objeto="Bien",
         descripcion="ADQUISICION DE UNIFORMES Y CALZADO PARA PERSONAL",
@@ -143,8 +147,12 @@ def test_apply_auto_reject_marks_public_process_and_stores_reason():
     match = apply_auto_reject_rules(proc, entity, [rule])
 
     assert match == rule
-    assert proc.status == ProcessStatus.autorejected
-    assert proc.auto_reject_reason == "bien_uniformes: Bienes de uniformes/vestimenta fuera de foco"
+    assert proc.status == ProcessStatus.publicada
+    assert proc.auto_reject_reason is None
+    assert (
+        autoreject_reason_text(match)
+        == "bien_uniformes: Bienes de uniformes/vestimenta fuera de foco"
+    )
 
 
 def test_apply_auto_reject_does_not_change_downloaded_process():
@@ -307,5 +315,10 @@ def test_scanner_applies_auto_reject_rules_after_upsert(monkeypatch):
 
     assert created is True
     proc = session.query(Process).one()
-    assert proc.status == ProcessStatus.autorejected
-    assert proc.auto_reject_reason.startswith("servicio_limpieza:")
+    # 0.3c-3: el scanner ya no muta status; la decisión vive en el overlay.
+    assert proc.status == ProcessStatus.publicada
+    decision = (
+        session.query(TenantFeedDecision).filter_by(feed_item_id=proc.id).one()
+    )
+    assert decision.decision == "autorejected"
+    assert decision.reason.startswith("servicio_limpieza:")

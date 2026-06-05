@@ -104,14 +104,16 @@ def test_apply_existing_only_selected_channel(tmp_path: Path):
 
     db = session_factory()
     try:
-        assert _status(db, "LP-1") == ProcessStatus.autorejected  # matchea + canal seace
+        # 0.3c-3: apply ya no muta status; la decisión vive solo en el overlay.
+        assert _status(db, "LP-1") == ProcessStatus.publicada  # matchea + canal seace
         assert _status(db, "LP-2") == ProcessStatus.publicada  # no matchea
         assert _status(db, "ADP-1") == ProcessStatus.publicada  # canal no seleccionado
-        # Doble escritura al overlay.
         decisions = db.query(TenantFeedDecision).all()
         assert len(decisions) == 1
         assert decisions[0].decision == "autorejected"
         assert decisions[0].rule_id == "limpieza"
+        lp1 = db.query(Process).filter_by(nomenclatura="LP-1").one()
+        assert decisions[0].feed_item_id == lp1.id
     finally:
         db.close()
 
@@ -172,13 +174,15 @@ def test_apply_isolates_per_item_failure(tmp_path: Path, monkeypatch):
 
     db = session_factory()
     try:
-        # LP-1 falló y se revirtió su savepoint → sigue publicada, sin decisión overlay.
+        # LP-1 falló y se revirtió su savepoint → sin decisión overlay.
         assert _status(db, "LP-1") == ProcessStatus.publicada
-        # LP-3 se aplicó y persiste pese al fallo del otro ítem.
-        assert _status(db, "LP-3") == ProcessStatus.autorejected
+        # LP-3 se aplicó y persiste pese al fallo del otro ítem (0.3c-3: solo overlay).
+        assert _status(db, "LP-3") == ProcessStatus.publicada
         decisions = db.query(TenantFeedDecision).all()
         assert {d.decision for d in decisions} == {"autorejected"}
         assert len(decisions) == 1
+        lp3 = db.query(Process).filter_by(nomenclatura="LP-3").one()
+        assert decisions[0].feed_item_id == lp3.id
     finally:
         db.close()
 

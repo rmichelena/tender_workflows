@@ -9,7 +9,12 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from .auto_reject import AutoRejectRule, apply_auto_reject_rules, load_auto_reject_rules
+from .auto_reject import (
+    AutoRejectRule,
+    apply_auto_reject_rules,
+    autoreject_reason_text,
+    load_auto_reject_rules,
+)
 from .client import ProcessRow, SeaceClient
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus, utcnow
@@ -443,7 +448,10 @@ class MultiEntityScanner:
         self.session.flush()
         if match is not None:
             record_autoreject_decision(
-                self.session, proc, rule_id=match.id, reason=proc.auto_reject_reason
+                self.session,
+                proc,
+                rule_id=match.id,
+                reason=autoreject_reason_text(match),
             )
             logger.info(
                 "Autorechazado %s por regla %s — %s",

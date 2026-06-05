@@ -266,6 +266,33 @@ def _purge_orphan_feed_decisions(engine) -> int:
         return result.rowcount or 0
 
 
+def _flip_autorejected_status_to_overlay(engine) -> int:
+    """Flip one-shot (0.3c-3): saca la decisión de autoreject del `status` del feed.
+
+    Tras mover el autoreject al overlay, el `status=autorejected` legacy queda como
+    artefacto: lo devolvemos a `publicada` para que el feed no codifique la decisión del
+    tenant. Solo se tocan los items que YA tienen su decisión en el overlay (garantizado
+    por el backfill previo), de modo que las lecturas efectivas no cambian de resultado.
+    Idempotente: tras correr no quedan `status=autorejected`. El motivo legacy
+    (`auto_reject_reason`) se conserva como red de seguridad de display.
+    """
+    insp = inspect(engine)
+    tables = insp.get_table_names()
+    if "tenant_feed_decisions" not in tables or "processes" not in tables:
+        return 0
+    with engine.begin() as conn:
+        result = conn.execute(
+            text(
+                "UPDATE processes SET status = 'publicada' "
+                "WHERE status = 'autorejected' AND id IN ("
+                "  SELECT feed_item_id FROM tenant_feed_decisions "
+                "  WHERE decision = 'autorejected'"
+                ")"
+            )
+        )
+        return result.rowcount or 0
+
+
 def _process_identity_index_names(engine) -> set[str]:
     insp = inspect(engine)
     names: set[str] = set()
@@ -504,6 +531,7 @@ def init_db(database_url: str) -> None:
     _migrate_process_identity_schema(_engine)
     _backfill_tenant_feed_decisions(_engine)
     _purge_orphan_feed_decisions(_engine)
+    _flip_autorejected_status_to_overlay(_engine)
     if _SessionLocal is not None:
         from ..list_order import backfill_list_ranks
 

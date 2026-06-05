@@ -284,16 +284,24 @@ def first_matching_rule(
     return None
 
 
+def autoreject_reason_text(rule: AutoRejectRule) -> str:
+    """Motivo canónico (``id: reason``) que se persiste en el overlay."""
+    return f"{rule.id}: {rule.reason}"
+
+
 def apply_auto_reject_rules(
     process: Process, entity: Entity | None, rules: list[AutoRejectRule]
 ) -> AutoRejectRule | None:
+    """Predicado puro de autoreject (0.3c-3): devuelve la regla que matchea sin mutar el
+    feed.
+
+    El estado del autoreject vive en el overlay por tenant (`TenantFeedDecision`), no en
+    `Process.status`. El caller registra la decisión vía `record_autoreject_decision`.
+    Los guards usan campos legacy (`status`, `auto_reject_exempt`) que la doble escritura
+    mantiene válidos durante la transición.
+    """
     if process.status != ProcessStatus.publicada:
         return None
     if process.auto_reject_exempt:
         return None
-    rule = first_matching_rule(process, entity, rules)
-    if rule is None:
-        return None
-    process.status = ProcessStatus.autorejected
-    process.auto_reject_reason = f"{rule.id}: {rule.reason}"
-    return rule
+    return first_matching_rule(process, entity, rules)

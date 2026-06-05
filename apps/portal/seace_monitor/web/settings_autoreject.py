@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..auto_reject import (
     active_auto_reject_rules_path,
     apply_auto_reject_rules,
+    autoreject_reason_text,
     editable_auto_reject_rules_path,
     load_auto_reject_rules,
     validate_rules_yaml,
@@ -125,7 +126,10 @@ def register_autoreject_settings_routes(app, config: AppConfig, render, _get_db)
                     if match is not None:
                         db.flush()
                         record_autoreject_decision(
-                            db, proc, rule_id=match.id, reason=proc.auto_reject_reason
+                            db,
+                            proc,
+                            rule_id=match.id,
+                            reason=autoreject_reason_text(match),
                         )
                         applied += 1
                     savepoint.commit()
