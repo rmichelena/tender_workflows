@@ -349,9 +349,13 @@ def test_adopt_clears_overlay_decision_of_deleted_duplicate():
     session.add_all([claimed, dup])
     session.flush()
     record_autoreject_decision(session, dup, rule_id="r", reason="r: y")
+    # Decisión de otro tenant sobre el mismo feed item compartido: también debe limpiarse.
+    session.add(
+        TenantFeedDecision(tenant_id="otro", feed_item_id=dup.id, decision="exempt")
+    )
     session.commit()
     dup_id = dup.id
-    assert session.query(TenantFeedDecision).filter_by(feed_item_id=dup_id).count() == 1
+    assert session.query(TenantFeedDecision).filter_by(feed_item_id=dup_id).count() == 2
 
     adopt_republication(session, claimed, dup, _row("1018219", NOM))
     session.commit()

@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from .db.models import Base, Entity, Process, ProcessStatus, TenantFeedDecision
 from .db.session import _backfill_tenant_feed_decisions, _purge_orphan_feed_decisions
 from .feed import (
+    clear_all_feed_decisions,
     clear_feed_decision,
     record_autoreject_decision,
     record_exempt_decision,
@@ -97,6 +98,23 @@ def test_clear_feed_decision_removes_row():
     clear_feed_decision(session, proc)
     session.flush()
     assert proc.id not in _decisions(session)
+
+
+def test_clear_all_feed_decisions_removes_every_tenant():
+    _, session, entity = _setup()
+    proc = _proc(entity, ref="3", status=ProcessStatus.publicada)
+    session.add(proc)
+    session.flush()
+    record_autoreject_decision(session, proc, rule_id="r", reason="r: y")
+    session.add(
+        TenantFeedDecision(tenant_id="otro", feed_item_id=proc.id, decision="exempt")
+    )
+    session.flush()
+    assert session.query(TenantFeedDecision).filter_by(feed_item_id=proc.id).count() == 2
+
+    clear_all_feed_decisions(session, proc)
+    session.flush()
+    assert session.query(TenantFeedDecision).filter_by(feed_item_id=proc.id).count() == 0
 
 
 def test_backfill_from_legacy_process_fields_is_idempotent():

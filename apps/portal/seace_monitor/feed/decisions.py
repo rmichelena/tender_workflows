@@ -112,3 +112,16 @@ def clear_feed_decision(
     session.query(TenantFeedDecision).filter_by(
         tenant_id=tenant_id, feed_item_id=feed_item_id
     ).delete()
+
+
+def clear_all_feed_decisions(session: "Session", process: "Process") -> None:
+    """Borra las decisiones de **todos** los tenants sobre un feed item.
+
+    El feed es compartido y sin FK al overlay: cuando el item se elimina (p. ej. el
+    duplicado que fusiona `adopt_republication`), hay que purgar las decisiones de
+    cualquier tenant, no solo del actual, para no dejar huérfanas.
+    """
+    feed_item_id = process.id
+    if feed_item_id is None:
+        return
+    session.query(TenantFeedDecision).filter_by(feed_item_id=feed_item_id).delete()
