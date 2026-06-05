@@ -82,11 +82,16 @@ def is_removable_publicada_duplicate(
     Tras el flip 0.3c-3 un item autorechazado vive en `status=publicada` con la decisión
     en el overlay; NO es un duplicado descartable: borrarlo perdería la decisión. Por eso
     se excluyen los `autorejected_ids` (decisión efectiva de autoreject).
+
+    Tampoco es descartable un item **promovido** (0.3d): aunque siga en `status=publicada`
+    y sin `data_dir`/análisis (p. ej. marcado solo con interés), tiene trabajo curado del
+    tenant que no debe perderse en una re-publicación.
     """
     if proc.id in autorejected_ids:
         return False
     return (
         proc.status == ProcessStatus.publicada
+        and proc.promoted_at is None
         and not proc.data_dir
         and proc.analysis is None
     )
@@ -369,25 +374,26 @@ class MultiEntityScanner:
         los procesos ya descargados/analizados, en vez de por el nid que SEACE reasigna.
         Tras el flip 0.3c-3, los autorechazados viven en `publicada` con la decisión en el
         overlay; se tratan como reclamados para fusionar sus re-publicaciones en la misma
-        fila (preservando la decisión) en vez de duplicarlas.
+        fila (preservando la decisión) en vez de duplicarlas. Igual los **promovidos**
+        (0.3d): aunque sigan en `publicada` (p. ej. marcados solo con interés), son
+        pipeline-bound y deben ser el target de merge, no un duplicado descartable.
         """
         claimed = list(
             self.feed.claimed_for_entity(
                 "seace", entity.id, _REPUBLICATION_CLAIMED_STATUSES
             )
         )
-        if autorejected_ids:
-            # Dedup por id: un item con status reclamado (p. ej. analizada) puede tener una
-            # decisión autorejected stale en el overlay y entraría en `autorejected_ids`;
-            # no debe añadirse dos veces al mapa de reclamados.
-            seen = {proc.id for proc in claimed}
-            claimed += [
-                proc
-                for proc in self.feed.by_status_for_entity(
-                    "seace", entity.id, (ProcessStatus.publicada,)
-                )
-                if proc.id in autorejected_ids and proc.id not in seen
-            ]
+        # Dedup por id: un item con status reclamado (p. ej. analizada) puede tener una
+        # decisión autorejected stale en el overlay; no debe añadirse dos veces al mapa.
+        seen = {proc.id for proc in claimed}
+        for proc in self.feed.by_status_for_entity(
+            "seace", entity.id, (ProcessStatus.publicada,)
+        ):
+            if proc.id in seen:
+                continue
+            if proc.id in autorejected_ids or proc.promoted_at is not None:
+                claimed.append(proc)
+                seen.add(proc.id)
         return build_claimed_nomenclatura_map(claimed)
 
     def _publicada_nomenclatura_map(
@@ -397,15 +403,16 @@ class MultiEntityScanner:
 
         Permite deduplicar re-publicaciones dentro del feed puro: si la misma licitación
         aparece dos veces como `publicada` (nid reasignado), conservamos una sola fila.
-        Excluye los autorechazados (los gestiona el mapa de reclamados, no el de publicada
-        pura) para no borrarlos ni perder su decisión del overlay.
+        Excluye los autorechazados y los **promovidos** (0.3d): ambos los gestiona el mapa
+        de reclamados, no el de publicada pura, para no borrarlos ni perder su trabajo
+        curado / decisión del overlay.
         """
         rows = self.feed.by_status_for_entity(
             "seace", entity.id, (ProcessStatus.publicada,)
         )
         mapping: dict[str, Process] = {}
         for proc in rows:
-            if proc.id in autorejected_ids:
+            if proc.id in autorejected_ids or proc.promoted_at is not None:
                 continue
             key = normalize_nomenclatura(proc.nomenclatura)
             if not key:

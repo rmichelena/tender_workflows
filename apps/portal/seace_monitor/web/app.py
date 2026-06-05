@@ -31,6 +31,7 @@ from ..db.session import init_db, session_factory
 from ..feed import (
     FeedRepository,
     clear_all_feed_decisions,
+    promote,
     record_exempt_decision,
 )
 from ..process_storage import (
@@ -461,6 +462,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             proc.interest_status = InterestStatus(interest_status)
         except ValueError as exc:
             raise HTTPException(400, "Estado de interés inválido") from exc
+        # Marcar interés es una acción positiva → promoción feed→pipeline (0.3d).
+        if proc.interest_status != InterestStatus.none:
+            promote(db, proc)
         return _workflow_list_redirect(
             _safe_workflow_path(return_to), sort=sort, dir=dir, scroll=scroll
         )

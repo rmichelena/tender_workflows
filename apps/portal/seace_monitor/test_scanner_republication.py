@@ -481,3 +481,74 @@ def test_claimed_for_entity_only_returns_claimed_statuses():
         "seace", entity.id, _REPUBLICATION_CLAIMED_STATUSES
     )
     assert {c.nomenclatura for c in claimed} == {"A", "B"}
+
+
+# --- 0.3d-3: la promoción protege en el dedupe -------------------------------------
+
+
+def _promoted(entity, **kwargs):
+    from .db.models import utcnow
+
+    proc = _proc(entity, **kwargs)
+    proc.promoted_at = utcnow()
+    return proc
+
+
+def test_is_removable_skips_promoted_publicada():
+    # 0.3d: un publicada promovido (p. ej. marcado solo con interés, sin data_dir) NO es
+    # un duplicado borrable: tiene trabajo curado del tenant.
+    session = _session()
+    entity = _entity(session)
+    promo = _promoted(entity, source_ref="1", nid="1", nomenclatura=NOM,
+                      status=ProcessStatus.publicada)
+    plain = _proc(entity, source_ref="2", nid="2", nomenclatura=NOM,
+                  status=ProcessStatus.publicada)
+    session.add_all([promo, plain])
+    session.commit()
+
+    assert is_removable_publicada_duplicate(promo) is False
+    assert is_removable_publicada_duplicate(plain) is True
+
+
+def test_promoted_publicada_is_claimed_target_not_pure_feed():
+    from .config import AppConfig
+    from .scanner import MultiEntityScanner
+    from .seace_search import normalize_nomenclatura
+
+    session = _session()
+    entity = _entity(session)
+    # Promovido con nid menor; un publicada puro con nid mayor.
+    promo = _promoted(entity, source_ref="100", nid="100", nomenclatura=NOM,
+                      status=ProcessStatus.publicada)
+    plain = _proc(entity, source_ref="200", nid="200", nomenclatura=NOM,
+                  status=ProcessStatus.publicada)
+    session.add_all([promo, plain])
+    session.commit()
+
+    scanner = MultiEntityScanner(AppConfig(), session)
+    autorejected_ids = scanner.feed.effective_autorejected_ids()
+    key = normalize_nomenclatura(NOM)
+
+    # El promovido se excluye del mapa de feed puro (gana `plain` pese a nid menor)...
+    pub_map = scanner._publicada_nomenclatura_map(entity, autorejected_ids)
+    assert pub_map[key] is plain
+    # ...y aparece como reclamado para fusionar sus re-publicaciones.
+    claimed_map = scanner._claimed_nomenclatura_map(entity, autorejected_ids)
+    assert claimed_map[key] is promo
+
+
+def test_adopt_does_not_delete_promoted_publicada_duplicate():
+    session = _session()
+    entity = _entity(session)
+    claimed = _proc(entity, source_ref="200", nid="200", nomenclatura=NOM,
+                    status=ProcessStatus.analizada, data_dir="/d")
+    promo = _promoted(entity, source_ref="100", nid="100", nomenclatura=NOM,
+                      status=ProcessStatus.publicada)
+    session.add_all([claimed, promo])
+    session.commit()
+    promo_id = promo.id
+
+    adopt_republication(session, claimed, promo, _row("100", NOM))
+    session.commit()
+    # El promovido NO se borra aunque parezca duplicado publicada sin datos.
+    assert session.get(Process, promo_id) is not None

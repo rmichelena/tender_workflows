@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..analysis.runner import AnalysisRunner
 from ..db.models import Process, ProcessStatus, utcnow
 from ..db.session import commit_session_with_retry, session_factory
+from ..feed import promote
 from ..process_storage import (
     archive_analyzed_process,
     clear_process_download_metadata,
@@ -109,6 +110,8 @@ def schedule_download(
 
 def begin_download_transition(db: Session, proc: Process) -> int:
     proc.status = ProcessStatus.descargando
+    # Acción positiva → promoción feed→pipeline (0.3d): el item deja de ser feed puro.
+    promote(db, proc)
     commit_session_with_retry(db)
     process_id = proc.id
     db.expunge(proc)

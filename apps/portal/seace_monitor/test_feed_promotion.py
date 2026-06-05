@@ -144,3 +144,66 @@ def test_backfill_marks_process_with_analysis():
     assert _backfill_promoted_at(engine) == 1
     session.expire_all()
     assert session.get(Process, proc.id).promoted_at is not None
+
+
+# --- 0.3d-2: promoción en las acciones positivas -----------------------------------
+
+
+def test_begin_download_transition_promotes(tmp_path):
+    from .config import AppConfig
+    from .db.session import init_db, session_factory
+    from .web.workflow_transitions import begin_download_transition
+
+    init_db(f"sqlite:///{tmp_path / 'dl.db'}")
+    db = session_factory()
+    try:
+        entity = Entity(ruc="20123456789", nombre="E", activa=True)
+        db.add(entity)
+        db.flush()
+        proc = _proc(entity, ref="1", status=ProcessStatus.publicada)
+        db.add(proc)
+        db.commit()
+        pid = proc.id
+
+        begin_download_transition(db, proc)
+        reloaded = db.get(Process, pid)
+        assert reloaded.status == ProcessStatus.descargando
+        assert reloaded.promoted_at is not None
+    finally:
+        db.close()
+
+
+def test_marking_interest_promotes(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from .config import AppConfig
+    from .db.session import session_factory
+    from .web.app import create_app
+
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'int.db'}")
+    app = create_app(cfg)
+    db = session_factory()
+    try:
+        entity = Entity(ruc="20123456789", nombre="E", activa=True)
+        db.add(entity)
+        db.flush()
+        proc = _proc(entity, ref="1", status=ProcessStatus.publicada)
+        db.add(proc)
+        db.commit()
+        pid = proc.id
+    finally:
+        db.close()
+
+    resp = TestClient(app).post(
+        f"/processes/{pid}/interest",
+        data={"interest_status": "candidate", "return_to": "/analizados"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    db = session_factory()
+    try:
+        reloaded = db.get(Process, pid)
+        assert reloaded.interest_status == InterestStatus.candidate
+        assert reloaded.promoted_at is not None
+    finally:
+        db.close()

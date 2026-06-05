@@ -337,7 +337,7 @@ riesgo de comportamiento, comparando conteos por estado/lista en el VPS antes/de
 | **0.3a** ✅ | **Seam feed (sin cambio físico):** módulo `feed/repository.py` (`FeedRepository.find_by_ref`, `query_by_status`) operando sobre `processes`. Scanners SEACE/ADP y list views lo usan en vez de consultar el ORM directo. | Bajo (behavior-preserving) | No toca la BD. Tests en `test_feed_repository.py`. |
 | **0.3b** ✅ | **Overlay `TenantFeedDecision` (aditivo):** modelo en `db/models.py` (creado por `create_all`); helpers de doble escritura en `feed/decisions.py` (`record_autoreject_decision`/`record_exempt_decision`/`clear_feed_decision`) cableados en scanner SEACE/ADP (al auto-rechazar) y web (restaurar→exempt, descartar→clear). Backfill idempotente `_backfill_tenant_feed_decisions` desde `status=autorejected`/`auto_reject_exempt`. `feed_item_id`→`processes.id` sin FK. Reads sin cambios todavía. | Bajo (solo CREATE TABLE) | Backup antes de desplegar. Tests en `test_feed_decisions.py`. |
 | **0.3c** | **Mover autoreject del scanner al overlay:** `apply_auto_reject_rules` deja de mutar `process.status`; escribe `TenantFeedDecision`. Scanner solo registra item crudo. Listas de descartados/exempt leen del overlay. | **Medio** (comportamiento) | Tests exhaustivos + verificación de conteos en VPS. |
-| **0.3d** | **Promoción explícita feed→pipeline (lógica):** acción positiva (descargar/analizar/watchlist/interés) marca `feed.status='promoted'` y consolida snapshot curado. Con `Process` aún única, "promoción" = flags/columnas. | Bajo–medio | Prepara la copia sin FK del split físico. |
+| **0.3d** 🚧 | **Promoción explícita feed→pipeline (lógica):** acción positiva (descargar/analizar/interés) marca `promoted_at` y consolida snapshot curado. Con `Process` aún única, "promoción" = columna `promoted_at` (latch). | Bajo–medio | Prepara la copia sin FK del split físico. Detalle abajo. |
 | **0.3e** | **Split físico (gated, opcional):** solo si 0.3a–d estables en VPS. Crear `pipeline_items` (migrar `promoted`), `processes`→`feed_items`. Copia sin FK. | **Alto** (destructivo) | Backup + ventana. Único paso irreversible. |
 
 **Decisiones resueltas que aplican aquí:** ver §8 (dedup_key vía adapter, overlay
@@ -385,3 +385,22 @@ carrera restaurar↔scanner.
   `exempt` (carrera restaurar↔scanner); flip incluye `exempt`-overlaid;
   `descartar_autorejected` limpia overlay cross-tenant y resetea `auto_reject_exempt`;
   `effective_autorejected_ids` en una sola query.
+
+### 0.3d en detalle (sub-pasos)
+
+La promoción es un **latch de un solo sentido** sobre `Process` (`promoted_at`): NULL =
+feed puro (purgable); seteado = trabajo curado (pipeline-bound). Helpers en
+`feed/promotion.py` (`promote`, `is_promoted`, `should_be_promoted`).
+
+- **0.3d-1** ✅ — *Marca de promoción (aditiva)*: columna `promoted_at` (nullable + índice),
+  ALTER TABLE en `_PROCESS_COLUMN_ADDITIONS` y backfill idempotente `_backfill_promoted_at`
+  (estados de pipeline / interés ≠ none / `data_dir` / análisis). Sin cambio de comportamiento.
+- **0.3d-2** ✅ — *Marcar en acciones positivas*: `begin_download_transition` (descargar) y
+  `cambiar_interes` (interés ≠ none) llaman a `promote()`. Cubre SEACE y ADP (endpoints
+  source-agnostic). Analizar/portafolio/archivar parten de items ya promovidos.
+- **0.3d-3** ✅ — *Dedupe respeta la promoción*: `is_removable_publicada_duplicate` excluye
+  items con `promoted_at` (cierra el gap de borrar un `publicada` con interés-only en una
+  re-publicación); un `publicada` promovido se trata como **reclamado** (target de merge),
+  no como feed puro (`_claimed_nomenclatura_map` lo incluye; `_publicada_nomenclatura_map`
+  lo excluye), igual que los autorechazados.
+- **0.3d-4** ⏳ — *Seam de lectura feed-puro vs promovido* (prepara la copia sin FK de 0.3e).
