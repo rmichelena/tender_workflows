@@ -562,6 +562,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             proc.auto_reject_reason = None
             record_exempt_decision(db, proc)
         proc.status = new_status
+        # Restaurar es una acción positiva → promoción feed→pipeline (0.3d): protege al
+        # item (y su decisión exempt) de ser borrado como duplicado `publicada` en una
+        # re-publicación SEACE.
+        promote(db, proc)
         return _descartados_redirect(estado)
 
     @app.post("/descartados/{process_id}/descartar")

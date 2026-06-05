@@ -596,6 +596,26 @@ def test_descartar_autorejected_clears_all_tenant_overlay(tmp_path: Path):
         db.close()
 
 
+def test_restore_promotes_item(tmp_path: Path):
+    # 0.3d (review): restaurar marca promoted_at para que el item (y su exempt) no se borre
+    # como duplicado publicada en una re-publicación SEACE.
+    app, pid = _seed_overlay_autorejected(tmp_path, "ov_restore_promo.db")
+    resp = TestClient(app).post(
+        f"/descartados/{pid}/restaurar",
+        data={"estado": "autorejected"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    db = session_factory()
+    try:
+        proc = db.get(Process, pid)
+        assert proc.status == ProcessStatus.publicada
+        assert proc.auto_reject_exempt is True
+        assert proc.promoted_at is not None
+    finally:
+        db.close()
+
+
 def test_overlay_autorejected_restore_sets_exempt(tmp_path: Path):
     app, pid = _seed_overlay_autorejected(tmp_path, "ov_restore.db")
     resp = TestClient(app).post(
