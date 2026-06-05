@@ -46,6 +46,42 @@ def test_google_style_query_supports_field_or_phrase_and_exclusion():
     )
 
 
+def test_and_keyword_is_an_operator_not_a_search_term():
+    # Regresión: `AND` debe ser operador (como `OR`), no un término literal. Antes el
+    # tokenizer trataba AND como término → toda regla con AND explícito nunca matcheaba.
+    proc, entity = _process(
+        objeto="Bien",
+        descripcion="Adquisición de suministro de combustible Diesel B5 S-50",
+    )
+    assert evaluate_query(
+        "objeto:bien (suministro AND (combustible OR gasohol OR diesel))", proc, entity
+    )
+
+
+def test_and_keyword_requires_both_operands():
+    proc, entity = _process(
+        objeto="Bien",
+        descripcion="Adquisición de combustible para la flota vehicular",  # sin 'suministro'
+    )
+    # Falta 'suministro' → la regla con AND no debe matchear.
+    assert not evaluate_query(
+        "objeto:bien (suministro AND (combustible OR gasohol OR diesel))", proc, entity
+    )
+
+
+def test_and_keyword_in_alquiler_local_rule():
+    proc, entity = _process(
+        objeto="Servicio",
+        descripcion="SERVICIO DE ARRENDAMIENTO DE LOCAL PARA OFICINAS ADMINISTRATIVAS",
+    )
+    assert evaluate_query(
+        "objeto:servicio ((alquiler OR arrendamiento) AND "
+        "(inmueble OR inmuebles OR local OR locales OR ambientes))",
+        proc,
+        entity,
+    )
+
+
 def test_google_style_query_exclusion_can_keep_corpac_transport():
     proc, entity = _process(
         objeto="Servicio",
