@@ -9,7 +9,6 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from .config import AppConfig
@@ -184,19 +183,19 @@ def watchlist_nav_badges(session: Session) -> dict[str, int]:
 
 def refresh_watchlist_processes(config: AppConfig, session: Session) -> int:
     """Re-fetch ficha SEACE para procesos en watchlist cuyo TTL venció."""
-    threshold = utcnow() - config.watchlist_refresh_timedelta
-    processes = (
-        session.query(Process)
-        .options(joinedload(Process.entity))
-        .filter(Process.status.in_(tuple(WATCHLIST_STATUSES)))
-        .filter(
-            or_(
-                Process.watch_checked_at.is_(None),
-                Process.watch_checked_at < threshold,
-            )
+    from .watchlist_refresh import watchlist_refresh_due
+
+    now = utcnow()
+    processes = [
+        proc
+        for proc in (
+            session.query(Process)
+            .options(joinedload(Process.entity))
+            .filter(Process.status.in_(tuple(WATCHLIST_STATUSES)))
+            .all()
         )
-        .all()
-    )
+        if watchlist_refresh_due(proc, config, now=now)
+    ]
     updated = 0
     for proc in processes:
         savepoint = session.begin_nested()

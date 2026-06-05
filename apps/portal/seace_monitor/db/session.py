@@ -375,6 +375,8 @@ def _sqlite_table_create_sql(engine, table_name: str) -> str | None:
 
 def _sqlite_recreate_table_from_model(engine, model) -> None:
     """Recrea una tabla SQLite conservando filas (resetea FKs rotos)."""
+    from .models import Entity, Process
+
     table_name = model.__tablename__
     insp = inspect(engine)
     if table_name not in insp.get_table_names():
@@ -385,6 +387,9 @@ def _sqlite_recreate_table_from_model(engine, model) -> None:
         return
     cols_sql = ", ".join(insert_cols)
     temp_md = MetaData()
+    # Stubs para resolver FKs al compilar CREATE (tablas ya existen en disco).
+    Entity.__table__.to_metadata(temp_md)
+    Process.__table__.to_metadata(temp_md)
     new_table = model.__table__.to_metadata(temp_md, name=f"{table_name}_new")
     with engine.begin() as conn:
         conn.execute(text("PRAGMA foreign_keys=OFF"))
@@ -448,7 +453,7 @@ def _sqlite_recover_failed_processes_rebuild(engine) -> bool:
 
 def _sqlite_rebuild_processes_table(engine) -> None:
     """Recrea `processes` con el esquema actual (nid_proceso nullable, identidad por source)."""
-    from .models import Process
+    from .models import Entity, Process
 
     _ensure_table_columns(engine, "processes", _PROCESS_COLUMN_ADDITIONS)
     _backfill_process_pipeline_fields(engine)
@@ -457,6 +462,9 @@ def _sqlite_rebuild_processes_table(engine) -> None:
     old_cols = {col["name"] for col in insp.get_columns("processes")}
     cols_sql, select_sql = _process_migration_select_sql(old_cols)
     temp_md = MetaData()
+    # Stub de `entities` en el MetaData temporal: SQLAlchemy necesita resolver la FK al
+    # compilar el CREATE de `processes_new` (la tabla ya existe en disco).
+    Entity.__table__.to_metadata(temp_md)
     processes_new = Process.__table__.to_metadata(temp_md, name="processes_new")
     with engine.begin() as conn:
         conn.execute(text("PRAGMA foreign_keys=OFF"))

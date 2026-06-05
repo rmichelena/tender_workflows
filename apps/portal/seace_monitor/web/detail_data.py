@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..parser import clean_cronograma_etapa, fechas_listado_from_cronograma_json
+from ..watchlist_changelog import changelog_entry_at_label
 from ..db.models import Process
 from ..document_storage import (
     MANIFEST_NAME,
@@ -733,7 +734,9 @@ _AREA_LABELS = {
 }
 
 
-def parse_watch_changelog(raw: str | None) -> list[WatchChangelogEntry]:
+def parse_watch_changelog(
+    raw: str | None, *, display_timezone: str = "America/Lima"
+) -> list[WatchChangelogEntry]:
     if not raw:
         return []
     try:
@@ -774,22 +777,13 @@ def parse_watch_changelog(raw: str | None) -> list[WatchChangelogEntry]:
         entries.append(
             WatchChangelogEntry(
                 at=at,
-                at_label=_format_changelog_timestamp(at),
+                at_label=changelog_entry_at_label(
+                    at, changes_raw, display_timezone=display_timezone
+                ),
                 changes=changes,
             )
         )
     return entries
-
-
-def _format_changelog_timestamp(at: str) -> str:
-    try:
-        dt = datetime.fromisoformat(at.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        local = dt.astimezone()
-        return local.strftime("%d/%m/%Y %H:%M")
-    except ValueError:
-        return at
 
 
 def changelog_area_label(area: str) -> str:

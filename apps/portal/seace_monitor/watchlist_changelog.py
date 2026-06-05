@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
+from .scan_options import LIMA, parse_seace_date
 from .watchlist_compare import (
     _DOC_COMPARE_KEYS,
     _parse_json_list,
@@ -168,6 +170,7 @@ def _diff_documentos(old_json: str | None, new_json: str) -> list[dict]:
     for uuid, row in new_by_uuid.items():
         label = _doc_label(new_full.get(uuid, row))
         if uuid not in old_by_uuid:
+            doc_fp = row.get("fecha_publicacion") or ""
             changes.append(
                 {
                     "area": "documento",
@@ -176,6 +179,8 @@ def _diff_documentos(old_json: str | None, new_json: str) -> list[dict]:
                     "kind": "added",
                     "old": "",
                     "new": label,
+                    # W2: fecha del portal para display (sin conversión de TZ).
+                    "doc_fecha_publicacion": doc_fp,
                 }
             )
             continue
@@ -221,3 +226,44 @@ def _diff_documentos(old_json: str | None, new_json: str) -> list[dict]:
             }
         )
     return changes
+
+
+def changelog_entry_at_label(
+    at: str, changes_raw: list[dict], *, display_timezone: str = "America/Lima"
+) -> str:
+    """Etiqueta de fecha/hora del bloque de cambios (W2).
+
+    - Solo documentos nuevos → fecha de publicación del portal (sin TZ).
+    - Cronograma u otros → hora del scan ajustada a ``display_timezone``.
+    """
+    if _is_document_only_additions(changes_raw):
+        fechas = [
+            str(item.get("doc_fecha_publicacion", "") or "").strip()
+            for item in changes_raw
+            if item.get("doc_fecha_publicacion")
+        ]
+        if fechas:
+            return max(
+                fechas,
+                key=lambda f: parse_seace_date(f)
+                or datetime.min.replace(tzinfo=LIMA),
+            )
+    return format_scan_timestamp(at, display_timezone)
+
+
+def _is_document_only_additions(changes: list[dict]) -> bool:
+    return bool(changes) and all(
+        item.get("area") == "documento" and item.get("kind") == "added"
+        for item in changes
+    )
+
+
+def format_scan_timestamp(at: str, display_timezone: str) -> str:
+    try:
+        dt = datetime.fromisoformat(at.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local = dt.astimezone(ZoneInfo(display_timezone))
+        return local.strftime("%d/%m/%Y %H:%M")
+    except (ValueError, ZoneInfoNotFoundError):
+        return at

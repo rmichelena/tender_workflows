@@ -295,6 +295,14 @@ class MultiEntityScanner:
                     ProcessStatus.archivada,
                 ):
                     proc.last_seen_at = utcnow()
+                    # W3: re-publicación en estado terminal — ignorada a propósito hasta
+                    # decisión de producto (ver ROADMAP W3). Log para diagnóstico.
+                    logger.info(
+                        "Re-publicación ignorada (estado terminal %s): %s nid=%s",
+                        proc.status.value,
+                        row.nomenclatura,
+                        row.nid_proceso,
+                    )
                     continue
 
                 # Dedupe del feed puro: re-publicación entre filas `publicada` (mismo UID

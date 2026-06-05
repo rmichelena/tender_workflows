@@ -89,6 +89,9 @@ class AppConfig:
     poll_interval: str = "6h"
     ficha_refresh_interval: str = "6h"
     watchlist_refresh_interval: str = "3h"
+    watchlist_refresh_interval_urgent: str = "45m"
+    watchlist_urgent_horizon: str = "48h"
+    display_timezone: str = "America/Lima"
     stale_analysis_interval: str = "2h"
     anio: int = 2026
     database_url: str = "sqlite:///./data/seace.db"
@@ -116,6 +119,14 @@ class AppConfig:
     @property
     def watchlist_refresh_timedelta(self) -> timedelta:
         return timedelta(seconds=self.watchlist_refresh_seconds)
+
+    @property
+    def watchlist_refresh_urgent_seconds(self) -> int:
+        return parse_duration(self.watchlist_refresh_interval_urgent)
+
+    @property
+    def watchlist_urgent_horizon_seconds(self) -> int:
+        return parse_duration(self.watchlist_urgent_horizon)
 
     @property
     def stale_analysis_seconds(self) -> int:
@@ -181,6 +192,11 @@ class AppConfig:
             watchlist_refresh_interval=str(
                 raw.get("watchlist_refresh_interval", "3h")
             ),
+            watchlist_refresh_interval_urgent=str(
+                raw.get("watchlist_refresh_interval_urgent", "45m")
+            ),
+            watchlist_urgent_horizon=str(raw.get("watchlist_urgent_horizon", "48h")),
+            display_timezone=str(raw.get("display_timezone", "America/Lima")),
             stale_analysis_interval=str(raw.get("stale_analysis_interval", "2h")),
             anio=int(raw.get("anio", 2026)),
             database_url=str(

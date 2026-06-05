@@ -12,7 +12,6 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from .adp_client import ALL_WORK_IDS, AdpClient
@@ -93,21 +92,20 @@ def refresh_adp_watchlist(config: AppConfig, session: Session) -> int:
 def _refresh_adp_watchlist_inner(
     config: AppConfig, session: Session, client: AdpClient
 ) -> int:
-    threshold = utcnow() - config.watchlist_refresh_timedelta
+    from .watchlist_refresh import watchlist_refresh_due
 
-    processes = (
-        session.query(Process)
-        .options(joinedload(Process.entity))
-        .filter(Process.source == ADP_PORTAL_SOURCE)
-        .filter(Process.status.in_(tuple(WATCHLIST_STATUSES)))
-        .filter(
-            or_(
-                Process.watch_checked_at.is_(None),
-                Process.watch_checked_at < threshold,
-            )
+    now = utcnow()
+    processes = [
+        proc
+        for proc in (
+            session.query(Process)
+            .options(joinedload(Process.entity))
+            .filter(Process.source == ADP_PORTAL_SOURCE)
+            .filter(Process.status.in_(tuple(WATCHLIST_STATUSES)))
+            .all()
         )
-        .all()
-    )
+        if watchlist_refresh_due(proc, config, now=now)
+    ]
 
     if not processes:
         return 0

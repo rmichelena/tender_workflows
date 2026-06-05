@@ -61,7 +61,7 @@ def test_collect_documentos_single_page_does_not_post():
 
 
 def test_collect_documentos_fetches_additional_pages():
-    page1_rows = "".join(_doc_row(f"uuid-{i}", f"Doc{i}.pdf") for i in range(5))
+    page1_rows = "".join(_doc_row(f"uuid-{i}", f"Doc{i}.pdf") for i in range(1, 6))
     html = _ficha_html(page1_rows, row_count=6, rows_per_page=5)
     partial = f"""<?xml version='1.0' encoding='UTF-8'?>
     <partial-response><changes>
@@ -104,7 +104,7 @@ def test_collect_documentos_propagates_view_state_across_pages():
         {rows}
       ]]></update>
     </changes></partial-response>""".format(
-        rows=_doc_row("uuid-12", "Doc12.zip")
+        rows="".join(_doc_row(f"uuid-{i}", f"Doc{i}.pdf") for i in range(11, 13))
     )
     session = MagicMock()
 

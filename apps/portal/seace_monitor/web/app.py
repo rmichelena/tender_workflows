@@ -160,7 +160,9 @@ def _build_analisis_detail_context(proc: Process, *, mark_read: bool) -> dict:
         "had_watch_updates": bool(prev_cron or prev_docs),
         "free_reader_html": free_reader_html,
         "chat": chat_payload,
-        "watch_changelog": parse_watch_changelog(proc.watch_changelog_json),
+        "watch_changelog": parse_watch_changelog(
+            proc.watch_changelog_json, display_timezone=_config.display_timezone
+        ),
     }
 
 
@@ -739,7 +741,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             archivos_analizando=archivos_analizando,
             cronograma=cronograma,
             had_watch_updates=had_watch_updates,
-            watch_changelog=parse_watch_changelog(proc.watch_changelog_json),
+            watch_changelog=parse_watch_changelog(
+                proc.watch_changelog_json, display_timezone=_config.display_timezone
+            ),
             ProcessStatus=ProcessStatus,
         )
 
