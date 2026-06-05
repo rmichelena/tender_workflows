@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from .base import IngestAdapter, IngestCapabilities, UnknownIngestSource
+from .base import IngestAdapter, IngestCapabilities, SourceAdapter, UnknownIngestSource
 from .seace import SEACE_ADAPTER
 from .adp import ADP_ADAPTER
 
-_ADAPTERS: dict[str, IngestAdapter] = {
+_ADAPTERS: dict[str, SourceAdapter] = {
     SEACE_ADAPTER.source: SEACE_ADAPTER,
     ADP_ADAPTER.source: ADP_ADAPTER,
 }
 
 
-def get_adapter(source: str) -> IngestAdapter:
+def get_adapter(source: str) -> SourceAdapter:
     key = (source or "").strip().lower()
     try:
         return _ADAPTERS[key]
@@ -27,6 +27,7 @@ def registered_sources() -> tuple[str, ...]:
 __all__ = [
     "IngestAdapter",
     "IngestCapabilities",
+    "SourceAdapter",
     "UnknownIngestSource",
     "get_adapter",
     "registered_sources",

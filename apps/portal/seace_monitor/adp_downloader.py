@@ -46,11 +46,12 @@ def download_adp_documents(
         if not friendly.lower().endswith(".pdf"):
             friendly += ".pdf"
         filename = sanitize_download_filename(friendly)
+        # `allocate_unique_path` evita que dos documentos distintos con el mismo nombre
+        # amigable (p. ej. ambos "BASES.pdf") colapsen en un solo archivo: el segundo
+        # recibe sufijo (_2). Reservamos creando el destino vacío para que la siguiente
+        # asignación en este mismo ciclo lo vea ocupado aunque la descarga aún no escriba.
         dest = allocate_unique_path(docs_dir, filename)
-
-        if dest.exists():
-            doc["archivo"] = dest.name
-            continue
+        dest.touch()
 
         try:
             client.download_document(name_file, dest)
@@ -58,6 +59,8 @@ def download_adp_documents(
             downloaded += 1
             logger.info("ADP descargado: %s → %s", name_file, dest.name)
         except Exception:
+            # Limpia el placeholder reservado si la descarga falla, sin perder el resto.
+            dest.unlink(missing_ok=True)
             logger.exception("ADP: fallo descargando %s", name_file)
 
     return downloaded

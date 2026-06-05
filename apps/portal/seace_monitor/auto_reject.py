@@ -126,7 +126,7 @@ def _with_field(node: _Node, field: str) -> _Node:
     return node
 
 
-_TOKEN_RE = re.compile(r'"([^"]+)"|(\()|(\))|(:)|(-)|(\bOR\b)|([^\s():-]+)', re.I)
+_TOKEN_RE = re.compile(r'"([^"]+)"|(\()|(\))|(:)|(-)|(\bAND\b)|(\bOR\b)|([^\s():-]+)', re.I)
 
 
 class _Parser:
@@ -162,11 +162,19 @@ class _Parser:
         return _Or(nodes)
 
     def _parse_and(self) -> _Node:
-        nodes: list[_Node] = []
-        while self._peek() is not None and self._peek() != ")" and self._peek().upper() != "OR":
+        nodes: list[_Node] = [self._parse_factor()]
+        while True:
+            nxt = self._peek()
+            if nxt is None or nxt == ")" or nxt.upper() == "OR":
+                break
+            # `AND` explícito es opcional: la yuxtaposición ya implica AND. Se acepta el
+            # keyword para que las reglas puedan escribirse de forma natural y legible.
+            if nxt.upper() == "AND":
+                self._pop()
+                after = self._peek()
+                if after is None or after == ")" or after.upper() == "OR":
+                    raise ValueError("Expresión incompleta tras AND")
             nodes.append(self._parse_factor())
-        if not nodes:
-            raise ValueError("Expresión incompleta")
         if len(nodes) == 1:
             return nodes[0]
         return _And(nodes)

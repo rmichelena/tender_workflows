@@ -47,6 +47,19 @@ class InterestStatus(str, enum.Enum):
     rejected = "rejected"
 
 
+class LifecyclePhase(str, enum.Enum):
+    """Fase comercial del objeto, ortogonal a `status` (portal) y `stage` (A–D).
+
+    El estudio de mercado no es un tipo de proceso separado, sino la fase previa
+    del mismo item, que puede transicionar a `licitacion` sin duplicarse.
+    """
+
+    estudio_mercado = "estudio_mercado"
+    licitacion = "licitacion"
+    adjudicacion = "adjudicacion"
+    ejecucion = "ejecucion"
+
+
 def _default_source_ref(context) -> str:
     params = context.get_current_parameters()
     return str(params.get("source_ref") or params.get("nid_proceso") or "")
@@ -101,6 +114,11 @@ class Process(Base):
     )
     interest_status: Mapped[InterestStatus] = mapped_column(
         Enum(InterestStatus, native_enum=False), default=InterestStatus.none, index=True
+    )
+    lifecycle_phase: Mapped[LifecyclePhase] = mapped_column(
+        Enum(LifecyclePhase, native_enum=False),
+        default=LifecyclePhase.licitacion,
+        index=True,
     )
 
     nid_proceso: Mapped[str | None] = mapped_column(String(32), index=True)
@@ -183,3 +201,34 @@ class AnalysisResult(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     process: Mapped[Process] = relationship(back_populates="analysis")
+
+
+class TenantFeedDecision(Base):
+    """Overlay por tenant sobre el feed: decisiones de autoreject/exempt.
+
+    Paso 0.3b del split feed/pipeline (`docs/INGEST_CONTRACT.md` §4/§9). El feed es
+    compartido (sin `tenant_id`); las decisiones de cada tenant viven aquí. Hoy el feed
+    se materializa sobre `processes`, así que `feed_item_id` referencia `processes.id`
+    **sin foreign key** (para no acoplar al futuro purgado/separación del feed). Una
+    decisión por `(tenant_id, feed_item_id)`; `exempt` supersede a `autorejected`.
+    """
+
+    __tablename__ = "tenant_feed_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "feed_item_id", name="uq_tenant_feed_decision"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), default="default", index=True)
+    feed_item_id: Mapped[int] = mapped_column(Integer, index=True)
+    decision: Mapped[str] = mapped_column(String(32))  # autorejected | exempt
+    rule_id: Mapped[str | None] = mapped_column(String(128))
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

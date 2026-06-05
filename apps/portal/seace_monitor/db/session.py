@@ -21,6 +21,7 @@ _PROCESS_COLUMN_ADDITIONS = (
     ("source_ref", "VARCHAR(256)"),
     ("workflow_profile", "VARCHAR(64) DEFAULT 'public_tender'"),
     ("interest_status", "VARCHAR(32) DEFAULT 'none'"),
+    ("lifecycle_phase", "VARCHAR(32) DEFAULT 'licitacion'"),
     ("nid_convocatoria", "TEXT"),
     ("nid_sistema", "VARCHAR(8)"),
     ("link_id", "VARCHAR(128)"),
@@ -152,7 +153,10 @@ def _backfill_process_pipeline_fields(engine) -> None:
     existing = {col["name"] for col in insp.get_columns("processes")}
     if not {"workflow_profile", "interest_status"}.issubset(existing):
         return
-    if not _has_missing_values(engine, "processes", ("workflow_profile", "interest_status")):
+    targets = ("workflow_profile", "interest_status")
+    if "lifecycle_phase" in existing:
+        targets = targets + ("lifecycle_phase",)
+    if not _has_missing_values(engine, "processes", targets):
         return
     with engine.begin() as conn:
         conn.execute(
@@ -169,6 +173,76 @@ def _backfill_process_pipeline_fields(engine) -> None:
                 "WHERE interest_status IS NULL OR interest_status = ''"
             )
         )
+        if "lifecycle_phase" in existing:
+            conn.execute(
+                text(
+                    "UPDATE processes "
+                    "SET lifecycle_phase = 'licitacion' "
+                    "WHERE lifecycle_phase IS NULL OR lifecycle_phase = ''"
+                )
+            )
+
+
+def _backfill_tenant_feed_decisions(engine) -> None:
+    """Backfill idempotente del overlay desde los campos de autoreject en `processes`.
+
+    Paso 0.3b: copia las decisiones ya materializadas en `Process` al overlay
+    `tenant_feed_decisions` (tenant `default`). `exempt` y `autorejected` son disjuntos
+    (un proceso eximido no queda en estado autorejected). Reejecutable: salta los que ya
+    tienen decisión.
+    """
+    insp = inspect(engine)
+    tables = insp.get_table_names()
+    if "tenant_feed_decisions" not in tables or "processes" not in tables:
+        return
+    with engine.begin() as conn:
+        existing = {
+            (row[0], row[1])
+            for row in conn.execute(
+                text("SELECT tenant_id, feed_item_id FROM tenant_feed_decisions")
+            )
+        }
+        rows = conn.execute(
+            text(
+                "SELECT id, status, auto_reject_reason, auto_reject_exempt "
+                "FROM processes WHERE status = 'autorejected' OR auto_reject_exempt = 1"
+            )
+        ).fetchall()
+        to_insert: list[dict] = []
+        for pid, status, reason, exempt in rows:
+            if ("default", pid) in existing:
+                continue
+            if exempt:
+                to_insert.append(
+                    {
+                        "tenant_id": "default",
+                        "feed_item_id": pid,
+                        "decision": "exempt",
+                        "rule_id": None,
+                        "reason": None,
+                    }
+                )
+            elif status == "autorejected":
+                rule_id = reason.split(":", 1)[0].strip() if reason else None
+                to_insert.append(
+                    {
+                        "tenant_id": "default",
+                        "feed_item_id": pid,
+                        "decision": "autorejected",
+                        "rule_id": rule_id,
+                        "reason": reason,
+                    }
+                )
+        if to_insert:
+            conn.execute(
+                text(
+                    "INSERT INTO tenant_feed_decisions "
+                    "(tenant_id, feed_item_id, decision, rule_id, reason, created_at, updated_at) "
+                    "VALUES (:tenant_id, :feed_item_id, :decision, :rule_id, :reason, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                to_insert,
+            )
 
 
 def _process_identity_index_names(engine) -> set[str]:
@@ -202,6 +276,7 @@ def _process_migration_copy_defaults() -> dict[str, str]:
         "source": "'seace'",
         "workflow_profile": "'public_tender'",
         "interest_status": "'none'",
+        "lifecycle_phase": "'licitacion'",
         "status": "'publicada'",
         "auto_reject_exempt": "0",
         "watch_unread": "0",
@@ -406,6 +481,7 @@ def init_db(database_url: str) -> None:
     _ensure_table_columns(_engine, "analysis_results", _ANALYSIS_COLUMN_ADDITIONS)
     _backfill_process_pipeline_fields(_engine)
     _migrate_process_identity_schema(_engine)
+    _backfill_tenant_feed_decisions(_engine)
     if _SessionLocal is not None:
         from ..list_order import backfill_list_ranks
 
@@ -427,6 +503,7 @@ def _ensure_sqlite_indexes(engine) -> None:
         "CREATE INDEX IF NOT EXISTS ix_processes_source_ref ON processes (source_ref)",
         "CREATE INDEX IF NOT EXISTS ix_processes_workflow_profile ON processes (workflow_profile)",
         "CREATE INDEX IF NOT EXISTS ix_processes_interest_status ON processes (interest_status)",
+        "CREATE INDEX IF NOT EXISTS ix_processes_lifecycle_phase ON processes (lifecycle_phase)",
         "CREATE INDEX IF NOT EXISTS ix_processes_auto_reject_exempt ON processes (auto_reject_exempt)",
         "CREATE INDEX IF NOT EXISTS ix_processes_watch_unread ON processes (watch_unread)",
     )

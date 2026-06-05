@@ -13,13 +13,26 @@ from .config import AppConfig
 from .db.models import Entity
 from .db.session import init_db, session_factory
 from .entity_catalog import sync_entity_catalog_if_changed
-from .scanner import MultiEntityScanner
-from .adp_scanner import AdpScanner
-from .adp_watchlist import refresh_adp_watchlist
-from .watchlist import refresh_watchlist_processes
+from .ingest import get_adapter, registered_sources
+from .ingest.base import SourceAdapter
 from .worker_heartbeat import write_worker_heartbeat
 
 logger = logging.getLogger(__name__)
+
+
+def _active_scan_adapters(cfg: AppConfig) -> list[SourceAdapter]:
+    """Adapters con escaneo habilitado, ordenados por `scan_priority`.
+
+    El worker es agnóstico a la fuente: agregar un canal = registrar su adapter,
+    sin tocar este módulo.
+    """
+    adapters = [get_adapter(source) for source in registered_sources()]
+    active = [
+        adapter
+        for adapter in adapters
+        if adapter.capabilities.scan_listings and adapter.scan_enabled(cfg)
+    ]
+    return sorted(active, key=lambda adapter: (adapter.scan_priority, adapter.source))
 
 _CATALOG_SYNC_RETRIES = 3
 _CATALOG_SYNC_BACKOFF_SECONDS = 5
@@ -87,14 +100,12 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
     _acquire_worker_lock(data_dir)
     init_db(cfg.database_url)
     poll_s = cfg.poll_interval_seconds
-    watch_s = cfg.watchlist_refresh_seconds
+
+    adapters = _active_scan_adapters(cfg)
 
     logger.info(
-        "Worker iniciado — scan %s (%ss), watchlist %s (%ss), tenant: %s",
-        cfg.poll_interval,
-        poll_s,
-        cfg.watchlist_refresh_interval,
-        watch_s,
+        "Worker iniciado — fuentes: %s, tenant: %s",
+        ", ".join(adapter.source for adapter in adapters) or "(ninguna)",
         cfg.tenant_id,
     )
 
@@ -107,54 +118,45 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
     write_worker_heartbeat(data_dir, poll_interval_seconds=poll_s)
 
     now = time.time()
-    next_scan_at = now
-    next_adp_scan_at = now
-    next_watch_at = now
-    next_adp_watch_at = now
+    next_scan_at = {adapter.source: now for adapter in adapters}
+    next_watch_at = {adapter.source: now for adapter in adapters}
 
     while True:
         now = time.time()
         session = session_factory()
-        n = 0
-        w = 0
-        adp_n = 0
-        adp_w = 0
-        ran_scan = False
-        ran_watch = False
-        ran_adp_scan = False
-        ran_adp_watch = False
+        scan_counts: dict[str, int] = {}
+        watch_counts: dict[str, int] = {}
         try:
-            if now >= next_scan_at:
-                scanner = MultiEntityScanner(cfg, session)
-                n = scanner.run_once()
-                next_scan_at = now + poll_s
-                ran_scan = True
-            if cfg.adp.enabled and now >= next_adp_scan_at:
-                adp_scanner = AdpScanner(cfg, session)
-                adp_n = adp_scanner.run_once()
-                next_adp_scan_at = now + cfg.adp.poll_interval_seconds
-                ran_adp_scan = True
-            if now >= next_watch_at:
-                w = refresh_watchlist_processes(cfg, session)
-                next_watch_at = now + watch_s
-                ran_watch = True
-            if cfg.adp.enabled and now >= next_adp_watch_at:
-                adp_w = refresh_adp_watchlist(cfg, session)
-                next_adp_watch_at = now + watch_s
-                ran_adp_watch = True
-            if ran_scan or ran_watch or ran_adp_scan or ran_adp_watch:
-                session.commit()
-            if n or w or adp_n or adp_w:
-                logger.info(
-                    "Ciclo completado: SEACE %s nuevo(s), %s watch; ADP %s nuevo(s), %s watch",
-                    n,
-                    w,
-                    adp_n,
-                    adp_w,
+            # Escaneos primero (en orden de prioridad), luego watchlists.
+            # Cada adapter commitea/rollbackea por separado: el fallo de una fuente no
+            # debe descartar el trabajo ya confirmado de otra.
+            for adapter in adapters:
+                if now >= next_scan_at[adapter.source]:
+                    try:
+                        scan_counts[adapter.source] = adapter.scan(cfg, session)
+                        session.commit()
+                        next_scan_at[adapter.source] = now + adapter.scan_interval_seconds(cfg)
+                    except Exception:
+                        session.rollback()
+                        next_scan_at[adapter.source] = now + adapter.scan_interval_seconds(cfg)
+                        logger.exception("Error escaneando fuente %s", adapter.source)
+            for adapter in adapters:
+                if now >= next_watch_at[adapter.source]:
+                    try:
+                        watch_counts[adapter.source] = adapter.refresh_watchlist(cfg, session)
+                        session.commit()
+                        next_watch_at[adapter.source] = now + adapter.watch_interval_seconds(cfg)
+                    except Exception:
+                        session.rollback()
+                        next_watch_at[adapter.source] = now + adapter.watch_interval_seconds(cfg)
+                        logger.exception("Error en watchlist de fuente %s", adapter.source)
+            if any(scan_counts.values()) or any(watch_counts.values()):
+                summary = "; ".join(
+                    f"{source} {scan_counts.get(source, 0)} nuevo(s)/"
+                    f"{watch_counts.get(source, 0)} watch"
+                    for source in sorted(set(scan_counts) | set(watch_counts))
                 )
-        except Exception:
-            session.rollback()
-            logger.exception("Error en ciclo de escaneo/watchlist")
+                logger.info("Ciclo completado: %s", summary)
         finally:
             session.close()
 
@@ -162,11 +164,14 @@ def run_worker(config: AppConfig | None = None, once: bool = False) -> None:
 
         if once:
             break
-        sleep_for = seconds_until_next_wake(
-            time.time(),
-            min(next_scan_at, next_adp_scan_at),
-            min(next_watch_at, next_adp_watch_at),
-        )
+        if next_scan_at:
+            sleep_for = seconds_until_next_wake(
+                time.time(),
+                min(next_scan_at.values()),
+                min(next_watch_at.values()),
+            )
+        else:
+            sleep_for = float(poll_s)
         time.sleep(sleep_for)
 
 

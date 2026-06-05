@@ -13,8 +13,10 @@ from .auto_reject import AutoRejectRule, apply_auto_reject_rules, load_auto_reje
 from .client import ProcessRow, SeaceClient
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus, utcnow
+from .feed import FeedRepository, record_autoreject_decision
 from .parser import extract_cronograma_fechas, parse_ficha, row_snapshot_hash
 from .scan_options import ScanOptions, passes_date_filter
+from .seace_search import normalize_nomenclatura
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +27,132 @@ _FICHA_REFRESH_STATUSES = frozenset(
     }
 )
 
+# Estados "reclamados": ya seguimos/trabajamos el proceso (descarga/análisis/portafolio).
+# Cuando SEACE re-publica un proceso interrumpido reasigna el nid pero conserva la
+# nomenclatura; el scanner contrasta por nomenclatura (UID de negocio) contra estas
+# filas para fusionar el scan en un update en vez de crear un duplicado `publicada`.
+_REPUBLICATION_CLAIMED_STATUSES = frozenset(
+    {
+        ProcessStatus.descargando,
+        ProcessStatus.descargada,
+        ProcessStatus.analizada,
+        ProcessStatus.portafolio,
+    }
+)
+
+
+# Orden de avance entre estados reclamados (mayor = más trabajo invertido). Sirve para
+# desempatar si dos procesos reclamados comparten nomenclatura (datos legacy).
+_CLAIMED_STATUS_RANK = {
+    ProcessStatus.descargando: 0,
+    ProcessStatus.descargada: 1,
+    ProcessStatus.analizada: 2,
+    ProcessStatus.portafolio: 3,
+}
+
+
+def _nid_int(value: str | None) -> int:
+    """nid SEACE como entero (crece con el tiempo); -1 si no es numérico."""
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return -1
+
+
+def _nid_advances(current: str | None, new: str | None) -> bool:
+    """¿`new` es un nid más reciente que `current`? (nunca regresar identidad)."""
+    new_n = _nid_int(new)
+    if new_n < 0:
+        return False
+    cur_n = _nid_int(current)
+    return cur_n < 0 or new_n > cur_n
+
+
+def is_removable_publicada_duplicate(proc: Process) -> bool:
+    """¿`proc` es un duplicado `publicada` sin datos propios (seguro de borrar)?"""
+    return (
+        proc.status == ProcessStatus.publicada
+        and not proc.data_dir
+        and proc.analysis is None
+    )
+
+
+def build_claimed_nomenclatura_map(processes: list[Process]) -> dict[str, Process]:
+    """Mapa nomenclatura-normalizada → proceso reclamado preferido.
+
+    Ante varios reclamados con la misma nomenclatura (datos legacy / fusión incompleta)
+    elige el más avanzado y, a igualdad, el de nid más reciente, y lo registra en logs;
+    así la reconciliación no depende del orden no determinístico de la consulta.
+    """
+    mapping: dict[str, Process] = {}
+    for proc in processes:
+        key = normalize_nomenclatura(proc.nomenclatura)
+        if not key:
+            continue
+        current = mapping.get(key)
+        if current is None:
+            mapping[key] = proc
+            continue
+        logger.warning(
+            "Nomenclatura duplicada entre reclamados: %s (id=%s estado=%s vs id=%s estado=%s)",
+            key,
+            current.id,
+            current.status.value if current.status else "?",
+            proc.id,
+            proc.status.value if proc.status else "?",
+        )
+        if _claimed_is_preferred(proc, current):
+            mapping[key] = proc
+    return mapping
+
+
+def _claimed_is_preferred(candidate: Process, current: Process) -> bool:
+    """¿`candidate` representa mejor al item que `current`? (más avanzado, luego nid)."""
+    cand_rank = _CLAIMED_STATUS_RANK.get(candidate.status, -1)
+    cur_rank = _CLAIMED_STATUS_RANK.get(current.status, -1)
+    if cand_rank != cur_rank:
+        return cand_rank > cur_rank
+    return _nid_int(candidate.source_ref) > _nid_int(current.source_ref)
+
+
+def adopt_republication(
+    session, claimed: Process, existing: Process | None, row
+) -> None:
+    """Fusiona una re-publicación en el item ya reclamado `claimed`.
+
+    `existing` es la fila hallada por `source_ref` (nuevo nid) si la hubiera: si es un
+    duplicado `publicada` sin datos, se elimina para liberar la identidad. Si la
+    identidad queda libre (o no existía) y el nid **avanza** (no regresar a un nid ya
+    superado en el mismo scan), se adopta el nuevo nid en `claimed`. El refresco de
+    contenido (cronograma/documentos) lo sigue gobernando el watchlist, que resuelve por
+    nomenclatura y preserva docs/changelog.
+    """
+    if existing is not None and is_removable_publicada_duplicate(existing):
+        session.delete(existing)
+        session.flush()
+        existing = None
+    if existing is None and _nid_advances(claimed.source_ref, row.nid_proceso):
+        logger.info(
+            "Re-publicación %s: adopto nid %s → %s en proceso id=%s (%s)",
+            row.nomenclatura,
+            claimed.source_ref,
+            row.nid_proceso,
+            claimed.id,
+            claimed.status.value if claimed.status else "?",
+        )
+        claimed.source_ref = row.nid_proceso
+        claimed.nid_proceso = row.nid_proceso
+        if row.reiniciado_desde:
+            claimed.reiniciado_desde = row.reiniciado_desde
+        claimed.list_hash = row_snapshot_hash(row)
+    claimed.last_seen_at = utcnow()
+
 
 class MultiEntityScanner:
     def __init__(self, config: AppConfig, session: Session) -> None:
         self.config = config
         self.session = session
+        self.feed = FeedRepository(session)
         self.auto_reject_rules: list[AutoRejectRule] = load_auto_reject_rules(config)
 
     def run_once(self, options: ScanOptions | None = None) -> int:
@@ -76,6 +199,8 @@ class MultiEntityScanner:
         )
         new_count = 0
         seen_nids: set[str] = set()
+        claimed_by_nomenclatura = self._claimed_nomenclatura_map(entity)
+        publicada_by_nomenclatura = self._publicada_nomenclatura_map(entity)
 
         first_soup = None
         max_pages = self.config.max_pages
@@ -106,21 +231,51 @@ class MultiEntityScanner:
                     continue
                 seen_nids.add(row.nid_proceso)
                 list_hash = row_snapshot_hash(row)
-                proc = (
-                    self.session.query(Process)
-                    .filter(
-                        Process.source == "seace",
-                        Process.entity_id == entity.id,
-                        Process.source_ref == row.nid_proceso,
-                    )
-                    .one_or_none()
+                proc = self.feed.find_by_ref("seace", entity.id, row.nid_proceso)
+
+                claimed = claimed_by_nomenclatura.get(
+                    normalize_nomenclatura(row.nomenclatura)
                 )
+                if claimed is not None and claimed is not proc:
+                    # Re-publicación de un proceso ya reclamado: fusionar, no duplicar.
+                    savepoint = self.session.begin_nested()
+                    try:
+                        adopt_republication(self.session, claimed, proc, row)
+                        savepoint.commit()
+                    except Exception:
+                        savepoint.rollback()
+                        logger.exception(
+                            "Error fusionando re-publicación nid=%s nomenclatura=%s",
+                            row.nid_proceso,
+                            row.nomenclatura,
+                        )
+                    continue
 
                 if proc is not None and proc.status in (
                     ProcessStatus.descartada,
                     ProcessStatus.archivada,
                 ):
                     proc.last_seen_at = utcnow()
+                    continue
+
+                # Dedupe del feed puro: re-publicación entre filas `publicada` (mismo UID
+                # de negocio, nid nuevo). Mantener un solo `publicada` adoptando el nid más
+                # reciente, en vez de dejar dos publicadas paralelas para la misma licitación.
+                pub = publicada_by_nomenclatura.get(
+                    normalize_nomenclatura(row.nomenclatura)
+                )
+                if pub is not None and pub is not proc:
+                    savepoint = self.session.begin_nested()
+                    try:
+                        adopt_republication(self.session, pub, proc, row)
+                        savepoint.commit()
+                    except Exception:
+                        savepoint.rollback()
+                        logger.exception(
+                            "Error dedup re-publicación publicada nid=%s nomenclatura=%s",
+                            row.nid_proceso,
+                            row.nomenclatura,
+                        )
                     continue
 
                 savepoint = self.session.begin_nested()
@@ -130,6 +285,21 @@ class MultiEntityScanner:
                             entity, client, row, proc=None, options=options, list_page=page
                         ):
                             new_count += 1
+                        # Mantener el mapa de dedupe al día dentro del mismo escaneo: si
+                        # otra fila de este ciclo trae la misma nomenclatura con otro nid,
+                        # debe fusionarse en esta `publicada` recién creada, no duplicarla.
+                        created = self.feed.find_by_ref(
+                            "seace", entity.id, row.nid_proceso
+                        )
+                        if created is not None and created.status == ProcessStatus.publicada:
+                            key = normalize_nomenclatura(row.nomenclatura)
+                            prev = publicada_by_nomenclatura.get(key) if key else None
+                            if key and (
+                                prev is None
+                                or _nid_int(created.source_ref)
+                                >= _nid_int(prev.source_ref)
+                            ):
+                                publicada_by_nomenclatura[key] = created
                     elif proc.list_hash != list_hash:
                         self._upsert_from_ficha(
                             entity, client, row, proc=proc, options=options, list_page=page
@@ -153,6 +323,36 @@ class MultiEntityScanner:
                     )
 
         return new_count
+
+    def _claimed_nomenclatura_map(self, entity: Entity) -> dict[str, Process]:
+        """Mapa nomenclatura-normalizada → proceso reclamado de la entidad.
+
+        Permite contrastar cada fila escaneada por UID de negocio (nomenclatura) contra
+        los procesos ya descargados/analizados, en vez de por el nid que SEACE reasigna.
+        """
+        claimed = self.feed.claimed_for_entity(
+            "seace", entity.id, _REPUBLICATION_CLAIMED_STATUSES
+        )
+        return build_claimed_nomenclatura_map(claimed)
+
+    def _publicada_nomenclatura_map(self, entity: Entity) -> dict[str, Process]:
+        """Mapa nomenclatura-normalizada → `publicada` preferida (nid más reciente).
+
+        Permite deduplicar re-publicaciones dentro del feed puro: si la misma licitación
+        aparece dos veces como `publicada` (nid reasignado), conservamos una sola fila.
+        """
+        rows = self.feed.by_status_for_entity(
+            "seace", entity.id, (ProcessStatus.publicada,)
+        )
+        mapping: dict[str, Process] = {}
+        for proc in rows:
+            key = normalize_nomenclatura(proc.nomenclatura)
+            if not key:
+                continue
+            current = mapping.get(key)
+            if current is None or _nid_int(proc.source_ref) > _nid_int(current.source_ref):
+                mapping[key] = proc
+        return mapping
 
     def _needs_ficha_refresh(self, proc: Process) -> bool:
         if proc.status not in _FICHA_REFRESH_STATUSES:
@@ -229,15 +429,25 @@ class MultiEntityScanner:
         proc.content_hash = ficha.content_hash()
         proc.last_seen_at = utcnow()
         proc.updated_at = datetime.now(timezone.utc)
-        match = apply_auto_reject_rules(proc, entity, self.auto_reject_rules)
+        # Autoreject solo en el alta del proceso. Los cambios de reglas NO se aplican
+        # automática ni silenciosamente a publicaciones existentes; eso se hace de forma
+        # explícita y por canal desde el editor de reglas (Settings → autoreject).
+        match = (
+            apply_auto_reject_rules(proc, entity, self.auto_reject_rules)
+            if is_new
+            else None
+        )
+        self.session.flush()
         if match is not None:
+            record_autoreject_decision(
+                self.session, proc, rule_id=match.id, reason=proc.auto_reject_reason
+            )
             logger.info(
                 "Autorechazado %s por regla %s — %s",
                 row.nid_proceso,
                 match.id,
                 row.nomenclatura,
             )
-        self.session.flush()
 
         logger.info(
             "%s %s — %s",

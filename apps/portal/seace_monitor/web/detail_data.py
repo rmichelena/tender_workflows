@@ -99,6 +99,7 @@ class DocumentoNodo:
     default_checked: bool = False
     analyzed: bool = False
     is_new: bool = False
+    seace_removed: bool = False
     is_folder: bool = False
     children: list[DocumentoNodo] = field(default_factory=list)
 
@@ -323,6 +324,7 @@ def _node_from_path(
         downloaded=True,
         previewable=suffix == ".pdf",
         selectable=suffix in ANALYZABLE_SUFFIXES,
+        seace_removed=bool(merged.get("seace_removed")),
     )
 
 
@@ -384,6 +386,7 @@ def _missing_document_node(meta: dict, uuid_index: dict[str, dict]) -> Documento
         origen="descarga SEACE",
         uuid=uuid,
         downloaded=False,
+        seace_removed=bool(merged.get("seace_removed")),
     )
 
 
@@ -526,6 +529,11 @@ def build_document_tree(
             for node in _walk_document_nodes(nodes):
                 if node.is_new and node.selectable:
                     node.default_checked = True
+
+    for node in nodes:
+        if node.seace_removed:
+            for child in _walk_document_nodes(node.children):
+                child.seace_removed = True
 
     return nodes
 

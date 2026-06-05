@@ -539,3 +539,156 @@ def test_refresh_persists_post_download_document_names(
     by_uuid = {item["uuid"]: item for item in stored}
     assert by_uuid["u2"]["nombre"] == "Canonical-u2.pdf"
     assert by_uuid["u2"]["archivo"] == "Canonical-u2.pdf"
+
+
+def _make_disk_zip(docs_dir: Path, name: str) -> None:
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(docs_dir / name, "w") as zf:
+        zf.writestr("inside.pdf", b"pdf-content")
+
+
+def test_refresh_preserves_downloaded_doc_removed_from_ficha(
+    watch_session: Session, tmp_path: Path
+):
+    """SEACE retira un doc ya descargado (re-publicación) → se conserva marcado."""
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[
+            {"uuid": "u1", "nombre": "a.pdf", "tipo_descarga": "3"},
+            {"uuid": "u2", "nombre": "pack.zip", "archivo": "pack.zip", "tipo_descarga": "3"},
+        ],
+    )
+    proc.fecha_publicacion = "01/01/26"
+    watch_session.flush()
+    _make_disk_zip(Path(proc.data_dir) / "documentos", "pack.zip")
+    ficha = _ficha_with_docs([Documento("u1", "a.pdf", "", "", "", "", "3")])
+
+    with (
+        patch("seace_monitor.watchlist.open_ficha_for_process", return_value=_open_ficha_result(_row(proc.nid_proceso))),
+        patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
+        patch("seace_monitor.watchlist.download_and_store_document"),
+    ):
+        assert _refresh_watchlist_process(cfg, watch_session, proc) is True
+
+    by_uuid = {d["uuid"]: d for d in json.loads(proc.documentos_json or "[]")}
+    assert set(by_uuid) == {"u1", "u2"}  # u2 se conserva pese a salir de la ficha
+    assert by_uuid["u2"].get("seace_removed") is True
+    assert by_uuid["u2"].get("seace_removed_at")
+    assert "seace_removed" not in by_uuid["u1"]
+    # El manifest también conserva el doc histórico (build_document_tree lo itera).
+    manifest = json.loads((Path(proc.data_dir) / "documentos" / "manifest.json").read_text())
+    docs_manifest = manifest.get("documentos", manifest) if isinstance(manifest, dict) else manifest
+    assert any(d.get("uuid") == "u2" for d in docs_manifest)
+    # El changelog registra el retiro una sola vez.
+    changes = json.loads(proc.watch_changelog_json or "[]")[0]["changes"]
+    assert any(c["area"] == "documento" and c["kind"] == "removed" for c in changes)
+
+
+def test_refresh_does_not_rechurn_already_preserved_doc(
+    watch_session: Session, tmp_path: Path
+):
+    """Tras conservar un doc retirado, un refresh idéntico no genera más cambios."""
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[
+            {"uuid": "u1", "nombre": "a.pdf", "tipo_descarga": "3"},
+            {
+                "uuid": "u2",
+                "nombre": "pack.zip",
+                "archivo": "pack.zip",
+                "tipo_descarga": "3",
+                "seace_removed": True,
+                "seace_removed_at": "2026-05-29T00:00:00+00:00",
+            },
+        ],
+    )
+    proc.fecha_publicacion = "01/01/26"
+    watch_session.flush()
+    _make_disk_zip(Path(proc.data_dir) / "documentos", "pack.zip")
+    docs_before = proc.documentos_json
+    ficha = _ficha_with_docs([Documento("u1", "a.pdf", "", "", "", "", "3")])
+
+    with (
+        patch("seace_monitor.watchlist.open_ficha_for_process", return_value=_open_ficha_result(_row(proc.nid_proceso))),
+        patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
+        patch("seace_monitor.watchlist.download_and_store_document"),
+    ):
+        assert _refresh_watchlist_process(cfg, watch_session, proc) is False
+
+    assert proc.documentos_json == docs_before  # sin cambios
+    assert proc.watch_changelog_json is None  # sin nueva entrada
+
+
+def test_refresh_revives_preserved_doc_when_it_reappears(
+    watch_session: Session, tmp_path: Path
+):
+    """Si el doc retirado vuelve a la ficha, la ficha manda y se quita la marca."""
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[
+            {"uuid": "u1", "nombre": "a.pdf", "tipo_descarga": "3"},
+            {
+                "uuid": "u2",
+                "nombre": "pack.zip",
+                "archivo": "pack.zip",
+                "tipo_descarga": "3",
+                "seace_removed": True,
+                "seace_removed_at": "2026-05-29T00:00:00+00:00",
+            },
+        ],
+    )
+    proc.fecha_publicacion = "01/01/26"
+    watch_session.flush()
+    _make_disk_zip(Path(proc.data_dir) / "documentos", "pack.zip")
+    ficha = _ficha_with_docs(
+        [
+            Documento("u1", "a.pdf", "", "", "", "", "3"),
+            Documento("u2", "pack.zip", "", "", "", "", "3"),
+        ]
+    )
+
+    with (
+        patch("seace_monitor.watchlist.open_ficha_for_process", return_value=_open_ficha_result(_row(proc.nid_proceso))),
+        patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
+        patch("seace_monitor.watchlist.download_and_store_document"),
+    ):
+        assert _refresh_watchlist_process(cfg, watch_session, proc) is True
+
+    by_uuid = {d["uuid"]: d for d in json.loads(proc.documentos_json or "[]")}
+    assert set(by_uuid) == {"u1", "u2"}
+    assert not by_uuid["u2"].get("seace_removed")  # vuelve a estar viva
+
+
+def test_refresh_does_not_preserve_removed_doc_without_file(
+    watch_session: Session, tmp_path: Path
+):
+    """Un doc retirado que nunca se descargó (sin archivo) no se conserva."""
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[
+            {"uuid": "u1", "nombre": "a.pdf", "tipo_descarga": "3"},
+            {"uuid": "u2", "nombre": "b.pdf", "tipo_descarga": "3"},
+        ],
+    )
+    proc.fecha_publicacion = "01/01/26"
+    watch_session.flush()
+    (Path(proc.data_dir) / "documentos").mkdir(parents=True, exist_ok=True)
+    ficha = _ficha_with_docs([Documento("u1", "a.pdf", "", "", "", "", "3")])
+
+    with (
+        patch("seace_monitor.watchlist.open_ficha_for_process", return_value=_open_ficha_result(_row(proc.nid_proceso))),
+        patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
+        patch("seace_monitor.watchlist.download_and_store_document"),
+    ):
+        assert _refresh_watchlist_process(cfg, watch_session, proc) is True
+
+    by_uuid = {d["uuid"]: d for d in json.loads(proc.documentos_json or "[]")}
+    assert set(by_uuid) == {"u1"}  # u2 sin archivo se descarta

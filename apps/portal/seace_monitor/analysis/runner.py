@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..config import AppConfig
 from ..db.models import AnalysisResult, Process, ProcessStatus, utcnow
+from ..ingest import get_adapter
 from ..list_order import (
     enter_analizados_list,
     enter_descargados_list,
@@ -33,7 +34,7 @@ from ..seace_search import (
     open_ficha_for_process,
 )
 from .analysis_lock import AnalysisBusyError, analysis_lock
-from .document_prep import extract_archives, resolve_selected_documents
+from .document_prep import resolve_selected_documents
 from .fast_reader import run_fast_analysis
 from .tender_bridge import run_tender_stage1
 from ..web.detail_data import save_analyzed_files
@@ -89,27 +90,20 @@ class AnalysisRunner:
                 f"Estado inválido para descarga: {process.status.value}"
             )
 
-        entity = process.entity
         proc_dir = process_data_dir(self.config, process)
         docs_dir = proc_dir / "documentos"
         docs_dir.mkdir(parents=True, exist_ok=True)
 
-        # Liberar SQLite antes del fetch SEACE (puede tardar varios segundos).
+        adapter = get_adapter(process.source)
+
+        # Liberar SQLite antes del fetch (puede tardar varios segundos).
         self.session.commit()
 
-        # Seleccionar downloader según source
-        if process.source == "adp_portal":
-            docs = self._fetch_documentos_from_adp(process)
-        else:
-            docs = self._fetch_documentos_from_seace(process, entity.ruc)
+        docs = adapter.resolve_document_index(self, process)
         self.session.commit()
 
         try:
-            if process.source == "adp_portal":
-                self._fetch_adp_documents(docs, docs_dir)
-            else:
-                self._fetch_documents(docs, docs_dir)
-                extract_archives(docs_dir)
+            adapter.fetch_documents(self, docs, docs_dir)
         except Exception:
             cleanup_partial_downloads(docs_dir)
             process = self.session.get(Process, process_id)

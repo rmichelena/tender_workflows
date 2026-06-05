@@ -93,7 +93,7 @@
 
 {% macro doc_tree(nodes, process_id, route_prefix, selectable=false, analizando=false) %}
 {% for node in nodes %}
-<li class="doc-item doc-tree-item{% if node.is_new %} doc-item-new{% endif %}{% if not node.downloaded %} doc-item-missing{% endif %}{% if node.is_folder %} doc-item-folder{% endif %}">
+<li class="doc-item doc-tree-item{% if node.is_new %} doc-item-new{% endif %}{% if not node.downloaded %} doc-item-missing{% endif %}{% if node.seace_removed %} doc-item-removed{% endif %}{% if node.is_folder %} doc-item-folder{% endif %}">
   <div class="doc-row">
     {% if selectable %}
       {% if node.selectable %}
@@ -106,7 +106,7 @@
     {% endif %}
     {{ file_icon(node) }}
     <div class="doc-meta">
-      <div class="doc-name">{{ node.nombre }}{% if node.analyzed %}<span class="doc-analyzed-tag">analizado</span>{% endif %}{{ doc_fecha(node.fecha_publicacion) }}</div>
+      <div class="doc-name">{{ node.nombre }}{% if node.analyzed %}<span class="doc-analyzed-tag">analizado</span>{% endif %}{% if node.seace_removed %}<span class="doc-removed-tag" title="SEACE retiró este documento al re-publicar el proceso; se conserva el que ya habíamos descargado">ya no en SEACE</span>{% endif %}{{ doc_fecha(node.fecha_publicacion) }}</div>
       {% if node.etapa or node.tipo_documento or node.origen %}
       <div class="doc-sub muted">
         {% if node.etapa %}{{ node.etapa }}{% endif %}

@@ -2,7 +2,25 @@
 
 Decisiones transversales para que el portal, los datos en disco y la capa agentica escalen a **varios usuarios sin un stack Docker por persona**.
 
-**Relacionado:** [ARCHITECTURE.md](ARCHITECTURE.md), [HERMES_VPS.md](HERMES_VPS.md), [ROADMAP.md](ROADMAP.md) Fase 4.
+**Relacionado:** [INGEST_CONTRACT.md](INGEST_CONTRACT.md) (modelo feed/pipeline + capas), [ARCHITECTURE.md](ARCHITECTURE.md), [HERMES_VPS.md](HERMES_VPS.md), [ROADMAP.md](ROADMAP.md) Fase 4.
+
+---
+
+## Principio rector: lo compartido no lleva `tenant_id`, lo privado sí
+
+El multi-tenant se modela en **tres capas** (detalle en [INGEST_CONTRACT.md §4](INGEST_CONTRACT.md#4-pilar-3--multi-tenant-por-capas)):
+
+| Capa | Tenant | Qué incluye |
+|------|--------|-------------|
+| **Feed** (descubrimiento) | **compartido** | Resultado de los scanners; **se escanea una sola vez** para todos. Datos públicos (licitaciones). **Sin `tenant_id`**. |
+| **Overlay** (decisiones) | por tenant | Reglas de autoreject, exempt/visto/oculto, **selección de entidades**. |
+| **Pipeline** (trabajo) | por tenant | Descargadas, analizadas, oportunidades, análisis. Aislamiento estricto. **Siempre `tenant_id`**. |
+
+**Implicaciones que corrigen supuestos previos:**
+
+- **No repetir scanners por tenant.** El scan es el valor y el costo (proxies, sesiones JSF, rate-limits). Un solo scan alimenta el feed compartido.
+- **El autoreject es un overlay por tenant, NO se ejecuta en el scanner.** El scanner registra el item crudo en el feed; cada tenant lo filtra con SUS reglas. `autorejected`/`auto_reject_exempt` dejan de ser estado global del item.
+- **La selección de entidades es por tenant; el worker escanea la unión.** Cada tenant ve solo las entidades que eligió (filtro del overlay).
 
 ---
 
@@ -11,7 +29,7 @@ Decisiones transversales para que el portal, los datos en disco y la capa agenti
 1. **Un solo despliegue** de portal + worker (+ opcionalmente un gateway de mensajería). No `docker compose` por usuario.
 2. **Partición en disco por tenant** (usuario u organización): settings, cookies SEACE, expedientes, sesiones agente.
 3. **Dropbox fuera** del camino crítico (sync lento, permisos, no multi-tenant). Datos en volumen host o object storage.
-4. **BD es fuente de verdad** para ownership, permisos y estado; el filesystem refleja `tenant_id` + `process_id`.
+4. **BD es fuente de verdad** para ownership, permisos y estado; el filesystem refleja `tenant_id` + `process_id`. El **feed compartido** es la excepción: no se particiona por tenant.
 5. **Hermes es un adapter opcional** de canal/agente, no el dueño del modelo de usuarios ni de los expedientes.
 6. **Migración suave:** hoy un tenant implícito `default`; mañana `users` + `organizations` sin mover el monorepo.
 
@@ -23,14 +41,23 @@ Decisiones transversales para que el portal, los datos en disco y la capa agenti
 erDiagram
   Organization ||--o{ Membership : has
   User ||--o{ Membership : has
-  Organization ||--o{ Process : owns
-  User ||--o{ Process : created_by
-  Organization ||--o{ EntityMonitor : monitors
-  Process {
+  Organization ||--o{ PipelineItem : owns
+  User ||--o{ PipelineItem : created_by
+  Organization ||--o{ TenantFeedDecision : "filtra feed con"
+  FeedItem ||--o{ TenantFeedDecision : "es decidido por"
+  FeedItem ||--o{ PipelineItem : "promovido a (snapshot, sin FK)"
+  FeedItem {
     int id
-    string tenant_id
     string source
     string source_ref
+    string status_feed
+  }
+  PipelineItem {
+    uuid id
+    string tenant_id
+    string origin_source
+    string origin_source_ref
+    string lifecycle_phase
     string status
   }
 ```
@@ -40,9 +67,10 @@ erDiagram
 | **User** | Persona que inicia sesión en el portal |
 | **Organization** | Equipo / empresa (opcional al inicio; un user = una org) |
 | **Tenant** | Clave de partición en disco y en queries (`tenant_id` = org id o user id) |
-| **Process** | Oportunidad/licitación; siempre scoped a `tenant_id` |
+| **FeedItem** | Item descubierto por un scanner. **Compartido, sin `tenant_id`** |
+| **PipelineItem** | Lo que un tenant decidió trabajar; **siempre scoped a `tenant_id`** (reemplaza a `Process` como objeto privado) |
 
-Reglas de acceso: un usuario solo ve procesos de sus orgs; admin de org gestiona `entities` y reglas de prefiltro.
+Reglas de acceso: un usuario solo ve **su pipeline** y el feed filtrado por sus reglas; admin de org gestiona la **selección de entidades** y las **reglas de prefiltro** de su tenant. El feed crudo y el catálogo OSCE son compartidos.
 
 ---
 
@@ -88,12 +116,13 @@ El código actual usa `data/procesos/` → migración: `data_dir = {base}/tenant
 | Dato | Ubicación | Notas |
 |------|-----------|-------|
 | Settings LLM (GenAI / OpenRouter / Fireworks) | `tenants/{id}/settings/portal.yaml` + UI | Fase 2 roadmap |
-| Reglas prefiltro | `filter_rules.yaml` + columnas BD | Evaluadas en scanner |
-| Entidades SEACE | Tabla `Entity` (catálogo OSCE + flag `activa`) | UI Settings; hoy tenant `default` |
-| Documentos descargados | `tenants/{id}/procesos/.../documentos/` | Sin Dropbox |
+| Reglas prefiltro (autoreject) | `filter_rules.yaml` + overlay BD por tenant | **Evaluadas por tenant sobre el feed**, NO en el scanner |
+| Feed crudo (scanners) | Tabla `FeedItem` global | **Compartido**, sin `tenant_id`, autopurge >90d |
+| Catálogo de entidades | Tabla `Entity` (catálogo OSCE) | Compartido; la **selección `activa` es por tenant** |
+| Documentos descargados | `tenants/{id}/procesos/.../documentos/` | Sin Dropbox; parte del pipeline privado |
 | Cookies SEACE | `tenants/{id}/seace/` | Si varios usuarios abren SEACE distinto |
 | Sesión chat agente | BD + `tenants/{id}/agent/sessions/` | Portal es dueño del `session_id` |
-| SQLite/Postgres | global o por tenant | Empezar global con `tenant_id` en tablas |
+| SQLite/Postgres | feed global + pipeline por tenant | Empezar todo en una DB (feed sin `tenant_id`, pipeline con `tenant_id`); Fase 4 puede mover el pipeline a DB por tenant |
 
 ---
 
@@ -138,7 +167,7 @@ La decisión se pospone hasta Fase 4; el **filesystem por tenant** sirve para am
 | Dropbox / hermes-shared | No usar para SEACE | Symlinks a Dropbox en flujo automático |
 | Contenedores | 1× web, 1× worker, 0–1× Hermes gateway | 1× Hermes por usuario |
 | Paths en código | `tenant_data_dir(tenant_id)` helper | Hardcode `data/procesos/` |
-| BD | Preparar columna `tenant_id` nullable → `default` | Asumir un solo operador forever |
+| BD | `tenant_id` en pipeline/overlay → `default`; feed **sin** `tenant_id` | `tenant_id` en el feed; autoreject que mute el item compartido |
 | Integración agente | Pasar `tenant_id` + path absoluto al continuar | Copiar PDFs a otro árbol manual |
 | Permisos Unix | Grupo compartido o ACL por `tenants/{id}/` | root-only sin plan para uid 10000 |
 
@@ -151,8 +180,8 @@ La decisión se pospone hasta Fase 4; el **filesystem por tenant** sirve para am
 | **Ahora** | Tenant implícito `default`; documentar layout `tenants/` |
 | **Volumen Hermes** | Montar `/data` en portal + Hermes; paths bajo `tenants/default/` |
 | **Settings LLM** | Archivo por tenant desde el inicio |
-| **Prefiltros** | Reglas por tenant |
-| **Fase 4** | Auth, `users`, `organizations`, `tenant_id` en Process |
+| **Prefiltros** | Reglas por tenant, evaluadas como overlay sobre el feed compartido |
+| **Fase 4** | Auth, `users`, `organizations`, `tenant_id` en pipeline/overlay (no en feed); opcional pipeline en DB por tenant |
 | **Agente** | `home_dir = tenants/{id}/agent` o SDK con mismo path |
 
 ---
@@ -161,5 +190,5 @@ La decisión se pospone hasta Fase 4; el **filesystem por tenant** sirve para am
 
 1. Crear `/data/tenants/default/procesos/` y mover contenido de `data/procesos/`.
 2. Introducir `AppConfig.tenant_id = "default"` y helper de paths.
-3. Añadir `tenant_id` a modelos SQLAlchemy (default `'default'`).
+3. Separar `Process` en `FeedItem` (sin `tenant_id`) + `PipelineItem` (con `tenant_id`, default `'default'`) + overlay de decisiones por tenant; sacar el autoreject del scanner. Ver [INGEST_CONTRACT.md §7](INGEST_CONTRACT.md#7-plan-de-refactor-incremental-sin-romper-producción).
 4. Recrear Hermes con mount `/data:/data:rw` y `HERMES_HOME` o agent `home_dir` apuntando a subcarpeta (no todo `.hermes` mezclado con tenders).

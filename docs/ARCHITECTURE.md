@@ -2,8 +2,13 @@
 
 Documento de referencia del sistema integrado: monitoreo SEACE, portal, pipeline documental y fase agentica.
 
-**Estado:** refleja el código en `main` a mayo 2026.  
-**Relacionado:** [STAGES.md](STAGES.md) (modelo canónico A→D), [INPUT_SOURCES.md](INPUT_SOURCES.md), [ROADMAP.md](ROADMAP.md), [INTEGRATION.md](INTEGRATION.md).
+**Estado:** refleja el código en `main` a junio 2026 (incluye fuente SEACE + ADP).  
+**Relacionado:** [INGEST_CONTRACT.md](INGEST_CONTRACT.md) (arquitectura objetivo de plugins + feed/pipeline + multi-tenant), [STAGES.md](STAGES.md) (modelo canónico A→D), [INPUT_SOURCES.md](INPUT_SOURCES.md), [ROADMAP.md](ROADMAP.md), [INTEGRATION.md](INTEGRATION.md).
+
+> **Nota de arquitectura objetivo:** la multi-ingesta hoy funciona pero acopla el
+> comportamiento por `source` (branching + archivos `adp_*`/`seace_*` paralelos). El
+> diseño objetivo (contrato `SourceAdapter`, split feed/pipeline e identidad estable) está
+> en [INGEST_CONTRACT.md](INGEST_CONTRACT.md) y se ejecuta en la rama `ingest-plugin-contract`.
 
 ---
 
@@ -99,7 +104,9 @@ tender_workflows/
   apps/portal/seace_monitor/
     scanner.py          # Worker multi-entidad/cliente: listado + ficha JSF
     client.py           # Cliente SEACE (ViewState, paginación)
-    ingest/             # Registry/adapters de fuentes (`seace` hoy)
+    adp_*.py            # Fuente ADP (scanner/watchlist/downloader/client/parser)
+    ingest/             # Registry/adapters: HOY solo metadatos (source/label/capabilities);
+                        #   el contrato de comportamiento es objetivo → INGEST_CONTRACT.md
     analysis/
       runner.py         # download() + analyze()
       fast_reader.py    # Multi-PDF → Gemini free reader
@@ -183,7 +190,7 @@ stateDiagram-v2
 | `Process` | `source`, `source_ref`, `(entity_id, nid_proceso)` para SEACE, status, objeto, descripción, cronograma_json, data_dir, documentos_json |
 | `AnalysisResult` | status, alcance, requisitos, raw_json, timestamps |
 
-**Deuda de diseño acordada:** `Process` representa hoy el `PipelineItem` conceptual. No renombrar a `Opportunity`: oportunidad será `interest_status=opportunity`. Próximos campos: `workflow_profile`, `interest_status`, `trigger`/eventos y paquetes documentales. Ver [INPUT_SOURCES.md](INPUT_SOURCES.md) y [ROADMAP.md](ROADMAP.md).
+**Deuda de diseño acordada:** `Process` está hoy **sobrecargada** — es a la vez la fila del feed ruidoso (99% no interesa), el item de trabajo y el contenedor del análisis. El target la descompone en `FeedItem` (compartido, purgable) + `PipelineItem` (privado por tenant, identidad UUID estable, `ExternalRef` multi-canal) + overlay de decisiones por tenant. No renombrar a `Opportunity`: oportunidad será `interest_status=opportunity`. Próximos campos/ejes: `workflow_profile`, `interest_status`, `lifecycle_phase`, `trigger`/eventos y paquetes documentales. Detalle completo en [INGEST_CONTRACT.md](INGEST_CONTRACT.md); ver también [INPUT_SOURCES.md](INPUT_SOURCES.md) y [ROADMAP.md](ROADMAP.md).
 
 ---
 
@@ -209,6 +216,7 @@ stateDiagram-v2
 
 ## Referencias
 
+- [INGEST_CONTRACT.md](INGEST_CONTRACT.md) — arquitectura objetivo: contrato de plugins, feed/pipeline, multi-tenant por capas
 - [ROADMAP.md](ROADMAP.md) — fases y prioridades
 - [INPUT_SOURCES.md](INPUT_SOURCES.md) — fuentes, entrypoints, triggers y perfiles de lectura
 - [INTEGRATION.md](INTEGRATION.md) — detalle Paso 1 ↔ portal

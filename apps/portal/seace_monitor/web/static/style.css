@@ -230,6 +230,23 @@ table.data tr:hover td { background: #f8fafc; }
   vertical-align: middle;
 }
 
+.doc-removed-tag {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #fef3c7;
+  color: #92400e;
+  vertical-align: middle;
+  cursor: help;
+}
+.doc-item-removed .doc-name,
+.doc-item-removed .doc-name a {
+  color: var(--muted);
+}
+
 .btn {
   display: inline-block;
   padding: 0.35rem 0.7rem;
@@ -300,6 +317,19 @@ table.data td.status-cell { vertical-align: top; white-space: nowrap; }
 }
 .detail-box-wide {
   grid-column: 1 / -1;
+}
+
+.autoreject-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  margin: 0.75rem 0;
+}
+.autoreject-channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
 }
 
 .detail-split {

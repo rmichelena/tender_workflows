@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..db.list_views import build_process_list_views
 from ..db.models import Process, ProcessStatus
+from ..feed import FeedRepository
 from .sorting import (
     WORKFLOW_LIST_DEFAULT_SORT,
     WORKFLOW_LIST_SORT_COLUMNS,
@@ -34,9 +35,9 @@ def render_workflow_list(
     sort_col = normalize_sort(sort, default=WORKFLOW_LIST_DEFAULT_SORT)
     sort_dir = normalize_dir(dir, sort_col)
     rows = (
-        db.query(Process)
+        FeedRepository(db)
+        .query_by_status(statuses)
         .options(joinedload(Process.entity), joinedload(Process.analysis))
-        .filter(Process.status.in_(statuses))
         .all()
     )
     processes = sort_process_list_views(
