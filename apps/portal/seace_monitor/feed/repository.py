@@ -134,3 +134,67 @@ class FeedRepository:
             )
             .all()
         }
+
+    # --- Predicados "bi-régimen" (paso 0.3c-2) ---
+    # Resuelven la decisión efectiva combinando overlay + campos legacy de `Process`,
+    # con la regla "el overlay manda, fallback al legacy". Así las lecturas dan el mismo
+    # resultado mientras el scanner aún muta `status` (0.3c-2, doble escritura) y siguen
+    # correctas cuando deje de mutarlo (0.3c-3): el item autorejected quedará en
+    # `status=publicada` pero con decisión `autorejected` en el overlay.
+
+    def effective_autorejected_ids(
+        self, tenant_id: str = DEFAULT_TENANT_ID
+    ) -> set[int]:
+        """ids efectivamente autorejected (overlay manda; fallback a `status` legacy)."""
+        decisions = self.decisions_for_tenant(tenant_id)
+        overlay = {
+            fid for fid, d in decisions.items() if d == DECISION_AUTOREJECTED
+        }
+        legacy = {
+            row[0]
+            for row in self.session.query(Process.id)
+            .filter(Process.status == ProcessStatus.autorejected)
+            .all()
+            if row[0] not in decisions  # el overlay tiene prioridad si opinó
+        }
+        return overlay | legacy
+
+    def autoreject_reasons(
+        self, tenant_id: str = DEFAULT_TENANT_ID
+    ) -> dict[int, str | None]:
+        """Mapa ``feed_item_id -> motivo`` de las decisiones ``autorejected`` del tenant."""
+        return {
+            feed_item_id: reason
+            for feed_item_id, reason in (
+                self.session.query(
+                    TenantFeedDecision.feed_item_id, TenantFeedDecision.reason
+                )
+                .filter(
+                    TenantFeedDecision.tenant_id == tenant_id,
+                    TenantFeedDecision.decision == DECISION_AUTOREJECTED,
+                )
+                .all()
+            )
+        }
+
+    def decision_for(
+        self, process: Process, tenant_id: str = DEFAULT_TENANT_ID
+    ) -> str | None:
+        """Decisión del overlay para un item (``autorejected``|``exempt``|``None``)."""
+        if process.id is None:
+            return None
+        row = (
+            self.session.query(TenantFeedDecision.decision)
+            .filter_by(tenant_id=tenant_id, feed_item_id=process.id)
+            .one_or_none()
+        )
+        return row[0] if row is not None else None
+
+    def is_effectively_autorejected(
+        self, process: Process, tenant_id: str = DEFAULT_TENANT_ID
+    ) -> bool:
+        """¿El item está autorejected? (overlay manda; fallback a `status` legacy)."""
+        decision = self.decision_for(process, tenant_id)
+        if decision is not None:
+            return decision == DECISION_AUTOREJECTED
+        return process.status == ProcessStatus.autorejected

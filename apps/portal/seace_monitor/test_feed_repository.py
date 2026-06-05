@@ -130,3 +130,44 @@ def test_overlay_readers_match_legacy_status_fields():
     legacy_exempt = {p.id for p in procs if p.auto_reject_exempt}
     assert repo.autorejected_feed_ids() == legacy_rejected
     assert repo.exempt_feed_ids() == legacy_exempt
+
+
+def test_effective_autorejected_overlay_wins_over_status():
+    # Régimen post-0.3c-3: el scanner deja el item en status=publicada y registra la
+    # decisión solo en el overlay. El predicado efectivo debe detectarlo igual.
+    session = _session()
+    entity = _entity(session)
+    flipped = _proc(session, entity, ref="1", status=ProcessStatus.publicada)
+    record_autoreject_decision(session, flipped, rule_id="r", reason="r: x")
+    session.commit()
+
+    repo = FeedRepository(session)
+    assert repo.effective_autorejected_ids() == {flipped.id}
+    assert repo.is_effectively_autorejected(flipped) is True
+
+
+def test_effective_autorejected_legacy_fallback_without_overlay():
+    # Defensivo: item con status=autorejected legacy y sin fila en el overlay (p. ej.
+    # previo al backfill) sigue contando como autorejected.
+    session = _session()
+    entity = _entity(session)
+    legacy = _proc(session, entity, ref="2", status=ProcessStatus.autorejected)
+    session.commit()
+
+    repo = FeedRepository(session)
+    assert repo.effective_autorejected_ids() == {legacy.id}
+    assert repo.is_effectively_autorejected(legacy) is True
+
+
+def test_effective_autorejected_exempt_overlay_supersedes_legacy_status():
+    # Si el overlay dice 'exempt', manda sobre un status=autorejected legacy inconsistente.
+    session = _session()
+    entity = _entity(session)
+    proc = _proc(session, entity, ref="3", status=ProcessStatus.autorejected)
+    record_exempt_decision(session, proc)
+    session.commit()
+
+    repo = FeedRepository(session)
+    assert repo.effective_autorejected_ids() == set()
+    assert repo.is_effectively_autorejected(proc) is False
+    assert repo.decision_for(proc) == "exempt"

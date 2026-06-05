@@ -342,3 +342,24 @@ riesgo de comportamiento, comparando conteos por estado/lista en el VPS antes/de
 
 **Decisiones resueltas que aplican aquí:** ver §8 (dedup_key vía adapter, overlay
 materializado, sin rename físico hasta 0.3e, copia de docs por tenant).
+
+### 0.3c en detalle (sub-pasos)
+
+El paso 0.3c (mover autoreject al overlay) se ejecuta en micro-pasos deploy-safe:
+
+- **0.3c-1** ✅ — *Read seam en `FeedRepository`*: lectores `decisions_for_tenant`,
+  `autorejected_feed_ids`, `exempt_feed_ids` que derivan la decisión desde el overlay.
+  Aún no consumidos en producción; tests de paridad con los campos legacy.
+- **0.3c-1b** ✅ — *Limpieza de huérfanos del overlay*: `adopt_republication` purga la
+  decisión (cross-tenant) antes de borrar el feed item, y `init_db` corre una purga
+  one-shot idempotente (`_purge_orphan_feed_decisions`).
+- **0.3c-2** ✅ — *Lecturas bi-régimen*: las 4 lecturas (publicaciones, descartados,
+  dashboard, restaurar/descartar) resuelven autoreject con el predicado efectivo
+  `FeedRepository.effective_autorejected_ids` / `is_effectively_autorejected` (overlay
+  manda, fallback al `status` legacy). Behavior-preserving con doble escritura activa;
+  forward-compatible con el flip de 0.3c-3 (item autorejected queda en `status=publicada`
+  con decisión en el overlay). Tests simulan ambos regímenes.
+- **0.3c-3** ⏳ — *Flip del scanner*: `apply_auto_reject_rules` deja de mutar
+  `process.status` (escribe solo overlay) + migración one-shot de
+  `status=autorejected` legacy → `publicada` + decisión en overlay. Verificación de
+  conteos en VPS antes/después.

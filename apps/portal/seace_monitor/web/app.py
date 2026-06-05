@@ -14,7 +14,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Requ
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from ..analysis.runner import AnalysisRunner
@@ -28,7 +28,7 @@ from ..db.maintenance import (
 )
 from ..db.models import AnalysisResult, Entity, InterestStatus, Process, ProcessStatus
 from ..db.session import init_db, session_factory
-from ..feed import clear_feed_decision, record_exempt_decision
+from ..feed import FeedRepository, clear_feed_decision, record_exempt_decision
 from ..process_storage import (
     clear_process_download_metadata,
     delete_process_analysis,
@@ -272,6 +272,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             s.value: db.query(Process).filter(Process.status == s).count()
             for s in ProcessStatus
         }
+        # Bi-régimen (0.3c-2): autorejected/publicada por decisión efectiva. Hoy coincide
+        # con el status legacy; tras 0.3c-3 lo autorejected quedará en status=publicada y
+        # estos overrides evitan inflar "publicada" y vaciar "autorejected".
+        autorejected_ids = FeedRepository(db).effective_autorejected_ids()
+        counts[ProcessStatus.autorejected.value] = len(autorejected_ids)
+        publicada_q = db.query(Process).filter(
+            Process.status == ProcessStatus.publicada
+        )
+        if autorejected_ids:
+            publicada_q = publicada_q.filter(Process.id.notin_(autorejected_ids))
+        counts[ProcessStatus.publicada.value] = publicada_q.count()
         entities = db.query(Entity).filter(Entity.activa.is_(True)).count()
         recent = (
             db.query(Process)
@@ -301,6 +312,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         sort: str | None = None,
         dir: str | None = None,
     ):
+        # Bi-régimen (0.3c-2): excluir lo efectivamente autorejected. Hoy esos items ya
+        # están en status=autorejected (no entran al filtro); tras 0.3c-3 quedarán en
+        # status=publicada y se filtran por el overlay.
+        autorejected_ids = FeedRepository(db).effective_autorejected_ids()
         q = (
             db.query(Process)
             .options(joinedload(Process.entity))
@@ -310,6 +325,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 )
             )
         )
+        if autorejected_ids:
+            q = q.filter(Process.id.notin_(autorejected_ids))
         workflow_statuses = [ProcessStatus.publicada, ProcessStatus.descargando]
         valid_estado_values = {s.value for s in workflow_statuses}
         if estado:
@@ -332,7 +349,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         processes = sort_process_list_views(
             build_process_list_views(rows), sort_col, sort_dir
         )
-        entities = (
+        entities_q = (
             db.query(Entity)
             .join(Process, Process.entity_id == Entity.id)
             .filter(
@@ -340,25 +357,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     [ProcessStatus.publicada, ProcessStatus.descargando]
                 )
             )
-            .distinct()
-            .order_by(Entity.nombre)
-            .all()
         )
+        if autorejected_ids:
+            entities_q = entities_q.filter(Process.id.notin_(autorejected_ids))
+        entities = entities_q.distinct().order_by(Entity.nombre).all()
+        objetos_q = db.query(Process.objeto).filter(
+            Process.status.in_([ProcessStatus.publicada, ProcessStatus.descargando]),
+            Process.objeto.isnot(None),
+            Process.objeto != "",
+        )
+        if autorejected_ids:
+            objetos_q = objetos_q.filter(Process.id.notin_(autorejected_ids))
         objetos = [
-            row[0]
-            for row in (
-                db.query(Process.objeto)
-                .filter(
-                    Process.status.in_(
-                        [ProcessStatus.publicada, ProcessStatus.descargando]
-                    ),
-                    Process.objeto.isnot(None),
-                    Process.objeto != "",
-                )
-                .distinct()
-                .order_by(Process.objeto)
-                .all()
-            )
+            row[0] for row in objetos_q.distinct().order_by(Process.objeto).all()
         ]
         filtro_estado = estado or ""
         filtro_entidad = entidad or ""
@@ -485,23 +496,36 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         db: Session = Depends(get_db),
         estado: str = "",
     ):
-        status_filter = {
-            "descartada": [ProcessStatus.descartada],
-            "autorejected": [ProcessStatus.autorejected],
-        }.get(estado, [ProcessStatus.descartada, ProcessStatus.autorejected])
-        rows = (
-            db.query(Process)
-            .options(joinedload(Process.entity), joinedload(Process.analysis))
-            .filter(Process.status.in_(status_filter))
-            .order_by(Process.updated_at.desc())
-            .all()
+        # Bi-régimen (0.3c-2): "autorejected" se resuelve por el overlay (con fallback al
+        # status legacy), no solo por status==autorejected; "descartada" sigue por status.
+        repo = FeedRepository(db)
+        autorejected_ids = repo.effective_autorejected_ids()
+        autoreject_reasons = repo.autoreject_reasons()
+        base = db.query(Process).options(
+            joinedload(Process.entity), joinedload(Process.analysis)
         )
+        if estado == "descartada":
+            q = base.filter(Process.status == ProcessStatus.descartada)
+            if autorejected_ids:
+                q = q.filter(Process.id.notin_(autorejected_ids))
+        elif estado == "autorejected":
+            q = base.filter(
+                Process.id.in_(autorejected_ids) if autorejected_ids else False
+            )
+        else:
+            conds = [Process.status == ProcessStatus.descartada]
+            if autorejected_ids:
+                conds.append(Process.id.in_(autorejected_ids))
+            q = base.filter(or_(*conds))
+        rows = q.order_by(Process.updated_at.desc()).all()
         return render(
             request,
             "descartados.html",
             db=db,
             active_page="descartados",
             processes=rows,
+            autorejected_ids=autorejected_ids,
+            autoreject_reasons=autoreject_reasons,
             estado=estado if estado in ("descartada", "autorejected") else "",
         )
 
@@ -512,7 +536,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         estado: str = Form(""),
     ):
         proc = get_process_or_404(db, process_id, with_analysis=True)
-        was_autorejected = proc.status == ProcessStatus.autorejected
+        was_autorejected = FeedRepository(db).is_effectively_autorejected(proc)
         new_status = resolve_restore_status(_config, proc)
         if new_status == ProcessStatus.publicada:
             clear_process_download_metadata(proc)
@@ -535,7 +559,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             raise HTTPException(404)
         if proc.status == ProcessStatus.descartada:
             return _descartados_redirect(estado)
-        if proc.status != ProcessStatus.autorejected:
+        if not FeedRepository(db).is_effectively_autorejected(proc):
             raise HTTPException(400, "Solo autorejected puede descartarse desde Descartados")
         proc.status = ProcessStatus.descartada
         proc.auto_reject_reason = None
