@@ -18,7 +18,7 @@ from ..auto_reject import (
 )
 from ..config import AppConfig
 from ..db.models import Process, ProcessStatus
-from ..feed import record_autoreject_decision
+from ..feed import FeedRepository, record_autoreject_decision
 from ..ingest import get_adapter, registered_sources
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,11 @@ def register_autoreject_settings_routes(app, config: AppConfig, render, _get_db)
         rules = load_auto_reject_rules(config)
         applied = 0
         if rules:
-            procesos = (
+            # Bi-régimen (0.3c-2): tras el flip los items autorechazados quedan en
+            # status=publicada con la decisión en el overlay; excluirlos para no
+            # re-evaluarlos (mismo criterio que /publicaciones).
+            autorejected_ids = FeedRepository(db).effective_autorejected_ids()
+            q = (
                 db.query(Process)
                 .options(joinedload(Process.entity))
                 .filter(
@@ -108,8 +112,10 @@ def register_autoreject_settings_routes(app, config: AppConfig, render, _get_db)
                     Process.auto_reject_exempt.is_(False),
                     Process.source.in_(selected),
                 )
-                .all()
             )
+            if autorejected_ids:
+                q = q.filter(Process.id.notin_(autorejected_ids))
+            procesos = q.all()
             # Savepoint por proceso: el fallo en uno (p. ej. violación de constraint) no
             # debe descartar las decisiones ya aplicadas al resto del lote.
             for proc in procesos:

@@ -499,11 +499,21 @@ def test_overlay_autorejected_shown_in_descartados(tmp_path: Path):
 def test_overlay_autorejected_counts_in_dashboard(tmp_path: Path):
     app, _ = _seed_overlay_autorejected(tmp_path, "ov_dash.db")
     html = TestClient(app).get("/").text
-    # El item no debe inflar "publicada"; debe contar como autorejected.
     soup = BeautifulSoup(html, "lxml")
-    # No es trivial parsear el badge exacto; basta verificar que la página renderiza y
-    # que el item no aparece como publicación activa en el dashboard reciente.
-    assert soup is not None
+
+    # El único item está en status=publicada pero overlay=autorejected: la tarjeta
+    # "Publicadas" no debe contarlo.
+    publicadas_card = None
+    for card in soup.select(".card"):
+        label = card.select_one(".label")
+        if label and label.get_text(strip=True) == "Publicadas":
+            publicadas_card = card
+            break
+    assert publicadas_card is not None
+    assert publicadas_card.select_one(".num").get_text(strip=True) == "0"
+
+    # Tampoco debe aparecer en "Últimas publicaciones detectadas".
+    assert "OVERLAY-AUTO-1" not in html
 
 
 def test_overlay_autorejected_can_be_restored_and_discarded(tmp_path: Path):

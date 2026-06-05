@@ -14,7 +14,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Requ
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, or_
+from sqlalchemy import and_, false, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from ..analysis.runner import AnalysisRunner
@@ -284,13 +284,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             publicada_q = publicada_q.filter(Process.id.notin_(autorejected_ids))
         counts[ProcessStatus.publicada.value] = publicada_q.count()
         entities = db.query(Entity).filter(Entity.activa.is_(True)).count()
-        recent = (
-            db.query(Process)
-            .options(joinedload(Process.entity))
-            .order_by(Process.first_seen_at.desc())
-            .limit(10)
-            .all()
-        )
+        recent_q = db.query(Process).options(joinedload(Process.entity))
+        if autorejected_ids:
+            recent_q = recent_q.filter(Process.id.notin_(autorejected_ids))
+        recent = recent_q.order_by(Process.first_seen_at.desc()).limit(10).all()
         return render(
             request,
             "dashboard.html",
@@ -504,19 +501,26 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         base = db.query(Process).options(
             joinedload(Process.entity), joinedload(Process.analysis)
         )
+        # "autorejected" = en el conjunto efectivo y NO descartado manualmente (un descarte
+        # definitivo limpia el overlay, pero el guard evita estados anómalos sin limpiar).
+        autorejected_pred = (
+            and_(
+                Process.id.in_(autorejected_ids),
+                Process.status != ProcessStatus.descartada,
+            )
+            if autorejected_ids
+            else false()
+        )
         if estado == "descartada":
             q = base.filter(Process.status == ProcessStatus.descartada)
             if autorejected_ids:
                 q = q.filter(Process.id.notin_(autorejected_ids))
         elif estado == "autorejected":
-            q = base.filter(
-                Process.id.in_(autorejected_ids) if autorejected_ids else False
-            )
+            q = base.filter(autorejected_pred)
         else:
-            conds = [Process.status == ProcessStatus.descartada]
-            if autorejected_ids:
-                conds.append(Process.id.in_(autorejected_ids))
-            q = base.filter(or_(*conds))
+            q = base.filter(
+                or_(Process.status == ProcessStatus.descartada, autorejected_pred)
+            )
         rows = q.order_by(Process.updated_at.desc()).all()
         return render(
             request,
