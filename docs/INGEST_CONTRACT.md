@@ -371,11 +371,17 @@ pasa a ser exclusivamente la decisión `exempt` del overlay. Hasta entonces, el 
 coherente, y `record_autoreject_decision` respeta el supersede de `exempt` para evitar la
 carrera restaurar↔scanner.
 
-- **0.3c-3** ✅ (pend. deploy) — *Flip del scanner*: `apply_auto_reject_rules` es ahora
+- **0.3c-3** ✅ — *Flip del scanner*: `apply_auto_reject_rules` es ahora
   un **predicado puro** (no muta `process.status` ni `auto_reject_reason`); los callers
   (scanner SEACE/ADP, apply del editor) registran la decisión en el overlay con el motivo
   derivado de la regla (`autoreject_reason_text`). Migración one-shot idempotente
   `_flip_autorejected_status_to_overlay` en `init_db`: devuelve a `publicada` los items
-  con `status=autorejected` legacy que ya tienen decisión en el overlay (guard: no flipea
-  sin respaldo). Las lecturas efectivas (0.3c-2) hacen que los conteos no cambien.
-  **Pendiente:** deploy + verificación de conteos en VPS antes/después.
+  con `status=autorejected` legacy que tienen **cualquier** decisión en el overlay (incl.
+  `exempt`; guard: no flipea sin respaldo ni corre el UPDATE si no quedan legacy). Las
+  lecturas efectivas (0.3c-2) hacen que los conteos no cambien. **Desplegado y verificado
+  en VPS** (status_ar 126→0, effective_ar≡overlay_ar, orphans=0).
+- **0.3c-review** ✅ — *Review multi-modelo (GLM + GPT-5.5)*: dedup por id en
+  `_claimed_nomenclatura_map`; `record_autoreject_decision` respeta el supersede de
+  `exempt` (carrera restaurar↔scanner); flip incluye `exempt`-overlaid;
+  `descartar_autorejected` limpia overlay cross-tenant y resetea `auto_reject_exempt`;
+  `effective_autorejected_ids` en una sola query.
