@@ -1,157 +1,161 @@
-# Branch Review — `ingest-plugin-contract` vs `adp-input`
+# Branch Review — `ingest-0.3c-autoreject-overlay` vs `main`
 
-Reviewed branch: `ingest-plugin-contract` (63113a7)
-Base: `adp-input` (38b2077)
-Scope: +3122/-192 lines, 39 files, 16 commits
+**Branch:** `ingest-0.3c-autoreject-overlay` (2d2b800)
+**Base:** `main` (d7aa7ed)
+**Scope:** 13 commits, +1931/-140, 31 files
 
-Reviewers:
-- GPT-5.5 — completed
-- GLM 5.1 (Z.ai) — completed
-- DeepSeek V4 Pro (Fireworks) — completed
-- Qwen 3.6 Plus (Fireworks) — aborted (timeout, no formatted output)
+**Reviewers:**
+- GPT-5.5 → failover a GLM 5.1 (Z.ai) — findings included
+- GLM 5.1 (Z.ai) — ✅ completed
+- DeepSeek V4 Pro (Fireworks) — ✅ completed
+- Qwen 3.6 Plus (Fireworks) — ❌ billing cooldown
+
+---
 
 ## Summary
 
-This branch adds the ingest plugin contract layer on top of the ADP Portal integration in `adp-input`. The main additions are: `SourceAdapter` abstract base with registry, `FeedRepository` / `TenantFeedDecision` overlay, `lifecycle_phase` on `Process`, SEACE republishing reconciliation, and worker loop with per-adapter isolation.
+This branch introduces the autoreject overlay pattern in 4 micro-steps (0.3c-1 through 0.3c-3), then adds feed→pipeline promotion marks (0.3d), watchlist adaptive TTL, and changelog TZ fixes. It also addresses all prior review findings (claimed map dedup, flip migration, restore race condition, cross-tenant overlay purge).
 
-The prior branch-review findings (against `main`) are all addressed in commit `63113a7`:
-- ✅ Worker per-adapter commit/rollback isolation
-- ✅ Autoreject consistency across adapters (only on `is_new`)
-- ✅ ADP filename dedup handling
-- ✅ Republishing detection for `publicada` and terminal statuses
+The architecture is sound: bi-régime reads with idempotent migration, overlay exempt-supersede for race protection, `promoted_at` as one-way latch for dedupe defense-in-depth, and adaptive watchlist TTL with configurable thresholds.
 
-No Critical or High findings remain. The remaining Medium findings are around autoreject apply durability and minor consistency issues.
+**One High confirmed**, otherwise Mediums and Lows.
+
+---
 
 ## Findings
 
-### Medium — `apply_autoreject_existing` lacks explicit commit and savepoint protection
+### High — `ZoneInfoNotFoundError` no importada → NameError en runtime
 
-**File:** `apps/portal/seace_monitor/web/settings_autoreject.py`
-**Line:** ~60-80
-**Reported by:** DeepSeek, GLM, GPT-5.5
+**File:** `apps/portal/seace_monitor/watchlist_changelog.py`
+**Line:** 268
+**Reported by:** DeepSeek
 
-The `apply_autoreject_existing` endpoint iterates over `publicada` processes, applies autoreject rules, and calls `session.flush()` for each match. Issues:
+La línea 7 importa `from zoneinfo import ZoneInfo` pero la línea 268 usa `ZoneInfoNotFoundError` en un `except` sin importarlo. Si el config tiene un timezone inválido, Python lanza `NameError: name 'ZoneInfoNotFoundError' is not defined` en vez de entrar al handler — crashea todo el changelog rendering.
 
-1. **No explicit commit**: The function depends on FastAPI's `get_db` auto-commit behavior at request end. If the auto-commit mechanism fails or is misconfigured, decisions are silently lost.
-2. **No savepoint protection**: If flush fails on the Nth item (e.g., constraint violation), the entire transaction rolls back, losing all previous autoreject decisions from the same call. The scanner uses `begin_nested()` savepoints for individual row processing — this endpoint should too.
+**Verificado en código:** ✅ confirmado. Solo `ZoneInfo` está importado.
 
-Trace:
-
-1. User saves new autoreject rules and clicks "Aplicar a existentes".
-2. Endpoint finds 5 matching processes, applies autoreject to items 1-4 successfully.
-3. Item 5 hits a constraint error on `session.flush()`.
-4. Entire transaction rolls back — items 1-4 are lost.
-5. User sees "0 applied" or partial result on next page load.
-
-Suggested fix:
-
+**Fix:**
 ```python
-for proc in candidates:
-    savepoint = db.begin_nested()
-    try:
-        match = apply_auto_reject_rules(proc, entity, rules)
-        if match is not None:
-            record_autoreject_decision(db, proc, ...)
-            savepoint.commit()
-            applied += 1
-    except Exception:
-        savepoint.rollback()
-        logger.exception(...)
-db.commit()
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 ```
 
 ---
 
-### Medium — `adopt_republication` always sets `last_seen_at` even when no merge happened
+### Medium — `apply_auto_reject_rules` solo consulta legacy `auto_reject_exempt`, no el overlay
 
-**File:** `apps/portal/seace_monitor/scanner.py`
-**Line:** ~155
+**File:** `apps/portal/seace_monitor/auto_reject.py`
+**Line:** ~305
+**Reported by:** GLM (2 sesiones)
+
+Después del flip (0.3c-3), la guarda es `if process.auto_reject_exempt: return None` — lee solo la columna legacy. Si el campo legacy está stale (migration glitch, race con web handler), la única protección es el `_upsert_decision` exempt-supersede que bloquea la escritura. No es destructivo pero es un gap de defense-in-depth.
+
+**Fix:** Agregar check del overlay: `FeedRepository(session).decision_for(process) == DECISION_EXEMPT` antes de evaluar reglas, o aceptar el riesgo actual.
+
+---
+
+### Medium — Watchlist TTL: carga todos los procesos en Python en vez de filtrar en SQL
+
+**File:** `apps/portal/seace_monitor/watchlist_refresh.py` / `watchlist.py`
+**Line:** 92 / 189
+**Reported by:** GLM (2 sesiones), DeepSeek
+
+El adaptive TTL requiere parsear `cronograma_json` por proceso (Python-side), así que se carga `.all()` y filtra en Python. Con cientos/miles de watchlisted items, materializa todo en memoria cada ciclo. El caso base (deadline lejano, TTL estándar) podría filtrarse en SQL primero.
+
+**Fix:** Hybrid: filtrar `watch_checked_at < now - base_interval` en SQL primero, luego refinar en Python solo para los candidatos.
+
+---
+
+### Medium — Watchlist adaptive TTL no mantiene urgencia post-deadline
+
+**File:** `apps/portal/seace_monitor/watchlist_refresh.py`
+**Line:** 54
 **Reported by:** GLM
 
-`adopt_republication` unconditionally sets `claimed.last_seen_at = utcnow()` at the end, even when neither the nid adoption nor the existing-row deletion occurred (e.g., existing is not removable and nid doesn't advance). This means `last_seen_at` gets bumped for processes that weren't actually updated, which can affect TTL-based refresh logic.
+`_has_urgent_cronograma_deadline` chequa `now_lima <= dt <= deadline`. Una vez que pasa el deadline, la urgencia cae instantáneamente al TTL base (3h). En realidad, justo después del deadline es cuando se publican resultados/buena pro — aún debería ser urgente por una ventana.
 
-Suggested fix: Only update `last_seen_at` when `source_ref` was actually mutated or `existing` was deleted.
-
----
-
-### Medium — `once=True` now runs all adapters including watchlists
-
-**File:** `apps/portal/seace_monitor/worker.py`
-**Line:** ~120
-**Reported by:** GPT-5.5
-
-In the old code, `--once` ran a single scan cycle. Now the worker loop runs all adapters' scans AND watchlists in a single `--once` invocation. This is a behavioral change that makes `--once` significantly slower and more network-intensive, which may surprise operators using it for quick testing.
-
-Suggested fix: Document the new behavior, or add `--scan-only` flag for testing.
+**Fix:** Agregar look-back window (e.g., mantener urgente por `watchlist_urgent_horizon` horas después del deadline), o documentar como intencional.
 
 ---
 
-### Low — `branch-review.md` is tracked in git
+### Medium — `effective_autorejected_ids()` llamado múltiples veces por request sin caché
 
-**File:** `branch-review.md`
+**File:** `apps/portal/seace_monitor/web/app.py`
+**Line:** 285, 322, 513
+**Reported by:** GLM
+
+Cada ruta (dashboard, publicaciones, descartados) llama `effective_autorejected_ids()` que hace un outer join Process × TenantFeedDecision. Para single-tenant SQLite actual es aceptable, pero para multi-tenant futuro será N+1.
+
+**Fix:** Cachear en request scope (`g.autorejected_ids` en FastAPI dependency).
+
+---
+
+### Low — `_flip_autorejected_status_to_overlay` ejecuta SELECT guard en cada `init_db`
+
+**File:** `apps/portal/seace_monitor/db/session.py`
+**Line:** 298
+**Reported by:** GLM (2 sesiones)
+
+El guard `SELECT 1 FROM processes WHERE status = 'autorejected' LIMIT 1` es eficiente (indexed) pero corre en cada boot forever sin flag persistente de migración completada.
+
+**Fix:** Considerar tabla de metadata de migraciones one-shot. No blocking.
+
+---
+
+### Low — `_PROMOTED_STATUSES` en `db/session.py` usa strings crudos que pueden diverger del enum
+
+**File:** `apps/portal/seace_monitor/db/session.py`
+**Line:** 526
+**Reported by:** GLM
+
+El tuple `_PROMOTED_STATUSES` tiene strings crudos (`"descargando"`, etc.) mientras `feed/promotion.py` usa el enum `ProcessStatus`. Si se renombra un status, este tuple queda stale silenciosamente.
+
+**Fix:** Importar desde `promotion.py` o derivar del enum:
+```python
+from ..feed.promotion import PROMOTED_STATUSES as _PROMOTED_SET
+_PROMOTED_STATUSES = tuple(s.value for s in _PROMOTED_SET)
+```
+
+---
+
+### Low — Items autorechazados nuevos no se promueven → overlay es su única protección en dedupe
+
+**File:** `apps/portal/seace_monitor/scanner.py`
+**Line:** 519-528
 **Reported by:** DeepSeek
 
-The previous review file was committed and pushed. Should be removed before merge or excluded via `.gitignore`.
+Un item nuevo que matchea autoreject recibe overlay decision pero no `promote()` — y no debería, porque es feed-puro. Si el overlay se borra (SQL directo o API futura), el item queda como `publicada` sin `promoted_at`, elegible para dedupe deletion. Edge case de baja probabilidad con la API actual.
 
-Suggested fix: `git rm branch-review.md` and add to `.gitignore`, or keep as documentation.
+**Fix:** Documentar la dependencia. Si se agrega endpoint de "delete overlay decision", agregar guarda con `promoted_at`.
 
 ---
 
-### Low — `.cursor/hooks/state/` files tracked in git
+### Low — `changelog_entry_at_label` usa `datetime.min` con tzinfo=Lima como fallback
 
-**File:** `.cursor/hooks/state/continual-learning*.json`
+**File:** `apps/portal/seace_monitor/watchlist_changelog.py`
+**Line:** 250-253
 **Reported by:** DeepSeek
 
-IDE state files shouldn't be versioned.
+Funcional pero inusual. Para fechas inválidas, el fallback es `datetime.min.replace(tzinfo=LIMA)` (año 1, offset -5:00).
 
-Suggested fix: Add `.cursor/` to `.gitignore`.
-
----
-
-### Low — `adp_watchlist` bypasses `FeedRepository` seam
-
-**File:** `apps/portal/seace_monitor/adp_watchlist.py`
-**Reported by:** DeepSeek
-
-The SEACE watchlist uses `FeedRepository` for process lookups, but the ADP watchlist queries the session directly. This is an architectural inconsistency — both should go through the same seam for consistency when the feed layer becomes the canonical access path.
-
-Suggested fix: Refactor ADP watchlist to use `FeedRepository` in a follow-up.
+**Fix:** Reemplazar con `datetime.min.replace(tzinfo=timezone.utc)` para claridad. Baja prioridad.
 
 ---
 
-### Low — `FeedRepository.query_by_status` returns raw SQLAlchemy `Query`
+## Prior Review Findings — Verification
 
-**File:** `apps/portal/seace_monitor/feed/repository.py`
-**Reported by:** DeepSeek
+Todos los findings previos del review de `0.3c` (GPT-5.5 + GLM) están confirmados como corregidos:
 
-The method returns a `Query` object instead of materialized results. This is a leaky abstraction — callers must know to call `.all()` or `.count()`. Acceptable as a transitional API but should be cleaned up.
-
-Suggested fix: Return list or add explicit `query()` / `all()` variants.
-
----
-
-### Low — `feed/decisions.py` missing trailing newline
-
-**File:** `apps/portal/seace_monitor/feed/decisions.py`
-**Reported by:** GLM, GPT-5.5
-
-Cosmetic — file ends without newline.
+1. ✅ **Claimed map duplicates** — dedup por ID antes de agregar al map
+2. ✅ **Flip migration misses exempt items** — ahora flipea todos los `status=autorejected`
+3. ✅ **Scanner + restore race condition** — exempt-supersede en `_upsert_decision`
+4. ✅ **Cross-tenant overlay purge** — `_purge_orphan_feed_decisions` en cleanup
+5. ✅ **Autoreject apply durability** — savepoints en batch apply
+6. ✅ **`auto_reject_exempt` dual-write** — documentado como transicional
 
 ---
-
-## Prior Findings — Verification
-
-All prior branch-review findings (against `main`) confirmed fixed:
-
-1. ✅ **Worker rollback cross-adapter**: Now has per-adapter try/except with individual commit/rollback.
-2. ✅ **SEACE autoreject on existing**: Both SEACE and ADP now only apply autoreject on `is_new`.
-3. ✅ **ADP filename collision**: Uses `allocate_unique_path` with touch/unlink pattern.
-4. ✅ **Republishing for terminal statuses**: `publicada` included in claimed map, republishing checked before terminal guard.
-5. ✅ **`publicada` in `_CLAIMED_STATUS_RANK`**: Now included with rank 0.
-6. ✅ **`adopt_republication` UniqueConstraint**: Uses nested savepoint at call site, delete+mutation within same flush.
 
 ## Final Recommendation
 
-**Merge-ready after addressing the autoreject apply durability fix.** The `apply_autoreject_existing` endpoint should get savepoint protection and explicit commit before this ships to production — it's a real durability risk for batch operations.
+**Merge-ready tras fix del import de `ZoneInfoNotFoundError`.** Es un bug real que crashea el changelog con cualquier timezone inválido en config — una línea de fix.
 
-The other Mediums (unnecessary `last_seen_at` bump, `--once` behavior) are safe to defer. Lows are cleanup.
+Los Mediums de watchlist TTL (performance y post-deadline urgency) son mejoras postergables. El Medium de `auto_reject_exempt` guard es defense-in-depth, no destructivo. Los Lows son cleanup.
