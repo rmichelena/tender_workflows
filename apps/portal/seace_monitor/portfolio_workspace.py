@@ -7,7 +7,7 @@ import json
 import re
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -31,6 +31,7 @@ DOCUMENT_ROLE_LABELS = {
 _DATE_TIME_RE = re.compile(
     r"^(\d{2})/(\d{2})/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?"
 )
+_LIMA_TZ = timezone(timedelta(hours=-5))
 
 
 @dataclass(frozen=True)
@@ -201,6 +202,13 @@ def infer_portfolio_scenario(process: Process, selected_documents: list[dict]) -
             "Integrar aclaraciones/respuestas con las bases iniciales antes de continuar "
             "el trabajo de portafolio."
         )
+    elif "bases_iniciales" not in roles and "especificaciones_tecnicas" in roles:
+        scenario_id = "technical_specs_only"
+        seed_variant = "initial_bases"
+        action = (
+            "Revisar especificaciones técnicas seleccionadas sin asumir que hay bases "
+            "iniciales; pedir al usuario bases o aclaraciones si son necesarias."
+        )
     else:
         scenario_id = "initial_bases"
         seed_variant = "initial_bases"
@@ -234,7 +242,7 @@ def _queries_window_status(process: Process) -> str:
     ts = parse_seace_datetime(fechas.fecha_consultas)
     if ts is None:
         return "unknown"
-    now_ts = datetime.now().timestamp()
+    now_ts = datetime.now(_LIMA_TZ).timestamp()
     return "open" if ts >= now_ts else "closed"
 
 
@@ -256,7 +264,7 @@ def parse_seace_datetime(value: str | None) -> float | None:
         )
     except ValueError:
         return None
-    return dt.timestamp()
+    return dt.replace(tzinfo=_LIMA_TZ).timestamp()
 
 
 def _clarifications_from_documents(selected_documents: list[dict]) -> list[dict]:
@@ -293,6 +301,10 @@ def _backup_if_exists(path: Path, portfolio_dir: Path) -> None:
     backup_root = portfolio_dir / "backups"
     backup_root.mkdir(parents=True, exist_ok=True)
     backup = backup_root / f"{path.name}.{utcnow().strftime('%Y%m%dT%H%M%SZ')}.bak"
+    suffix = 1
+    while backup.exists():
+        suffix += 1
+        backup = backup_root / f"{path.name}.{utcnow().strftime('%Y%m%dT%H%M%SZ')}_{suffix}.bak"
     shutil.copy2(path, backup)
 
 
@@ -452,6 +464,12 @@ def _seed_variant_instructions(scenario: dict) -> str:
             "El usuario seleccionó bases iniciales y la ventana de consultas parece abierta. "
             "Tu primera tarea es detectar ambigüedades, riesgos, requisitos imposibles o puntos "
             "que convenga preguntar/observar antes del cierre de consultas."
+        )
+    if "bases_iniciales" not in scenario.get("document_roles", []):
+        return (
+            "El usuario no clasificó documentos como bases iniciales. Tu primera tarea es revisar "
+            "los documentos incluidos, explicar qué falta para un análisis completo y pedir bases, "
+            "aclaraciones o confirmación antes de avanzar a integración/BOM."
         )
     return (
         "El usuario seleccionó bases iniciales sin aclaraciones clasificadas. Tu primera tarea es "

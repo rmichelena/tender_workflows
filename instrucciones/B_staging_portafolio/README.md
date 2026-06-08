@@ -19,8 +19,11 @@ Cuando un proceso está en **`portafolio`**, el usuario prepara la transición d
    - `initial_bases` — bases iniciales sin aclaraciones; si consultas sigue abierto, preparar preguntas/observaciones.
    - `integrate_clarifications` — bases iniciales + aclaraciones/respuestas; integrar aclaraciones.
    - `verify_integrated_bases` — bases iniciales/aclaraciones + bases aclaradas/integradas; verificar integración y completar brechas.
+   - `technical_specs_only` — solo EETT u otros documentos técnicos; no asumir que hay bases.
 
 Estado objetivo opcional: **`portafolio_preparado`** cuando el manifest está completo y la copia terminó.
+
+**Implementado ahora:** selección + clasificación de documentos existentes. Uploads y subclasificación fina de aclaraciones (`addenda` / `enmienda`) quedan como incremento posterior.
 
 ---
 

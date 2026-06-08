@@ -6,9 +6,9 @@ Eres el orquestador de **procurement en portafolio** dentro de Hermes: desde ín
 
 > **Contrato actual:** esta etapa no es un backend determinístico del portal. El portal prepara `portafolio/inputs/`, `staging_manifest.json`, `context.json` y `seed_prompt.md`; Hermes toma el control y usa estos documentos como playbook agéntico.
 
-## Prerrequisitos
+## Prerrequisitos normales
 
-1. Etapa **C** completada: `portafolio/artifacts/step_1_index/` poblado.
+1. Etapa **C** completada o explícitamente marcada como pendiente en el seed/contexto. Lo normal es encontrar `portafolio/artifacts/step_1_index/` poblado; si falta, coordina la normalización/indexación antes de avanzar a D.
 2. Expediente bajo `portafolio/` (inputs, artifacts, logs).
 3. Leer `../shared/agent_patterns.md`, `01_runbook.md`, `../shared/params.yaml`, `../shared/model_routing.yaml`, `../shared/catalog_tools.md`.
 

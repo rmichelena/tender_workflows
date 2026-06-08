@@ -75,7 +75,8 @@
           "enum": [
             "initial_bases",
             "integrate_clarifications",
-            "verify_integrated_bases"
+            "verify_integrated_bases",
+            "technical_specs_only"
           ]
         },
         "seed_variant": {

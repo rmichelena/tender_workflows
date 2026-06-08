@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus
 from .db.session import session_factory
-from .portfolio_workspace import prepare_portfolio_workspace
+from .portfolio_workspace import parse_seace_datetime, prepare_portfolio_workspace
 from .web.app import create_app
 
 
@@ -152,3 +153,86 @@ def test_clarification_role_populates_clarifications_and_seed_variant(tmp_path: 
             "notes": "Clasificado por usuario en staging de portafolio",
         }
     ]
+
+
+def test_technical_specs_without_bases_does_not_claim_initial_bases(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'specs.db'}")
+    create_app(cfg)
+    process_id = _seed_portfolio_process(tmp_path)
+
+    db: Session = session_factory()
+    try:
+        proc = db.get(Process, process_id)
+        assert proc is not None
+        manifest = prepare_portfolio_workspace(
+            cfg,
+            proc,
+            ["anexo.docx"],
+            document_roles={"anexo.docx": "especificaciones_tecnicas"},
+        )
+    finally:
+        db.close()
+
+    scenario = manifest["portfolio_scenario"]
+    assert scenario["id"] == "technical_specs_only"
+    assert "sin asumir que hay bases iniciales" in scenario["recommended_action"]
+    seed = (
+        tmp_path
+        / "tenants"
+        / "default"
+        / "procesos"
+        / "web-portfolio"
+        / "portafolio"
+        / "seed_prompt.md"
+    ).read_text(encoding="utf-8")
+    assert "no clasificó documentos como bases iniciales" in seed
+
+
+def test_parse_seace_datetime_uses_lima_timezone():
+    lima = timezone(timedelta(hours=-5))
+    expected = datetime(2026, 6, 8, 10, 30, tzinfo=lima).timestamp()
+
+    assert parse_seace_datetime("08/06/2026 10:30") == expected
+
+
+def test_reprepare_keeps_distinct_manifest_backups(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'backup.db'}")
+    create_app(cfg)
+    process_id = _seed_portfolio_process(tmp_path)
+
+    db: Session = session_factory()
+    try:
+        proc = db.get(Process, process_id)
+        assert proc is not None
+        prepare_portfolio_workspace(
+            cfg,
+            proc,
+            ["bases.pdf"],
+            document_roles={"bases.pdf": "bases_iniciales"},
+        )
+        prepare_portfolio_workspace(
+            cfg,
+            proc,
+            ["anexo.docx"],
+            document_roles={"anexo.docx": "otros"},
+        )
+        prepare_portfolio_workspace(
+            cfg,
+            proc,
+            ["bases.pdf"],
+            document_roles={"bases.pdf": "bases_iniciales"},
+        )
+    finally:
+        db.close()
+
+    backup_dir = (
+        tmp_path
+        / "tenants"
+        / "default"
+        / "procesos"
+        / "web-portfolio"
+        / "portafolio"
+        / "backups"
+    )
+    backups = sorted(backup_dir.glob("staging_manifest.json.*.bak"))
+    assert len(backups) >= 2
