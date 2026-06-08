@@ -58,7 +58,7 @@ class AdpIngestAdapter:
         return config.adp.poll_interval_seconds
 
     def watch_interval_seconds(self, config: "AppConfig") -> int:
-        return config.watchlist_refresh_seconds
+        return config.watchlist_worker_wake_seconds
 
     def scan(self, config: "AppConfig", session: "Session") -> int:
         from ..adp_scanner import AdpScanner

@@ -43,9 +43,9 @@ def watchlist_refresh_seconds(
 def watchlist_sql_min_stale_before(
     config: "AppConfig", now: datetime | None = None
 ) -> datetime:
-    """Umbral mínimo para pre-filtro SQL (intervalo urgente, el más corto)."""
+    """Umbral mínimo para pre-filtro SQL (menor TTL: base vs urgente)."""
     now = _as_utc(now or datetime.now(timezone.utc))
-    return now - timedelta(seconds=config.watchlist_refresh_urgent_seconds)
+    return now - timedelta(seconds=config.watchlist_worker_wake_seconds)
 
 
 def _has_urgent_cronograma_deadline(

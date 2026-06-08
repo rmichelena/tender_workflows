@@ -274,6 +274,7 @@ def _fake_worker_config(adp_enabled: bool = True):
     return SimpleNamespace(
         poll_interval_seconds=321,
         watchlist_refresh_seconds=654,
+        watchlist_worker_wake_seconds=654,
         adp=SimpleNamespace(enabled=adp_enabled, poll_interval_seconds=987),
     )
 

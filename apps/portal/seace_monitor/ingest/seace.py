@@ -59,7 +59,9 @@ class SeaceIngestAdapter:
         return config.poll_interval_seconds
 
     def watch_interval_seconds(self, config: "AppConfig") -> int:
-        return config.watchlist_refresh_seconds
+        # Despertar con el menor TTL para que el adaptive refresh (45m urgente vs 3h
+        # base) sea efectivo; el filtro fino por proceso sigue en watchlist_refresh_due.
+        return config.watchlist_worker_wake_seconds
 
     def scan(self, config: "AppConfig", session: "Session") -> int:
         from ..scanner import MultiEntityScanner

@@ -10,9 +10,11 @@ from sqlalchemy.orm import sessionmaker
 
 from .config import AppConfig
 from .db.models import Base, Entity, Process, ProcessStatus
+from .ingest import get_adapter
 from .watchlist_refresh import (
     watchlist_refresh_due,
     watchlist_refresh_seconds,
+    watchlist_sql_min_stale_before,
 )
 
 
@@ -92,6 +94,27 @@ def test_never_checked_is_always_due():
     proc = _proc(entity, watch_checked_at=None)
     cfg = AppConfig()
     assert watchlist_refresh_due(proc, cfg) is True
+
+
+def test_adapter_watch_interval_uses_min_base_and_urgent():
+    cfg = AppConfig(
+        watchlist_refresh_interval="3h",
+        watchlist_refresh_interval_urgent="45m",
+    )
+    assert cfg.watchlist_worker_wake_seconds == 45 * 60
+    assert get_adapter("seace").watch_interval_seconds(cfg) == 45 * 60
+    assert get_adapter("adp_portal").watch_interval_seconds(cfg) == 45 * 60
+
+
+def test_sql_stale_threshold_uses_min_interval_not_assumed_urgent():
+    now = datetime(2026, 6, 5, 12, 0, tzinfo=timezone.utc)
+    # Edge: urgente > base — el mínimo debe ser el base, no asumir que urgente es menor.
+    cfg = AppConfig(
+        watchlist_refresh_interval="1h",
+        watchlist_refresh_interval_urgent="3h",
+    )
+    threshold = watchlist_sql_min_stale_before(cfg, now=now)
+    assert threshold == now - timedelta(hours=1)
 
 
 def test_urgent_ttl_after_deadline_within_horizon():

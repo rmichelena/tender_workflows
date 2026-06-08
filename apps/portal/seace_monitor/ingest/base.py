@@ -74,7 +74,7 @@ class SourceAdapter(Protocol):
         ...
 
     def watch_interval_seconds(self, config: "AppConfig") -> int:
-        """Periodo entre refrescos de watchlist."""
+        """Periodo entre ciclos de watchlist en el worker (mínimo TTL base/urgente)."""
         ...
 
     def scan(self, config: "AppConfig", session: "Session") -> int:

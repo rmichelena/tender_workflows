@@ -125,6 +125,11 @@ class AppConfig:
         return parse_duration(self.watchlist_refresh_interval_urgent)
 
     @property
+    def watchlist_worker_wake_seconds(self) -> int:
+        """Intervalo con el que el worker despierta para watchlist (mínimo TTL)."""
+        return min(self.watchlist_refresh_seconds, self.watchlist_refresh_urgent_seconds)
+
+    @property
     def watchlist_urgent_horizon_seconds(self) -> int:
         return parse_duration(self.watchlist_urgent_horizon)
 
