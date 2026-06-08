@@ -46,6 +46,10 @@ from ..process_storage import (
     restore_archived_process,
     resolve_restore_status,
 )
+from ..portfolio_workspace import (
+    prepare_portfolio_workspace,
+    portfolio_workspace_status,
+)
 from ..watchlist import mark_watchlist_read, watchlist_nav_badges
 from ..tenant_paths import migrate_legacy_layout, migrate_process_data_dir_refs
 from .detail_data import (
@@ -175,6 +179,7 @@ def _build_analisis_detail_context(proc: FeedItem, *, mark_read: bool) -> dict:
         "had_watch_updates": bool(prev_cron or prev_docs),
         "free_reader_html": free_reader_html,
         "chat": chat_payload,
+        "portfolio": portfolio_workspace_status(proc),
         "watch_changelog": parse_watch_changelog(
             proc.watch_changelog_json, display_timezone=_config.display_timezone
         ),
@@ -1030,6 +1035,72 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             dir=dir,
             scroll=scroll.strip() if scroll.strip().isdigit() else "",
         )
+
+    @app.get("/analizados/{process_id}/portafolio/preparar", response_class=HTMLResponse)
+    def preparar_portafolio_form(
+        request: Request,
+        process_id: int,
+        db: Session = Depends(get_db),
+    ):
+        proc = get_process_or_404(
+            db, process_id, with_entity=True, with_analysis=True
+        )
+        if proc.status != ProcessStatus.portafolio:
+            raise HTTPException(400, "Primero marca el proceso como portafolio")
+        if not proc.data_dir:
+            raise HTTPException(400, "Sin data_dir; descarga los documentos primero")
+        checked_paths = load_analyzed_files(Path(proc.data_dir))
+        documentos = build_document_tree(
+            proc,
+            checked_paths=checked_paths,
+            apply_default_selection=checked_paths is None,
+        )
+        return render(
+            request,
+            "preparar_portafolio.html",
+            db=db,
+            active_page="analizados",
+            process=proc,
+            documentos=documentos,
+            documento_count=count_document_nodes(documentos),
+            portfolio=portfolio_workspace_status(proc),
+            ProcessStatus=ProcessStatus,
+        )
+
+    @app.post("/analizados/{process_id}/portafolio/preparar")
+    async def preparar_portafolio_submit(
+        request: Request,
+        process_id: int,
+        db: Session = Depends(get_db),
+    ):
+        proc = get_process_or_404(
+            db, process_id, with_entity=True, with_analysis=True
+        )
+        if proc.status != ProcessStatus.portafolio:
+            raise HTTPException(400, "Primero marca el proceso como portafolio")
+        form = await request.form()
+        selected = [
+            str(item).strip()
+            for item in form.getlist("selected_files")
+            if str(item).strip()
+        ]
+        if not selected:
+            return RedirectResponse(
+                f"/analizados/{process_id}/portafolio/preparar?msg=selecciona_archivos",
+                status_code=303,
+            )
+        notes = str(form.get("notes") or "")
+        try:
+            prepare_portfolio_workspace(
+                _config,
+                proc,
+                selected,
+                notes=notes,
+                prepared_by="portal",
+            )
+        except RuntimeError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return RedirectResponse(f"/analizados/{process_id}?msg=portafolio_preparado", status_code=303)
 
     @app.get("/analizados", response_class=HTMLResponse)
     def analizados(

@@ -298,6 +298,30 @@ table.data td.status-cell { vertical-align: top; white-space: nowrap; }
   margin-bottom: 1rem;
 }
 
+.form-label {
+  display: block;
+  margin: 1rem 0 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.form-textarea {
+  width: 100%;
+  min-height: 7rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  resize: vertical;
+}
+.portfolio-path-list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+.portfolio-path-list li {
+  margin: 0.35rem 0;
+  word-break: break-word;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

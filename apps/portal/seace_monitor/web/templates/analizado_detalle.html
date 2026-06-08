@@ -24,6 +24,10 @@
 <div class="watch-update-banner">SEACE actualizó este proceso. El análisis previo se conservará al volver a analizar.</div>
 {% endif %}
 
+{% if request.query_params.get('msg') == 'portafolio_preparado' %}
+<div class="alert">Workspace de portafolio preparado para Hermes.</div>
+{% endif %}
+
 <div class="detail-split">
   <div class="detail-box detail-summary">
     <h3>Resumen del análisis</h3>
@@ -93,6 +97,23 @@
       </div>
     </form>
   </div>
+</div>
+{% endif %}
+
+{% if process.status.value == 'portafolio' %}
+<div class="detail-box detail-box-wide">
+  <h3>Workspace de portafolio</h3>
+  {% if portfolio.prepared %}
+  <p class="muted">Preparado con {{ portfolio.selected_count }} archivo(s){% if portfolio.prepared_at %} · {{ portfolio.prepared_at }}{% endif %}.</p>
+  <p>
+    <a href="/analizados/{{ process.id }}/portafolio/preparar" class="btn btn-primary">Repreparar portafolio</a>
+  </p>
+  {% else %}
+  <p class="muted">Pendiente: staging documental, manifest y seed prompt para Hermes.</p>
+  <p>
+    <a href="/analizados/{{ process.id }}/portafolio/preparar" class="btn btn-primary">Preparar portafolio</a>
+  </p>
+  {% endif %}
 </div>
 {% endif %}
 
