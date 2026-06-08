@@ -21,12 +21,25 @@
 <div class="detail-grid">
   <div class="detail-box detail-box-wide">
     <h3>Documentos para staging</h3>
-    <p class="muted">Se copiarán a <code>portafolio/inputs/</code> y se generará el manifest + seed prompt para Hermes.</p>
-    {% if documentos %}
-    <form method="post" action="/analizados/{{ process.id }}/portafolio/preparar" id="form-portafolio">
+    <p class="muted">Los documentos originales seleccionados se copiarán a <code>portafolio/inputs/</code>. Los archivos agregados manualmente irán a <code>portafolio/uploads/</code>. Ambos se incluirán en el manifest y deberán convertirse a Markdown.</p>
+    <form method="post" action="/analizados/{{ process.id }}/portafolio/preparar" id="form-portafolio" enctype="multipart/form-data">
+      {% if documentos %}
       <ul class="doc-list doc-list-selectable doc-list-tree">
         {{ doc_tree(documentos, process.id, 'analizados', selectable=true, portfolio_roles=true, document_role_labels=document_role_labels) }}
       </ul>
+      {% else %}
+      <p class="muted">Sin archivos originales analizables; puedes subir documentos adicionales.</p>
+      {% endif %}
+      <div class="upload-panel">
+        <label class="form-label" for="upload-files">Uploads adicionales</label>
+        <input id="upload-files" class="form-input" type="file" name="upload_files" multiple accept=".pdf,.doc,.docx,.xls,.xlsx"/>
+        <label class="form-label" for="upload-role">Función de los uploads</label>
+        <select id="upload-role" name="upload_role" class="form-select">
+          {% for value, label in document_role_labels.items() %}
+          <option value="{{ value }}" {% if value == 'otros' %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
       <label class="form-label" for="notes">Notas para el seed prompt</label>
       <textarea id="notes" name="notes" rows="5" class="form-textarea" placeholder="Ej: priorizar equipos de inspección, revisar plazos críticos, armar BOM inicial..."></textarea>
       <p style="margin-top:1rem">
@@ -34,10 +47,6 @@
         <a href="/analizados/{{ process.id }}" class="btn btn-secondary">Volver</a>
       </p>
     </form>
-    {% else %}
-    <p class="muted">Sin archivos analizables.</p>
-    <p><a href="/analizados/{{ process.id }}" class="btn btn-secondary">Volver</a></p>
-    {% endif %}
   </div>
 
   {% if portfolio.prepared %}
@@ -48,6 +57,7 @@
       <li><code>{{ portfolio.seed_prompt_path }}</code></li>
       <li><code>{{ portfolio.context_path }}</code></li>
       <li><code>{{ portfolio.inputs_dir }}</code></li>
+      <li><code>{{ portfolio.uploads_dir }}</code></li>
     </ul>
   </div>
   {% endif %}
@@ -61,7 +71,8 @@
   if (!form) return;
   form.addEventListener("submit", function (ev) {
     var checked = form.querySelectorAll('input[name="selected_files"]:checked');
-    if (!checked.length) {
+    var uploads = form.querySelector('input[name="upload_files"]');
+    if (!checked.length && (!uploads || !uploads.files || !uploads.files.length)) {
       ev.preventDefault();
       window.location.href = "/analizados/{{ process.id }}/portafolio/preparar?msg=selecciona_archivos";
       return;

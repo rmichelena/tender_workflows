@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus
 from .db.session import session_factory
-from .portfolio_workspace import parse_seace_datetime, prepare_portfolio_workspace
+from .portfolio_workspace import (
+    PortfolioUpload,
+    parse_seace_datetime,
+    prepare_portfolio_workspace,
+)
 from .web.app import create_app
 
 
@@ -155,6 +159,43 @@ def test_clarification_role_populates_clarifications_and_seed_variant(tmp_path: 
     ]
 
 
+def test_uploads_go_to_uploads_dir_and_participate_in_scenario(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'upload.db'}")
+    create_app(cfg)
+    process_id = _seed_portfolio_process(tmp_path)
+
+    db: Session = session_factory()
+    try:
+        proc = db.get(Process, process_id)
+        assert proc is not None
+        manifest = prepare_portfolio_workspace(
+            cfg,
+            proc,
+            ["bases.pdf"],
+            document_roles={"bases.pdf": "bases_iniciales"},
+            uploads=[
+                PortfolioUpload(
+                    filename="EETT cámara térmica.pdf",
+                    content=b"%PDF-1.4\nupload",
+                    document_role="especificaciones_tecnicas",
+                )
+            ],
+        )
+    finally:
+        db.close()
+
+    proc_dir = tmp_path / "tenants" / "default" / "procesos" / "web-portfolio"
+    assert (proc_dir / "portafolio" / "inputs" / "bases.pdf").is_file()
+    upload_path = proc_dir / "portafolio" / "uploads" / "EETT_c_mara_t_rmica.pdf"
+    assert upload_path.read_bytes() == b"%PDF-1.4\nupload"
+    assert manifest["uploads"][0]["dest_path"] == "portafolio/uploads/EETT_c_mara_t_rmica.pdf"
+    assert manifest["uploads"][0]["document_role"] == "especificaciones_tecnicas"
+    context = json.loads(
+        (proc_dir / "portafolio" / "context.json").read_text(encoding="utf-8")
+    )
+    assert context["paths"]["uploads_dir"].endswith("/portafolio/uploads")
+
+
 def test_technical_specs_without_bases_does_not_claim_initial_bases(tmp_path: Path):
     cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'specs.db'}")
     create_app(cfg)
@@ -186,6 +227,30 @@ def test_technical_specs_without_bases_does_not_claim_initial_bases(tmp_path: Pa
         / "seed_prompt.md"
     ).read_text(encoding="utf-8")
     assert "no clasificó documentos como bases iniciales" in seed
+
+
+def test_portfolio_prepare_route_accepts_upload_only(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'web-upload.db'}")
+    app = create_app(cfg)
+    process_id = _seed_portfolio_process(tmp_path)
+
+    response = TestClient(app).post(
+        f"/analizados/{process_id}/portafolio/preparar",
+        data={"upload_role": "especificaciones_tecnicas", "notes": "Solo upload."},
+        files=[("upload_files", ("specs.pdf", b"%PDF-1.4\nupload", "application/pdf"))],
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    proc_dir = tmp_path / "tenants" / "default" / "procesos" / "web-portfolio"
+    assert not any((proc_dir / "portafolio" / "inputs").iterdir())
+    assert (proc_dir / "portafolio" / "uploads" / "specs.pdf").is_file()
+    manifest = json.loads(
+        (proc_dir / "portafolio" / "staging_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["selected_documents"] == []
+    assert manifest["uploads"][0]["document_role"] == "especificaciones_tecnicas"
+    assert manifest["portfolio_scenario"]["id"] == "technical_specs_only"
 
 
 def test_parse_seace_datetime_uses_lima_timezone():

@@ -48,6 +48,7 @@ from ..process_storage import (
 )
 from ..portfolio_workspace import (
     DOCUMENT_ROLE_LABELS,
+    PortfolioUpload,
     prepare_portfolio_workspace,
     portfolio_workspace_status,
 )
@@ -1086,7 +1087,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             for item in form.getlist("selected_files")
             if str(item).strip()
         ]
-        if not selected:
+        upload_files = [
+            item
+            for item in form.getlist("upload_files")
+            if getattr(item, "filename", "")
+        ]
+        if not selected and not upload_files:
             return RedirectResponse(
                 f"/analizados/{process_id}/portafolio/preparar?msg=selecciona_archivos",
                 status_code=303,
@@ -1096,12 +1102,22 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             rel: str(form.get(f"document_role:{rel}") or "")
             for rel in selected
         }
+        upload_role = str(form.get("upload_role") or "")
+        uploads = [
+            PortfolioUpload(
+                filename=str(upload.filename or ""),
+                content=await upload.read(),
+                document_role=upload_role,
+            )
+            for upload in upload_files
+        ]
         try:
             prepare_portfolio_workspace(
                 _config,
                 proc,
                 selected,
                 document_roles=document_roles,
+                uploads=uploads,
                 notes=notes,
                 prepared_by="portal",
             )

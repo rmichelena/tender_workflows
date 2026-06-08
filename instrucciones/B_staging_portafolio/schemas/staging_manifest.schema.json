@@ -46,7 +46,18 @@
         "properties": {
           "dest_path": { "type": "string" },
           "original_name": { "type": "string" },
-          "sha256": { "type": "string" }
+          "sha256": { "type": "string" },
+          "document_role": {
+            "type": "string",
+            "enum": [
+              "bases_iniciales",
+              "aclaraciones",
+              "bases_aclaradas",
+              "especificaciones_tecnicas",
+              "otros"
+            ]
+          },
+          "document_role_label": { "type": "string" }
         }
       }
     },

@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from .config import AppConfig
 from .db.models import Process, utcnow
-from .analysis.document_prep import resolve_selected_documents
+from .analysis.document_prep import UPLOAD_SUFFIXES, resolve_selected_documents
 from .parser import fechas_listado_from_cronograma_json
 
 
@@ -42,8 +42,17 @@ class PortfolioWorkspaceStatus:
     manifest_path: Path | None
     seed_prompt_path: Path | None
     context_path: Path | None
+    uploads_dir: Path | None
     selected_count: int = 0
+    upload_count: int = 0
     prepared_at: str | None = None
+
+
+@dataclass(frozen=True)
+class PortfolioUpload:
+    filename: str
+    content: bytes
+    document_role: str = "otros"
 
 
 def portfolio_dir_for_process(process: Process) -> Path:
@@ -54,12 +63,13 @@ def portfolio_dir_for_process(process: Process) -> Path:
 
 def portfolio_workspace_status(process: Process) -> PortfolioWorkspaceStatus:
     if not process.data_dir:
-        return PortfolioWorkspaceStatus(False, None, None, None, None, None)
+        return PortfolioWorkspaceStatus(False, None, None, None, None, None, None)
     portfolio_dir = Path(process.data_dir) / "portafolio"
     manifest_path = portfolio_dir / MANIFEST_NAME
     seed_prompt_path = portfolio_dir / SEED_PROMPT_NAME
     context_path = portfolio_dir / CONTEXT_NAME
     selected_count = 0
+    upload_count = 0
     prepared_at = None
     if manifest_path.is_file():
         try:
@@ -69,6 +79,9 @@ def portfolio_workspace_status(process: Process) -> PortfolioWorkspaceStatus:
         selected = manifest.get("selected_documents")
         if isinstance(selected, list):
             selected_count = len(selected)
+        uploads = manifest.get("uploads")
+        if isinstance(uploads, list):
+            upload_count = len(uploads)
         prepared_at = str(manifest.get("prepared_at") or "") or None
     return PortfolioWorkspaceStatus(
         prepared=manifest_path.is_file() and seed_prompt_path.is_file(),
@@ -77,7 +90,9 @@ def portfolio_workspace_status(process: Process) -> PortfolioWorkspaceStatus:
         manifest_path=manifest_path,
         seed_prompt_path=seed_prompt_path,
         context_path=context_path,
+        uploads_dir=portfolio_dir / "uploads",
         selected_count=selected_count,
+        upload_count=upload_count,
         prepared_at=prepared_at,
     )
 
@@ -88,6 +103,7 @@ def prepare_portfolio_workspace(
     selected_rel_paths: list[str],
     *,
     document_roles: dict[str, str] | None = None,
+    uploads: list[PortfolioUpload] | None = None,
     notes: str = "",
     prepared_by: str = "portal",
 ) -> dict:
@@ -96,7 +112,14 @@ def prepare_portfolio_workspace(
         raise RuntimeError("Sin data_dir; descarga los documentos primero.")
     proc_dir = Path(process.data_dir)
     docs_dir = proc_dir / "documentos"
-    selected_paths = resolve_selected_documents(docs_dir, selected_rel_paths)
+    selected_paths = (
+        resolve_selected_documents(docs_dir, selected_rel_paths)
+        if selected_rel_paths
+        else []
+    )
+    uploads = uploads or []
+    if not selected_paths and not uploads:
+        raise RuntimeError("Selecciona documentos o sube al menos un archivo.")
 
     portfolio_dir = proc_dir / "portafolio"
     portfolio_dir.mkdir(parents=True, exist_ok=True)
@@ -108,10 +131,14 @@ def prepare_portfolio_workspace(
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     inputs_dir = portfolio_dir / "inputs"
+    uploads_dir = portfolio_dir / "uploads"
     tmp_inputs = portfolio_dir / f".inputs_tmp_{uuid4().hex}"
+    tmp_uploads = portfolio_dir / f".uploads_tmp_{uuid4().hex}"
     tmp_inputs.mkdir(parents=True, exist_ok=False)
+    tmp_uploads.mkdir(parents=True, exist_ok=False)
 
     selected_documents: list[dict] = []
+    upload_documents: list[dict] = []
     document_roles = document_roles or {}
     try:
         for source_path in selected_paths:
@@ -133,21 +160,44 @@ def prepare_portfolio_workspace(
                     "document_role_label": DOCUMENT_ROLE_LABELS[document_role],
                 }
             )
+        for upload in uploads:
+            if not upload.content:
+                raise RuntimeError(f"{upload.filename} está vacío o corrupto.")
+            document_role = normalize_document_role(upload.document_role)
+            dest_path = _unique_child_path(
+                tmp_uploads, _safe_upload_filename(upload.filename)
+            )
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            dest_path.write_bytes(upload.content)
+            final_dest_path = uploads_dir / dest_path.name
+            upload_documents.append(
+                {
+                    "dest_path": _rel_to_process(proc_dir, final_dest_path),
+                    "original_name": upload.filename,
+                    "sha256": _sha256(dest_path),
+                    "document_role": document_role,
+                    "document_role_label": DOCUMENT_ROLE_LABELS[document_role],
+                }
+            )
         _replace_inputs_dir(inputs_dir, tmp_inputs, portfolio_dir)
+        _replace_inputs_dir(uploads_dir, tmp_uploads, portfolio_dir)
     except Exception:
         shutil.rmtree(tmp_inputs, ignore_errors=True)
+        shutil.rmtree(tmp_uploads, ignore_errors=True)
         raise
 
     now = utcnow().astimezone(timezone.utc).isoformat()
-    scenario = infer_portfolio_scenario(process, selected_documents)
+    scenario = infer_portfolio_scenario(process, selected_documents + upload_documents)
     manifest = {
         "version": "0.1",
         "process_id": process.id,
         "tenant_id": config.tenant_id,
         "source": process.source,
         "selected_documents": selected_documents,
-        "uploads": [],
-        "clarifications": _clarifications_from_documents(selected_documents),
+        "uploads": upload_documents,
+        "clarifications": _clarifications_from_documents(
+            selected_documents + upload_documents
+        ),
         "portfolio_scenario": scenario,
         "free_reader_profile": _load_free_reader_profile(proc_dir),
         "notes": notes.strip(),
@@ -179,6 +229,34 @@ def normalize_document_role(value: str | None) -> str:
     if role in DOCUMENT_ROLE_LABELS:
         return role
     return "otros"
+
+
+def _safe_upload_filename(filename: str) -> str:
+    name = Path(filename).name.strip()
+    if not name:
+        raise RuntimeError("Archivo subido sin nombre.")
+    suffix = Path(name).suffix.lower()
+    if suffix not in UPLOAD_SUFFIXES:
+        allowed = ", ".join(sorted(UPLOAD_SUFFIXES))
+        raise RuntimeError(f"Formato de upload no soportado: {suffix or '(sin extensión)'}. Permitidos: {allowed}")
+    stem = Path(name).stem.strip() or "upload"
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._-") or "upload"
+    safe = f"{safe_stem}{suffix}"
+    return safe[:160]
+
+
+def _unique_child_path(parent: Path, filename: str) -> Path:
+    candidate = parent / filename
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem
+    suffix = candidate.suffix
+    index = 2
+    while True:
+        candidate = parent / f"{stem}_{index}{suffix}"
+        if not candidate.exists():
+            return candidate
+        index += 1
 
 
 def infer_portfolio_scenario(process: Process, selected_documents: list[dict]) -> dict:
@@ -282,17 +360,17 @@ def _clarifications_from_documents(selected_documents: list[dict]) -> list[dict]
     return clarifications
 
 
-def _replace_inputs_dir(inputs_dir: Path, tmp_inputs: Path, portfolio_dir: Path) -> None:
-    if inputs_dir.exists():
+def _replace_inputs_dir(target_dir: Path, tmp_dir: Path, portfolio_dir: Path) -> None:
+    if target_dir.exists():
         backup_root = portfolio_dir / "backups"
         backup_root.mkdir(parents=True, exist_ok=True)
-        backup = backup_root / f"inputs_{utcnow().strftime('%Y%m%dT%H%M%SZ')}"
+        backup = backup_root / f"{target_dir.name}_{utcnow().strftime('%Y%m%dT%H%M%SZ')}"
         suffix = 1
         while backup.exists():
             suffix += 1
-            backup = backup_root / f"inputs_{utcnow().strftime('%Y%m%dT%H%M%SZ')}_{suffix}"
-        shutil.move(str(inputs_dir), str(backup))
-    shutil.move(str(tmp_inputs), str(inputs_dir))
+            backup = backup_root / f"{target_dir.name}_{utcnow().strftime('%Y%m%dT%H%M%SZ')}_{suffix}"
+        shutil.move(str(target_dir), str(backup))
+    shutil.move(str(tmp_dir), str(target_dir))
 
 
 def _backup_if_exists(path: Path, portfolio_dir: Path) -> None:
@@ -359,6 +437,7 @@ def _build_context(
             "process_dir": str(proc_dir.resolve()),
             "portfolio_dir": str(portfolio_dir.resolve()),
             "inputs_dir": str((portfolio_dir / "inputs").resolve()),
+            "uploads_dir": str((portfolio_dir / "uploads").resolve()),
             "manifest": str((portfolio_dir / MANIFEST_NAME).resolve()),
             "context": str((portfolio_dir / CONTEXT_NAME).resolve()),
             "seed_prompt": str((portfolio_dir / SEED_PROMPT_NAME).resolve()),
@@ -408,7 +487,8 @@ Actúas como Hermes dentro del workspace de portafolio de una licitación. El po
 
 - Proceso: `{paths["process_dir"]}`
 - Portafolio: `{paths["portfolio_dir"]}`
-- Inputs: `{paths["inputs_dir"]}`
+- Inputs originales del proceso: `{paths["inputs_dir"]}`
+- Uploads manuales: `{paths["uploads_dir"]}`
 - Manifest staging: `{paths["manifest"]}`
 - Contexto: `{paths["context"]}`
 - Logs: `{paths["logs_dir"]}`
@@ -420,7 +500,7 @@ Actúas como Hermes dentro del workspace de portafolio de una licitación. El po
 1. Lee primero el manifest y el contexto.
 2. Usa los runbooks como playbooks de trabajo, no como un pipeline rígido de backend.
 3. No rehagas staging ni descarga documental; eso ya lo hizo el portal.
-4. Si necesitas normalización/indexación determinística pendiente, usa la etapa C como guía y deja logs claros.
+4. Si necesitas normalización/indexación determinística pendiente, usa la etapa C como guía y procesa tanto `inputs/` como `uploads/`; deja logs claros.
 5. Para D, conversa con el usuario, decide el siguiente movimiento y ejecuta herramientas/scripts temporales solo cuando el caso lo justifique.
 6. Preserva artefactos intermedios bajo `artifacts/` y resultados finales bajo `outputs/`.
 7. Registra decisiones relevantes en `logs/decision_log.md`.
