@@ -40,17 +40,29 @@ def watchlist_refresh_seconds(
     return config.watchlist_refresh_seconds
 
 
+def watchlist_sql_min_stale_before(
+    config: "AppConfig", now: datetime | None = None
+) -> datetime:
+    """Umbral mínimo para pre-filtro SQL (intervalo urgente, el más corto)."""
+    now = _as_utc(now or datetime.now(timezone.utc))
+    return now - timedelta(seconds=config.watchlist_refresh_urgent_seconds)
+
+
 def _has_urgent_cronograma_deadline(
     proc: "Process", config: "AppConfig", now: datetime | None = None
 ) -> bool:
-    """¿Algún hito clave del cronograma cae dentro del horizonte urgente?"""
+    """¿Algún hito clave dentro de la ventana urgente (antes o después del deadline)?
+
+    Ventana simétrica ±``watchlist_urgent_horizon``: mantiene TTL corto justo después
+    del cierre (cuando SEACE suele publicar resultados/buena pro), no solo antes.
+    """
     now_lima = (now or datetime.now(LIMA)).astimezone(LIMA)
     horizon = timedelta(seconds=config.watchlist_urgent_horizon_seconds)
-    deadline = now_lima + horizon
+    window_start = now_lima - horizon
+    window_end = now_lima + horizon
 
-    fechas = _key_deadline_datetimes(proc)
-    for dt in fechas:
-        if now_lima <= dt <= deadline:
+    for dt in _key_deadline_datetimes(proc):
+        if window_start <= dt <= window_end:
             return True
     return False
 

@@ -6,7 +6,10 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 import yaml
 
@@ -290,18 +293,30 @@ def autoreject_reason_text(rule: AutoRejectRule) -> str:
 
 
 def apply_auto_reject_rules(
-    process: Process, entity: Entity | None, rules: list[AutoRejectRule]
+    process: Process,
+    entity: Entity | None,
+    rules: list[AutoRejectRule],
+    session: "Session | None" = None,
 ) -> AutoRejectRule | None:
     """Predicado puro de autoreject (0.3c-3): devuelve la regla que matchea sin mutar el
     feed.
 
     El estado del autoreject vive en el overlay por tenant (`TenantFeedDecision`), no en
     `Process.status`. El caller registra la decisión vía `record_autoreject_decision`.
-    Los guards usan campos legacy (`status`, `auto_reject_exempt`) que la doble escritura
-    mantiene válidos durante la transición.
+    Los guards consultan el overlay (si hay ``session``) y el campo legacy
+    ``auto_reject_exempt`` durante la transición.
     """
     if process.status != ProcessStatus.publicada:
         return None
     if process.auto_reject_exempt:
         return None
+    if session is not None and _overlay_exempt(session, process):
+        return None
     return first_matching_rule(process, entity, rules)
+
+
+def _overlay_exempt(session: "Session", process: Process) -> bool:
+    from .feed.decisions import DECISION_EXEMPT
+    from .feed.repository import FeedRepository
+
+    return FeedRepository(session).decision_for(process) == DECISION_EXEMPT

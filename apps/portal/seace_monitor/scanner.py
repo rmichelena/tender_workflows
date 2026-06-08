@@ -509,7 +509,9 @@ class MultiEntityScanner:
         # automática ni silenciosamente a publicaciones existentes; eso se hace de forma
         # explícita y por canal desde el editor de reglas (Settings → autoreject).
         match = (
-            apply_auto_reject_rules(proc, entity, self.auto_reject_rules)
+            apply_auto_reject_rules(
+                proc, entity, self.auto_reject_rules, session=self.session
+            )
             if is_new
             else None
         )

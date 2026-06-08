@@ -122,7 +122,9 @@ def register_autoreject_settings_routes(app, config: AppConfig, render, _get_db)
             for proc in procesos:
                 savepoint = db.begin_nested()
                 try:
-                    match = apply_auto_reject_rules(proc, proc.entity, rules)
+                    match = apply_auto_reject_rules(
+                        proc, proc.entity, rules, session=db
+                    )
                     if match is not None:
                         db.flush()
                         record_autoreject_decision(

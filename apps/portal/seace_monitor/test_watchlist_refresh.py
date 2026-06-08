@@ -92,3 +92,28 @@ def test_never_checked_is_always_due():
     proc = _proc(entity, watch_checked_at=None)
     cfg = AppConfig()
     assert watchlist_refresh_due(proc, cfg) is True
+
+
+def test_urgent_ttl_after_deadline_within_horizon():
+    # Post-deadline: fin presentación ya pasó pero dentro del look-back de 48h.
+    _, entity = _setup()
+    now = datetime(2026, 6, 7, 17, 0, tzinfo=timezone.utc)  # ~12:00 Lima
+    proc = _proc(
+        entity,
+        cronograma_json=json.dumps(
+            [
+                {
+                    "etapa": "Presentación de propuestas",
+                    "fecha_inicio": "04/06/2026 00:00",
+                    "fecha_fin": "06/06/2026 18:00",
+                }
+            ]
+        ),
+        watch_checked_at=now - timedelta(minutes=50),
+    )
+    cfg = AppConfig(
+        watchlist_refresh_interval="3h",
+        watchlist_refresh_interval_urgent="45m",
+        watchlist_urgent_horizon="48h",
+    )
+    assert watchlist_refresh_seconds(proc, cfg, now=now) == cfg.watchlist_refresh_urgent_seconds

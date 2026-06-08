@@ -7,6 +7,7 @@ import json
 from .watchlist_changelog import (
     build_watchlist_changelog_entry,
     changelog_entry_at_label,
+    format_scan_timestamp,
 )
 
 
@@ -66,4 +67,11 @@ def test_cronograma_entry_uses_scan_time_in_lima():
             entry["at"], entry["changes"], display_timezone="America/Lima"
         )
         == "05/06/2026 17:30"
+    )
+
+
+def test_invalid_timezone_falls_back_to_raw_at():
+    # High fix: ZoneInfoNotFoundError importado; no NameError en runtime.
+    assert format_scan_timestamp("2026-06-05T22:30:00+00:00", "Not/A/Timezone") == (
+        "2026-06-05T22:30:00+00:00"
     )

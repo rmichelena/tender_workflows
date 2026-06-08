@@ -186,7 +186,13 @@ class AdpScanner:
             proc.anio = anio
 
         # Auto-reject (solo si está en publicada y es nuevo)
-        match = apply_auto_reject_rules(proc, entity, self.auto_reject_rules) if is_new else None
+        match = (
+            apply_auto_reject_rules(
+                proc, entity, self.auto_reject_rules, session=self.session
+            )
+            if is_new
+            else None
+        )
         self.session.flush()
         if match is not None:
             record_autoreject_decision(

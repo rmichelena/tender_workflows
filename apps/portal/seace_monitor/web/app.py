@@ -120,6 +120,21 @@ def get_db() -> Session:
         db.close()
 
 
+def _cached_autorejected_ids(request: Request, db: Session) -> set[int]:
+    """Conjunto efectivo autorejected, cacheado por request (evita N queries)."""
+    ids = getattr(request.state, "effective_autorejected_ids", None)
+    if ids is None:
+        ids = FeedRepository(db).effective_autorejected_ids()
+        request.state.effective_autorejected_ids = ids
+    return ids
+
+
+def _is_effectively_autorejected(request: Request, db: Session, proc: Process) -> bool:
+    if proc.id is None:
+        return False
+    return proc.id in _cached_autorejected_ids(request, db)
+
+
 def _build_analisis_detail_context(proc: Process, *, mark_read: bool) -> dict:
     prev_cron = proc.watch_cronograma_prev_json if proc.watch_unread else None
     prev_docs = proc.watch_documentos_prev_json if proc.watch_unread else None
@@ -282,7 +297,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # Bi-régimen (0.3c-2): autorejected/publicada por decisión efectiva. Hoy coincide
         # con el status legacy; tras 0.3c-3 lo autorejected quedará en status=publicada y
         # estos overrides evitan inflar "publicada" y vaciar "autorejected".
-        autorejected_ids = FeedRepository(db).effective_autorejected_ids()
+        autorejected_ids = _cached_autorejected_ids(request, db)
         counts[ProcessStatus.autorejected.value] = len(autorejected_ids)
         publicada_q = db.query(Process).filter(
             Process.status == ProcessStatus.publicada
@@ -319,7 +334,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # Bi-régimen (0.3c-2): excluir lo efectivamente autorejected. Hoy esos items ya
         # están en status=autorejected (no entran al filtro); tras 0.3c-3 quedarán en
         # status=publicada y se filtran por el overlay.
-        autorejected_ids = FeedRepository(db).effective_autorejected_ids()
+        autorejected_ids = _cached_autorejected_ids(request, db)
         q = (
             db.query(Process)
             .options(joinedload(Process.entity))
@@ -473,6 +488,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.post("/publicaciones/{process_id}/descartar")
     def descartar(
+        request: Request,
         process_id: int,
         db: Session = Depends(get_db),
         entidad: str = Form(""),
@@ -488,7 +504,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
         # Bi-régimen (0.3c-3): un autorechazado efectivo está en status=publicada pero no
         # se muestra en Publicaciones; pertenece a Descartados.
-        if FeedRepository(db).is_effectively_autorejected(proc):
+        if _is_effectively_autorejected(request, db, proc):
             return RedirectResponse("/descartados?estado=autorejected", status_code=303)
         if proc.status == ProcessStatus.descargando:
             raise HTTPException(409, "Descarga en curso")
@@ -510,7 +526,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # Bi-régimen (0.3c-2): "autorejected" se resuelve por el overlay (con fallback al
         # status legacy), no solo por status==autorejected; "descartada" sigue por status.
         repo = FeedRepository(db)
-        autorejected_ids = repo.effective_autorejected_ids()
+        autorejected_ids = _cached_autorejected_ids(request, db)
         autoreject_reasons = repo.autoreject_reasons()
         base = db.query(Process).options(
             joinedload(Process.entity), joinedload(Process.analysis)
@@ -549,12 +565,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.post("/descartados/{process_id}/restaurar")
     def restaurar(
+        request: Request,
         process_id: int,
         db: Session = Depends(get_db),
         estado: str = Form(""),
     ):
         proc = get_process_or_404(db, process_id, with_analysis=True)
-        was_autorejected = FeedRepository(db).is_effectively_autorejected(proc)
+        was_autorejected = _is_effectively_autorejected(request, db, proc)
         new_status = resolve_restore_status(_config, proc)
         if new_status == ProcessStatus.publicada:
             clear_process_download_metadata(proc)
@@ -572,6 +589,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.post("/descartados/{process_id}/descartar")
     def descartar_autorejected(
+        request: Request,
         process_id: int,
         db: Session = Depends(get_db),
         estado: str = Form(""),
@@ -581,7 +599,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             raise HTTPException(404)
         if proc.status == ProcessStatus.descartada:
             return _descartados_redirect(estado)
-        if not FeedRepository(db).is_effectively_autorejected(proc):
+        if not _is_effectively_autorejected(request, db, proc):
             raise HTTPException(400, "Solo autorejected puede descartarse desde Descartados")
         proc.status = ProcessStatus.descartada
         proc.auto_reject_reason = None
@@ -638,6 +656,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.post("/publicaciones/{process_id}/descargar")
     def descargar(
+        request: Request,
         process_id: int,
         background_tasks: BackgroundTasks,
         db: Session = Depends(get_db),
@@ -652,7 +671,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             return RedirectResponse(f"/descargados/{process_id}", status_code=303)
         # Bi-régimen (0.3c-3): no descargar un autorechazado efectivo (status=publicada
         # pero oculto de Publicaciones).
-        if FeedRepository(db).is_effectively_autorejected(proc):
+        if _is_effectively_autorejected(request, db, proc):
             return RedirectResponse("/descartados?estado=autorejected", status_code=303)
         if proc.status == ProcessStatus.descargando:
             return _filter_redirect(

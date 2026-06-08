@@ -187,6 +187,42 @@ def test_apply_auto_reject_skips_human_exempt_process():
     assert proc.status == ProcessStatus.publicada
 
 
+def test_apply_auto_reject_skips_overlay_exempt_without_legacy_flag():
+    from .feed import record_exempt_decision
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    entity = Entity(ruc="20123456789", nombre="Entidad", activa=True)
+    session.add(entity)
+    session.flush()
+    proc = Process(
+        entity_id=entity.id,
+        anio=2026,
+        source="seace",
+        source_ref="1",
+        nid_proceso="1",
+        nomenclatura="NOM-1",
+        status=ProcessStatus.publicada,
+        objeto="Servicio",
+        descripcion="SERVICIO DE LIMPIEZA DE OFICINAS",
+        auto_reject_exempt=False,
+    )
+    session.add(proc)
+    session.flush()
+    record_exempt_decision(session, proc)
+    session.commit()
+
+    rule = AutoRejectRule(
+        id="servicio_limpieza",
+        query="objeto:servicio limpieza",
+        reason="Limpieza fuera de foco",
+    )
+    assert apply_auto_reject_rules(proc, entity, [rule], session=session) is None
+
+
 def test_load_default_rules_includes_alquiler_and_food_patterns():
     rules = load_auto_reject_rules(AppConfig())
     queries = "\n".join(rule.query for rule in rules)
