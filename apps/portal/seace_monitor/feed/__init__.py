@@ -13,7 +13,7 @@ from .decisions import (
     record_autoreject_decision,
     record_exempt_decision,
 )
-from .promotion import is_promoted, promote, should_be_promoted
+from .promotion import is_feed_pure, is_promoted, promote, should_be_promoted
 from .repository import FeedRepository
 
 __all__ = [
@@ -23,6 +23,7 @@ __all__ = [
     "clear_feed_decision",
     "record_autoreject_decision",
     "record_exempt_decision",
+    "is_feed_pure",
     "is_promoted",
     "promote",
     "should_be_promoted",

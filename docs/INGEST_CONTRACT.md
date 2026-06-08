@@ -403,4 +403,7 @@ feed puro (purgable); seteado = trabajo curado (pipeline-bound). Helpers en
   re-publicación); un `publicada` promovido se trata como **reclamado** (target de merge),
   no como feed puro (`_claimed_nomenclatura_map` lo incluye; `_publicada_nomenclatura_map`
   lo excluye), igual que los autorechazados.
-- **0.3d-4** ⏳ — *Seam de lectura feed-puro vs promovido* (prepara la copia sin FK de 0.3e).
+- **0.3d-4** ✅ — *Seam de lectura feed-puro vs promovido*: `FeedRepository` expone
+  predicados/regime (`feed_pure`/`promoted`), `promoted_ids`, helpers
+  `feed_pure_publicada_for_entity` / `promoted_publicada_for_entity`; scanner dedupe
+  deja de leer `Process.promoted_at` directo. Prepara la copia sin FK de 0.3e.

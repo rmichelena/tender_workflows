@@ -12,15 +12,19 @@ Este paso es **behavior-preserving**: las consultas son las mismas que estaban i
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Iterable, Literal
 
 from sqlalchemy import and_, or_
 
 from ..db.models import Process, ProcessStatus, TenantFeedDecision
 from .decisions import DECISION_AUTOREJECTED, DECISION_EXEMPT, DEFAULT_TENANT_ID
+from .promotion import is_feed_pure, is_promoted
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Query, Session
+
+
+FeedRegime = Literal["all", "feed_pure", "promoted"]
 
 
 class FeedRepository:
@@ -28,6 +32,42 @@ class FeedRepository:
 
     def __init__(self, session: "Session") -> None:
         self.session = session
+
+    # --- Régimen feed-puro vs promovido (paso 0.3d-4) ---
+    # Centraliza el predicado de promoción para que scanners, purga y futuro split
+    # 0.3e no consulten `Process.promoted_at` directamente.
+
+    @staticmethod
+    def feed_pure_predicate():
+        """SQL: items sin promoción (feed puro, purgable)."""
+        return Process.promoted_at.is_(None)
+
+    @staticmethod
+    def promoted_predicate():
+        """SQL: items promovidos (pipeline-bound)."""
+        return Process.promoted_at.isnot(None)
+
+    def is_promoted(self, process: Process) -> bool:
+        return is_promoted(process)
+
+    def is_feed_pure(self, process: Process) -> bool:
+        return is_feed_pure(process)
+
+    def promoted_ids(self) -> set[int]:
+        """ids de items con `promoted_at` seteado."""
+        return {
+            row[0]
+            for row in self.session.query(Process.id)
+            .filter(self.promoted_predicate())
+            .all()
+        }
+
+    def _apply_regime(self, query: "Query", regime: FeedRegime) -> "Query":
+        if regime == "feed_pure":
+            return query.filter(self.feed_pure_predicate())
+        if regime == "promoted":
+            return query.filter(self.promoted_predicate())
+        return query
 
     def find_by_ref(
         self, source: str, entity_id: int, source_ref: str | None
@@ -47,24 +87,32 @@ class FeedRepository:
         )
 
     def query_by_status(
-        self, statuses: Iterable[ProcessStatus], *, source: str | None = None
+        self,
+        statuses: Iterable[ProcessStatus],
+        *,
+        source: str | None = None,
+        regime: FeedRegime = "all",
     ) -> "Query":
         """Query base de items del feed en los estados dados (opcional: por fuente).
 
-        Devuelve un `Query` para que el caller añada `options()`/orden según su vista.
+        ``regime``: ``feed_pure`` (sin `promoted_at`), ``promoted`` (pipeline-bound),
+        o ``all`` (sin filtro de promoción). Devuelve un `Query` para que el caller
+        añada `options()`/orden según su vista.
         """
         query = self.session.query(Process).filter(
             Process.status.in_(list(statuses))
         )
         if source is not None:
             query = query.filter(Process.source == source)
-        return query
+        return self._apply_regime(query, regime)
 
     def by_status_for_entity(
         self,
         source: str,
         entity_id: int,
         statuses: Iterable[ProcessStatus],
+        *,
+        regime: FeedRegime = "all",
     ) -> list[Process]:
         """Items de una entidad y fuente en los estados dados.
 
@@ -72,13 +120,31 @@ class FeedRepository:
         depender del `source_ref`/nid, que SEACE reasigna al re-publicar un proceso.
         """
         return (
-            self.session.query(Process)
-            .filter(
-                Process.source == source,
-                Process.entity_id == entity_id,
-                Process.status.in_(list(statuses)),
-            )
+            self.query_by_status(statuses, source=source, regime=regime)
+            .filter(Process.entity_id == entity_id)
             .all()
+        )
+
+    def feed_pure_publicada_for_entity(
+        self, source: str, entity_id: int
+    ) -> list[Process]:
+        """`publicada` sin promoción: candidatos al dedupe del feed puro."""
+        return self.by_status_for_entity(
+            source,
+            entity_id,
+            (ProcessStatus.publicada,),
+            regime="feed_pure",
+        )
+
+    def promoted_publicada_for_entity(
+        self, source: str, entity_id: int
+    ) -> list[Process]:
+        """`publicada` promovida: pipeline-bound, target de merge en re-publicación."""
+        return self.by_status_for_entity(
+            source,
+            entity_id,
+            (ProcessStatus.publicada,),
+            regime="promoted",
         )
 
     def claimed_for_entity(

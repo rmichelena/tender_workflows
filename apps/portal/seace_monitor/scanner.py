@@ -19,7 +19,12 @@ from .auto_reject import (
 from .client import ProcessRow, SeaceClient
 from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus, utcnow
-from .feed import FeedRepository, clear_all_feed_decisions, record_autoreject_decision
+from .feed import (
+    FeedRepository,
+    clear_all_feed_decisions,
+    is_feed_pure,
+    record_autoreject_decision,
+)
 from .parser import extract_cronograma_fechas, parse_ficha, row_snapshot_hash
 from .scan_options import ScanOptions, passes_date_filter
 from .seace_search import normalize_nomenclatura
@@ -91,7 +96,7 @@ def is_removable_publicada_duplicate(
         return False
     return (
         proc.status == ProcessStatus.publicada
-        and proc.promoted_at is None
+        and is_feed_pure(proc)
         and not proc.data_dir
         and proc.analysis is None
     )
@@ -394,12 +399,17 @@ class MultiEntityScanner:
         # Dedup por id: un item con status reclamado (p. ej. analizada) puede tener una
         # decisión autorejected stale en el overlay; no debe añadirse dos veces al mapa.
         seen = {proc.id for proc in claimed}
+        for proc in self.feed.promoted_publicada_for_entity("seace", entity.id):
+            if proc.id in seen:
+                continue
+            claimed.append(proc)
+            seen.add(proc.id)
         for proc in self.feed.by_status_for_entity(
             "seace", entity.id, (ProcessStatus.publicada,)
         ):
             if proc.id in seen:
                 continue
-            if proc.id in autorejected_ids or proc.promoted_at is not None:
+            if proc.id in autorejected_ids:
                 claimed.append(proc)
                 seen.add(proc.id)
         return build_claimed_nomenclatura_map(claimed)
@@ -415,12 +425,10 @@ class MultiEntityScanner:
         de reclamados, no el de publicada pura, para no borrarlos ni perder su trabajo
         curado / decisión del overlay.
         """
-        rows = self.feed.by_status_for_entity(
-            "seace", entity.id, (ProcessStatus.publicada,)
-        )
+        rows = self.feed.feed_pure_publicada_for_entity("seace", entity.id)
         mapping: dict[str, Process] = {}
         for proc in rows:
-            if proc.id in autorejected_ids or proc.promoted_at is not None:
+            if proc.id in autorejected_ids:
                 continue
             key = normalize_nomenclatura(proc.nomenclatura)
             if not key:

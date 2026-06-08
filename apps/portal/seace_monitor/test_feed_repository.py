@@ -5,6 +5,8 @@ from __future__ import annotations
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from datetime import datetime, timezone
+
 from .db.models import Base, Entity, Process, ProcessStatus
 from .feed import FeedRepository, record_autoreject_decision, record_exempt_decision
 
@@ -171,3 +173,60 @@ def test_effective_autorejected_exempt_overlay_supersedes_legacy_status():
     assert repo.effective_autorejected_ids() == set()
     assert repo.is_effectively_autorejected(proc) is False
     assert repo.decision_for(proc) == "exempt"
+
+
+def test_feed_regime_filters_promotion_latch():
+    session = _session()
+    entity = _entity(session)
+    feed_pure = Process(
+        entity_id=entity.id,
+        anio=2026,
+        source="seace",
+        source_ref="1",
+        nid_proceso="1",
+        nomenclatura="LP-1",
+        status=ProcessStatus.publicada,
+    )
+    promoted = Process(
+        entity_id=entity.id,
+        anio=2026,
+        source="seace",
+        source_ref="2",
+        nid_proceso="2",
+        nomenclatura="LP-2",
+        status=ProcessStatus.publicada,
+        promoted_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+    pipeline = Process(
+        entity_id=entity.id,
+        anio=2026,
+        source="seace",
+        source_ref="3",
+        nid_proceso="3",
+        nomenclatura="LP-3",
+        status=ProcessStatus.descargada,
+        promoted_at=datetime(2026, 6, 2, tzinfo=timezone.utc),
+    )
+    session.add_all([feed_pure, promoted, pipeline])
+    session.commit()
+
+    repo = FeedRepository(session)
+    assert repo.is_feed_pure(feed_pure) is True
+    assert repo.is_promoted(promoted) is True
+    assert repo.promoted_ids() == {promoted.id, pipeline.id}
+
+    pure_pub = repo.feed_pure_publicada_for_entity("seace", entity.id)
+    assert pure_pub == [feed_pure]
+
+    promo_pub = repo.promoted_publicada_for_entity("seace", entity.id)
+    assert promo_pub == [promoted]
+
+    all_pub = repo.by_status_for_entity(
+        "seace", entity.id, (ProcessStatus.publicada,), regime="all"
+    )
+    assert set(all_pub) == {feed_pure, promoted}
+
+    promoted_only = repo.query_by_status(
+        [ProcessStatus.publicada, ProcessStatus.descargada], regime="promoted"
+    ).all()
+    assert set(promoted_only) == {promoted, pipeline}

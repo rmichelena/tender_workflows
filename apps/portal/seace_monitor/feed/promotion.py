@@ -39,6 +39,11 @@ def is_promoted(process: "Process") -> bool:
     return process.promoted_at is not None
 
 
+def is_feed_pure(process: "Process") -> bool:
+    """¿El item sigue siendo feed puro (descubrimiento, purgable)?"""
+    return process.promoted_at is None
+
+
 def should_be_promoted(process: "Process") -> bool:
     """Predicado puro: ¿el item ya califica como curado por su estado actual?
 
