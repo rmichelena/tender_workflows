@@ -25,7 +25,7 @@
     {% if documentos %}
     <form method="post" action="/analizados/{{ process.id }}/portafolio/preparar" id="form-portafolio">
       <ul class="doc-list doc-list-selectable doc-list-tree">
-        {{ doc_tree(documentos, process.id, 'analizados', selectable=true) }}
+        {{ doc_tree(documentos, process.id, 'analizados', selectable=true, portfolio_roles=true, document_role_labels=document_role_labels) }}
       </ul>
       <label class="form-label" for="notes">Notas para el seed prompt</label>
       <textarea id="notes" name="notes" rows="5" class="form-textarea" placeholder="Ej: priorizar equipos de inspección, revisar plazos críticos, armar BOM inicial..."></textarea>

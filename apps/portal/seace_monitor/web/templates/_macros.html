@@ -91,7 +91,7 @@
 {% endif %}
 {% endmacro %}
 
-{% macro doc_tree(nodes, process_id, route_prefix, selectable=false, analizando=false) %}
+{% macro doc_tree(nodes, process_id, route_prefix, selectable=false, analizando=false, portfolio_roles=false, document_role_labels={}) %}
 {% for node in nodes %}
 <li class="doc-item doc-tree-item{% if node.is_new %} doc-item-new{% endif %}{% if not node.downloaded %} doc-item-missing{% endif %}{% if node.seace_removed %} doc-item-removed{% endif %}{% if node.is_folder %} doc-item-folder{% endif %}">
   <div class="doc-row">
@@ -118,6 +118,13 @@
       </div>
       {% endif %}
     </div>
+    {% if portfolio_roles and node.selectable and node.rel_path %}
+    <select class="doc-role-select" name="document_role:{{ node.rel_path }}" aria-label="Función del documento">
+      {% for value, label in document_role_labels.items() %}
+      <option value="{{ value }}" {% if value == 'otros' %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
     {% if node.size_label %}
     <span class="doc-size muted">{{ node.size_label }}</span>
     {% endif %}
@@ -125,7 +132,7 @@
   </div>
   {% if node.children %}
   <ul class="doc-tree-children">
-    {{ doc_tree(node.children, process_id, route_prefix, selectable, analizando) }}
+    {{ doc_tree(node.children, process_id, route_prefix, selectable, analizando, portfolio_roles, document_role_labels) }}
   </ul>
   {% endif %}
 </li>

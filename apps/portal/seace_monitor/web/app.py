@@ -47,6 +47,7 @@ from ..process_storage import (
     resolve_restore_status,
 )
 from ..portfolio_workspace import (
+    DOCUMENT_ROLE_LABELS,
     prepare_portfolio_workspace,
     portfolio_workspace_status,
 )
@@ -1064,6 +1065,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             documentos=documentos,
             documento_count=count_document_nodes(documentos),
             portfolio=portfolio_workspace_status(proc),
+            document_role_labels=DOCUMENT_ROLE_LABELS,
             ProcessStatus=ProcessStatus,
         )
 
@@ -1090,11 +1092,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 status_code=303,
             )
         notes = str(form.get("notes") or "")
+        document_roles = {
+            rel: str(form.get(f"document_role:{rel}") or "")
+            for rel in selected
+        }
         try:
             prepare_portfolio_workspace(
                 _config,
                 proc,
                 selected,
+                document_roles=document_roles,
                 notes=notes,
                 prepared_by="portal",
             )

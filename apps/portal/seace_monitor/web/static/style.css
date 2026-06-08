@@ -321,6 +321,16 @@ table.data td.status-cell { vertical-align: top; white-space: nowrap; }
   margin: 0.35rem 0;
   word-break: break-word;
 }
+.doc-role-select {
+  width: 12.5rem;
+  max-width: 18vw;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font-size: 0.8rem;
+}
 
 .detail-grid {
   display: grid;

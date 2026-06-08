@@ -4,20 +4,33 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from dataclasses import dataclass
-from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from .config import AppConfig
 from .db.models import Process, utcnow
 from .analysis.document_prep import resolve_selected_documents
+from .parser import fechas_listado_from_cronograma_json
 
 
 MANIFEST_NAME = "staging_manifest.json"
 SEED_PROMPT_NAME = "seed_prompt.md"
 CONTEXT_NAME = "context.json"
+
+DOCUMENT_ROLE_LABELS = {
+    "bases_iniciales": "Bases iniciales",
+    "aclaraciones": "Aclaraciones / respuestas",
+    "bases_aclaradas": "Bases aclaradas / integradas",
+    "especificaciones_tecnicas": "Especificaciones técnicas",
+    "otros": "Otros",
+}
+_DATE_TIME_RE = re.compile(
+    r"^(\d{2})/(\d{2})/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?"
+)
 
 
 @dataclass(frozen=True)
@@ -73,6 +86,7 @@ def prepare_portfolio_workspace(
     process: Process,
     selected_rel_paths: list[str],
     *,
+    document_roles: dict[str, str] | None = None,
     notes: str = "",
     prepared_by: str = "portal",
 ) -> dict:
@@ -97,9 +111,12 @@ def prepare_portfolio_workspace(
     tmp_inputs.mkdir(parents=True, exist_ok=False)
 
     selected_documents: list[dict] = []
+    document_roles = document_roles or {}
     try:
         for source_path in selected_paths:
             rel = source_path.relative_to(docs_dir)
+            rel_key = str(rel).replace("\\", "/")
+            document_role = normalize_document_role(document_roles.get(rel_key))
             dest_path = tmp_inputs / rel
             final_dest_path = inputs_dir / rel
             dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,6 +128,8 @@ def prepare_portfolio_workspace(
                     "original_name": source_path.name,
                     "sha256": _sha256(dest_path),
                     "included": True,
+                    "document_role": document_role,
+                    "document_role_label": DOCUMENT_ROLE_LABELS[document_role],
                 }
             )
         _replace_inputs_dir(inputs_dir, tmp_inputs, portfolio_dir)
@@ -119,6 +138,7 @@ def prepare_portfolio_workspace(
         raise
 
     now = utcnow().astimezone(timezone.utc).isoformat()
+    scenario = infer_portfolio_scenario(process, selected_documents)
     manifest = {
         "version": "0.1",
         "process_id": process.id,
@@ -126,7 +146,8 @@ def prepare_portfolio_workspace(
         "source": process.source,
         "selected_documents": selected_documents,
         "uploads": [],
-        "clarifications": [],
+        "clarifications": _clarifications_from_documents(selected_documents),
+        "portfolio_scenario": scenario,
         "free_reader_profile": _load_free_reader_profile(proc_dir),
         "notes": notes.strip(),
         "prepared_at": now,
@@ -139,7 +160,7 @@ def prepare_portfolio_workspace(
         encoding="utf-8",
     )
 
-    context = _build_context(config, process, proc_dir, portfolio_dir)
+    context = _build_context(config, process, proc_dir, portfolio_dir, scenario)
     (portfolio_dir / CONTEXT_NAME).write_text(
         json.dumps(context, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -150,6 +171,107 @@ def prepare_portfolio_workspace(
     )
     _append_decision_log(portfolio_dir, f"{now} portfolio workspace prepared by {prepared_by}")
     return manifest
+
+
+def normalize_document_role(value: str | None) -> str:
+    role = str(value or "").strip()
+    if role in DOCUMENT_ROLE_LABELS:
+        return role
+    return "otros"
+
+
+def infer_portfolio_scenario(process: Process, selected_documents: list[dict]) -> dict:
+    roles = {
+        str(doc.get("document_role") or "otros")
+        for doc in selected_documents
+        if isinstance(doc, dict)
+    }
+    queries_status = _queries_window_status(process)
+    if "bases_aclaradas" in roles:
+        scenario_id = "verify_integrated_bases"
+        seed_variant = "bases_clarifications_integrated"
+        action = (
+            "Verificar que las aclaraciones fueron integradas correctamente en las bases "
+            "aclaradas/integradas y completar brechas si hace falta."
+        )
+    elif "aclaraciones" in roles:
+        scenario_id = "integrate_clarifications"
+        seed_variant = "bases_plus_clarifications"
+        action = (
+            "Integrar aclaraciones/respuestas con las bases iniciales antes de continuar "
+            "el trabajo de portafolio."
+        )
+    else:
+        scenario_id = "initial_bases"
+        seed_variant = "initial_bases"
+        if queries_status == "open":
+            action = (
+                "Trabajar sobre bases iniciales con etapa de consultas abierta; priorizar "
+                "preguntas, observaciones y riesgos para el usuario."
+            )
+        else:
+            action = (
+                "Trabajar sobre bases iniciales sin aclaraciones seleccionadas; revisar alcance, "
+                "riesgos y próximos pasos con el usuario."
+            )
+    return {
+        "id": scenario_id,
+        "seed_variant": seed_variant,
+        "recommended_action": action,
+        "queries_window": queries_status,
+        "document_roles": sorted(roles),
+    }
+
+
+def _queries_window_status(process: Process) -> str:
+    fechas = fechas_listado_from_cronograma_json(
+        process.cronograma_json,
+        fallback_consultas=process.fecha_consultas or "",
+        fallback_presentacion=process.fecha_presentacion or "",
+    )
+    if not fechas.fecha_consultas:
+        return "unknown"
+    ts = parse_seace_datetime(fechas.fecha_consultas)
+    if ts is None:
+        return "unknown"
+    now_ts = datetime.now().timestamp()
+    return "open" if ts >= now_ts else "closed"
+
+
+def parse_seace_datetime(value: str | None) -> float | None:
+    if not value:
+        return None
+    match = _DATE_TIME_RE.match(value.strip())
+    if not match:
+        return None
+    day, month, year, hour, minute, second = match.groups()
+    try:
+        dt = datetime(
+            int(year),
+            int(month),
+            int(day),
+            int(hour or 0),
+            int(minute or 0),
+            int(second or 0),
+        )
+    except ValueError:
+        return None
+    return dt.timestamp()
+
+
+def _clarifications_from_documents(selected_documents: list[dict]) -> list[dict]:
+    clarifications: list[dict] = []
+    for doc in selected_documents:
+        if doc.get("document_role") != "aclaraciones":
+            continue
+        clarifications.append(
+            {
+                "file": str(doc.get("dest_path") or ""),
+                "clarification_type": "aclaracion",
+                "notes": "Clasificado por usuario en staging de portafolio",
+            }
+        )
+    return clarifications
 
 
 def _replace_inputs_dir(inputs_dir: Path, tmp_inputs: Path, portfolio_dir: Path) -> None:
@@ -206,6 +328,7 @@ def _build_context(
     process: Process,
     proc_dir: Path,
     portfolio_dir: Path,
+    scenario: dict,
 ) -> dict:
     return {
         "version": "0.1",
@@ -231,6 +354,7 @@ def _build_context(
             "artifacts_dir": str((portfolio_dir / "artifacts").resolve()),
             "outputs_dir": str((portfolio_dir / "outputs").resolve()),
         },
+        "portfolio_scenario": scenario,
         "instruction_paths": {
             "stage_c_orchestrator": "instrucciones/C_conversion/00_orquestador.md",
             "stage_c_runbook": "instrucciones/C_conversion/01_runbook.md",
@@ -246,7 +370,9 @@ def _build_context(
 def _render_seed_prompt(process: Process, context: dict, *, notes: str) -> str:
     paths = context["paths"]
     instruction_paths = context["instruction_paths"]
+    scenario = context["portfolio_scenario"]
     notes_block = notes.strip() or "(sin notas adicionales)"
+    variant_block = _seed_variant_instructions(scenario)
     return f"""# Seed prompt — portafolio {process.id}
 
 Actúas como Hermes dentro del workspace de portafolio de una licitación. El portal ya hizo staging determinístico de documentos y preparó el contrato de archivos; desde aquí el trabajo es agéntico e interactivo.
@@ -258,6 +384,13 @@ Actúas como Hermes dentro del workspace de portafolio de una licitación. El po
 - Objeto: {process.objeto or "—"}
 - Source: {process.source}
 - Workflow profile: {process.workflow_profile}
+
+## Escenario detectado
+
+- Variante seed: `{scenario["seed_variant"]}`
+- Escenario: `{scenario["id"]}`
+- Estado ventana de consultas: `{scenario["queries_window"]}`
+- Acción recomendada: {scenario["recommended_action"]}
 
 ## Paths del workspace
 
@@ -280,6 +413,10 @@ Actúas como Hermes dentro del workspace de portafolio de una licitación. El po
 6. Preserva artefactos intermedios bajo `artifacts/` y resultados finales bajo `outputs/`.
 7. Registra decisiones relevantes en `logs/decision_log.md`.
 
+## Variante de arranque
+
+{variant_block}
+
 ## Playbooks disponibles
 
 - `{instruction_paths["stage_c_orchestrator"]}`
@@ -294,6 +431,33 @@ Actúas como Hermes dentro del workspace de portafolio de una licitación. El po
 
 {notes_block}
 """
+
+
+def _seed_variant_instructions(scenario: dict) -> str:
+    seed_variant = scenario.get("seed_variant")
+    if seed_variant == "bases_plus_clarifications":
+        return (
+            "El usuario seleccionó bases iniciales y documentos de aclaraciones/respuestas. "
+            "Tu primera tarea es revisar el manifest, ubicar ambos grupos documentales e integrar "
+            "las aclaraciones sobre las bases antes de continuar con BOM, specs o búsqueda."
+        )
+    if seed_variant == "bases_clarifications_integrated":
+        return (
+            "El usuario seleccionó bases aclaradas/integradas. Tu primera tarea es verificar "
+            "contra bases iniciales y aclaraciones disponibles que la integración sea correcta; "
+            "si faltan aclaraciones o hay contradicciones, documenta brechas y propone corrección."
+        )
+    if scenario.get("queries_window") == "open":
+        return (
+            "El usuario seleccionó bases iniciales y la ventana de consultas parece abierta. "
+            "Tu primera tarea es detectar ambigüedades, riesgos, requisitos imposibles o puntos "
+            "que convenga preguntar/observar antes del cierre de consultas."
+        )
+    return (
+        "El usuario seleccionó bases iniciales sin aclaraciones clasificadas. Tu primera tarea es "
+        "orientar el análisis inicial de portafolio y confirmar con el usuario si conviene buscar "
+        "aclaraciones, preparar consultas u ordenar requisitos."
+    )
 
 
 def _append_decision_log(portfolio_dir: Path, line: str) -> None:

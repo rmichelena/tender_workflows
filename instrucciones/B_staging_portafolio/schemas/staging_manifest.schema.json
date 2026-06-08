@@ -23,6 +23,17 @@
           "dest_path": { "type": "string" },
           "original_name": { "type": "string" },
           "sha256": { "type": "string" },
+          "document_role": {
+            "type": "string",
+            "enum": [
+              "bases_iniciales",
+              "aclaraciones",
+              "bases_aclaradas",
+              "especificaciones_tecnicas",
+              "otros"
+            ]
+          },
+          "document_role_label": { "type": "string" },
           "included": { "type": "boolean", "default": true }
         }
       }
@@ -52,6 +63,37 @@
             "enum": ["aclaracion", "addenda", "enmienda"]
           },
           "notes": { "type": "string" }
+        }
+      }
+    },
+    "portfolio_scenario": {
+      "type": "object",
+      "description": "Escenario A/B/C deducido a partir de la clasificación documental y cronograma.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": [
+            "initial_bases",
+            "integrate_clarifications",
+            "verify_integrated_bases"
+          ]
+        },
+        "seed_variant": {
+          "type": "string",
+          "enum": [
+            "initial_bases",
+            "bases_plus_clarifications",
+            "bases_clarifications_integrated"
+          ]
+        },
+        "recommended_action": { "type": "string" },
+        "queries_window": {
+          "type": "string",
+          "enum": ["open", "closed", "unknown"]
+        },
+        "document_roles": {
+          "type": "array",
+          "items": { "type": "string" }
         }
       }
     },

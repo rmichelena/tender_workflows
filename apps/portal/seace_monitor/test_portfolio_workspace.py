@@ -67,6 +67,7 @@ def test_prepare_portfolio_workspace_writes_manifest_context_and_seed(tmp_path: 
             cfg,
             proc,
             ["bases.pdf"],
+            document_roles={"bases.pdf": "bases_iniciales"},
             notes="Priorizar plazo de entrega.",
             prepared_by="pytest",
         )
@@ -77,6 +78,8 @@ def test_prepare_portfolio_workspace_writes_manifest_context_and_seed(tmp_path: 
     portfolio_dir = proc_dir / "portafolio"
     assert (portfolio_dir / "inputs" / "bases.pdf").read_bytes() == b"%PDF-1.4\nbases"
     assert manifest["selected_documents"][0]["dest_path"] == "portafolio/inputs/bases.pdf"
+    assert manifest["selected_documents"][0]["document_role"] == "bases_iniciales"
+    assert manifest["portfolio_scenario"]["id"] == "initial_bases"
     assert (portfolio_dir / "staging_manifest.json").is_file()
     assert (portfolio_dir / "context.json").is_file()
     seed = (portfolio_dir / "seed_prompt.md").read_text(encoding="utf-8")
@@ -93,10 +96,15 @@ def test_portfolio_prepare_route_generates_workspace(tmp_path: Path):
     get_response = client.get(f"/analizados/{process_id}/portafolio/preparar")
     assert get_response.status_code == 200
     assert "Preparar workspace" in get_response.text
+    assert "Bases iniciales" in get_response.text
 
     post_response = client.post(
         f"/analizados/{process_id}/portafolio/preparar",
-        data={"selected_files": ["bases.pdf"], "notes": "Seed desde test."},
+        data={
+            "selected_files": ["bases.pdf"],
+            "document_role:bases.pdf": "bases_aclaradas",
+            "notes": "Seed desde test.",
+        },
         follow_redirects=False,
     )
 
@@ -109,4 +117,38 @@ def test_portfolio_prepare_route_generates_workspace(tmp_path: Path):
     )
     assert manifest["process_id"] == process_id
     assert manifest["selected_documents"][0]["source_path"] == "documentos/bases.pdf"
+    assert manifest["selected_documents"][0]["document_role"] == "bases_aclaradas"
+    assert manifest["portfolio_scenario"]["seed_variant"] == "bases_clarifications_integrated"
     assert (proc_dir / "portafolio" / "seed_prompt.md").is_file()
+
+
+def test_clarification_role_populates_clarifications_and_seed_variant(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'clar.db'}")
+    create_app(cfg)
+    process_id = _seed_portfolio_process(tmp_path)
+
+    db: Session = session_factory()
+    try:
+        proc = db.get(Process, process_id)
+        assert proc is not None
+        manifest = prepare_portfolio_workspace(
+            cfg,
+            proc,
+            ["bases.pdf", "anexo.docx"],
+            document_roles={
+                "bases.pdf": "bases_iniciales",
+                "anexo.docx": "aclaraciones",
+            },
+        )
+    finally:
+        db.close()
+
+    assert manifest["portfolio_scenario"]["id"] == "integrate_clarifications"
+    assert manifest["portfolio_scenario"]["seed_variant"] == "bases_plus_clarifications"
+    assert manifest["clarifications"] == [
+        {
+            "file": "portafolio/inputs/anexo.docx",
+            "clarification_type": "aclaracion",
+            "notes": "Clasificado por usuario en staging de portafolio",
+        }
+    ]

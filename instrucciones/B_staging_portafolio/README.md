@@ -11,9 +11,14 @@ Sistema **no agéntico**: formularios en el portal para armar el expediente que 
 Cuando un proceso está en **`portafolio`**, el usuario prepara la transición de **pre-portafolio** a **portafolio de trabajo**:
 
 1. Elegir qué documentos de `pre_portafolio/` se copian a `portafolio/inputs/`.
-2. Subir documentos adicionales (EETT no descargados, aclaraciones en papel, etc.).
-3. Declarar aclaraciones/addenda/enmiendas (**UI**, no chat con agente — sustituye Gate 0.a legacy).
-4. Generar **`staging_manifest.json`** — fuente de verdad para C.2 y auditoría.
+2. Clasificar la función de cada documento incluido: `bases_iniciales`, `aclaraciones`, `bases_aclaradas`, `especificaciones_tecnicas`, `otros`.
+3. Subir documentos adicionales (EETT no descargados, aclaraciones en papel, etc.).
+4. Declarar aclaraciones/addenda/enmiendas (**UI**, no chat con agente — sustituye Gate 0.a legacy).
+5. Generar **`staging_manifest.json`** — fuente de verdad para C.2 y auditoría.
+6. Deducir el escenario de arranque Hermes:
+   - `initial_bases` — bases iniciales sin aclaraciones; si consultas sigue abierto, preparar preguntas/observaciones.
+   - `integrate_clarifications` — bases iniciales + aclaraciones/respuestas; integrar aclaraciones.
+   - `verify_integrated_bases` — bases iniciales/aclaraciones + bases aclaradas/integradas; verificar integración y completar brechas.
 
 Estado objetivo opcional: **`portafolio_preparado`** cuando el manifest está completo y la copia terminó.
 
@@ -26,6 +31,7 @@ Estado objetivo opcional: **`portafolio_preparado`** cuando el manifest está co
 | Control | Descripción |
 |---------|-------------|
 | Tabla documentos | Lista de archivos en `pre_portafolio/documentos/_extracted/` con checkbox «incluir» |
+| Función documental | Menú por archivo incluido: bases iniciales, aclaraciones, bases aclaradas, EETT, otros |
 | Upload | Drag-drop → `portafolio/inputs/_uploads/` o directo a `inputs/` |
 | Aclaraciones | Por archivo upload o existente: tipo `aclaracion` / `addenda` / `enmienda` / `ninguno` |
 | Metadatos | Notas libres, referencia interna |
@@ -47,6 +53,8 @@ Campos principales:
 
 - `process_id`, `tenant_id`, `source`
 - `selected_documents[]` — path origen, path destino, hash opcional
+- `selected_documents[].document_role` — función documental elegida por el usuario
+- `portfolio_scenario` — escenario deducido para seed prompt Hermes
 - `uploads[]` — archivos nuevos
 - `clarifications[]` — `{ file, type, declared_at }`
 - `free_reader_profile` — copia de `pre_portafolio/fast_analysis/profile.json`
