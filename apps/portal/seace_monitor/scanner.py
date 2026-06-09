@@ -405,7 +405,7 @@ class MultiEntityScanner:
             claimed.append(proc)
             seen.add(proc.id)
         for proc in self.feed.by_status_for_entity(
-            "seace", entity.id, (ProcessStatus.publicada,)
+            "seace", entity.id, (ProcessStatus.publicada,), regime="feed_pure"
         ):
             if proc.id in seen:
                 continue
@@ -417,13 +417,11 @@ class MultiEntityScanner:
     def _publicada_nomenclatura_map(
         self, entity: Entity, autorejected_ids: Collection[int] = ()
     ) -> dict[str, Process]:
-        """Mapa nomenclatura-normalizada → `publicada` preferida (nid más reciente).
+        """Mapa nomenclatura-normalizada → `publicada` feed-puro preferida (nid más reciente).
 
-        Permite deduplicar re-publicaciones dentro del feed puro: si la misma licitación
-        aparece dos veces como `publicada` (nid reasignado), conservamos una sola fila.
-        Excluye los autorechazados y los **promovidos** (0.3d): ambos los gestiona el mapa
-        de reclamados, no el de publicada pura, para no borrarlos ni perder su trabajo
-        curado / decisión del overlay.
+        Dedupe de re-publicaciones entre filas `publicada` sin promoción. Los promovidos
+        ya quedan fuera vía `feed_pure_publicada_for_entity`; los autorechazados efectivos
+        se excluyen aquí y los gestiona el mapa de reclamados.
         """
         rows = self.feed.feed_pure_publicada_for_entity("seace", entity.id)
         mapping: dict[str, Process] = {}
