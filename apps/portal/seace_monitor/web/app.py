@@ -611,11 +611,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.get("/archivados", response_class=HTMLResponse)
     def archivados(request: Request, db: Session = Depends(get_db)):
+        from ..feed.pipeline_repository import PipelineRepository
+        from ..db.models import PipelineItem
         rows = (
-            db.query(Process)
-            .options(joinedload(Process.entity), joinedload(Process.analysis))
-            .filter(Process.status == ProcessStatus.archivada)
-            .order_by(Process.updated_at.desc())
+            PipelineRepository(db)
+            .query_by_status([ProcessStatus.archivada])
+            .options(joinedload(PipelineItem.entity), joinedload(PipelineItem.analysis))
+            .order_by(PipelineItem.updated_at.desc())
             .all()
         )
         return render(

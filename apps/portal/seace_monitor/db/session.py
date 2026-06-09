@@ -785,18 +785,18 @@ def _sync_dirty_promoted(session: Session) -> None:
             if obj.process_id is not None:
                 proc = session.get(_Process, obj.process_id)
                 if proc is not None and proc.promoted_at is not None and proc.id not in synced_ids:
-                    sync_to_pipeline(session, proc)
+                    pi = sync_to_pipeline(session, proc)
                     synced_ids.add(proc.id)
                     needs_flush = True
-                if obj.pipeline_item_id is None and obj.process_id is not None:
+                else:
                     pi = (
                         session.query(_PI)
                         .filter(_PI.origin_feed_id == obj.process_id)
                         .one_or_none()
                     )
-                    if pi is not None:
-                        obj.pipeline_item_id = pi.id
-                        needs_flush = True
+                if obj.pipeline_item_id is None and pi is not None:
+                    obj.pipeline_item_id = pi.id
+                    needs_flush = True
 
     if needs_flush:
         session.flush()
@@ -810,9 +810,9 @@ def commit_session_with_retry(
     Antes del commit, sincroniza los Process promovidos sucios a PipelineItem
     (dual-write 0.3e-2). Solo procesa objetos que están en la sesión (new/dirty).
     """
-    _sync_dirty_promoted(session)
     for attempt in range(attempts):
         try:
+            _sync_dirty_promoted(session)
             session.commit()
             return
         except OperationalError as exc:
