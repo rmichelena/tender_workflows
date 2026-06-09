@@ -729,10 +729,47 @@ def _backfill_pipeline_items(engine) -> None:
                 )
 
 
+def _sync_dirty_promoted(session: Session) -> None:
+    """Dual-write (0.3e-2): sincroniza Process promovidos sucios a PipelineItem.
+
+    Inspecciona la sesión de SQLAlchemy para encontrar objetos `Process` que fueron
+    modificados y tienen `promoted_at` seteado. Para cada uno, llama a
+    `sync_to_pipeline`. También detecta AnalysisResult nuevos y sincroniza su
+    process asociado.
+    """
+    from .models import Process as _Process, AnalysisResult as _AR
+    from .pipeline_sync import sync_to_pipeline, sync_analysis_to_pipeline
+
+    synced_ids: set[int] = set()
+
+    for obj in session.dirty:
+        if isinstance(obj, _Process) and obj.promoted_at is not None:
+            sync_to_pipeline(session, obj)
+            sync_analysis_to_pipeline(session, obj)
+            synced_ids.add(obj.id)
+    for obj in session.new:
+        if isinstance(obj, _Process) and obj.promoted_at is not None:
+            sync_to_pipeline(session, obj)
+            sync_analysis_to_pipeline(session, obj)
+            synced_ids.add(obj.id)
+        elif isinstance(obj, _AR):
+            # Nuevo analysis: sincronizar su process si es promovido
+            proc = session.get(_Process, obj.process_id)
+            if proc is not None and proc.promoted_at is not None and proc.id not in synced_ids:
+                sync_to_pipeline(session, proc)
+                sync_analysis_to_pipeline(session, proc)
+                synced_ids.add(proc.id)
+
+
 def commit_session_with_retry(
     session: Session, *, attempts: int = 8, delay: float = 0.25
 ) -> None:
-    """Commit con reintentos ante bloqueos transitorios de SQLite."""
+    """Commit con reintentos ante bloqueos transitorios de SQLite.
+
+    Antes del commit, sincroniza los Process promovidos sucios a PipelineItem
+    (dual-write 0.3e-2). Solo procesa objetos que están en la sesión (new/dirty).
+    """
+    _sync_dirty_promoted(session)
     for attempt in range(attempts):
         try:
             session.commit()
