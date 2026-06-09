@@ -1,7 +1,7 @@
 # Branch Review Final — 0.3e-split-fisico (2nd round)
 
 **Branch:** `0.3e-split-fisico`
-**Head:** `16ff28e`
+**Head:** `e2626ba`
 **Base:** `e3e584f` (main)
 **Reviewers:** GPT-5.5, GLM-5.1, DeepSeek V4 Pro
 **Date:** 2026-06-09
@@ -50,7 +50,26 @@ Segunda ronda de multi-review sobre la rama completa después de corregir los 7 
 ### 9. 🟢 LOW: Dual-write bypass en SQL directo (DeepSeek)
 - **Status:** ⚪ Accepted — rutas SQL directas son mantenimiento, no flujo normal
 
-## Commits (11 total)
+### 10. 🟡 MED: AnalysisResult.pipeline_item_id NULL en same-commit (GPT + GLM)
+- **File:** `db/session.py:786-802`
+- **Status:** ✅ Fixed — added session.flush() after PipelineItem creation to assign PK before linking AR
+- autoflush=False meant pi.id was None when assigned to AR FK
+
+### 11. 🟡 MED: tenant_id hardcoded to 'default' (GLM)
+- **File:** `db/pipeline_sync.py:99`
+- **Status:** ✅ Fixed — session_factory stores tenant_id, sync reads from session, web/app passes _config.tenant_id
+- Tests and single-tenant callers use default; architecture ready for multi-tenant
+
+### 12. 🟢 LOW: list_order.py ranks on FeedItem but reads from PipelineItem (GPT)
+- **Status:** ⚪ Works via dual-write — will move to PipelineItem when dual-write removed
+
+### 13. 🟢 LOW: SYNC_FIELDS omits first_seen_at (GPT)
+- **Status:** ⚪ By design — first_seen_at is set-once, not updated
+
+### 14. 🟢 LOW: Postgres backfill path untested (GPT)
+- **Status:** ⚪ All prod is SQLite; Postgres is opt-in
+
+## Commits (14 total)
 
 1. `e44c67d` feat(0.3e-1): PipelineItem model + backfill migration
 2. `7b9d1f8` feat(0.3e-2): dual-write via session hook
@@ -62,7 +81,10 @@ Segunda ronda de multi-review sobre la rama completa después de corregir los 7 
 8. `7a3a6d3` refactor(0.3e-4): rename Process → FeedItem
 9. `12bb85b` refactor(0.3e-5): bulk rename 58 files
 10. `916a6cb` docs: update AGENTS.md
-11. `16ff28e` fix(0.3e): address final multi-review findings
+11. `16ff28e` fix(0.3e): address final multi-review findings (3 reviewers)
+12. `aa4a6a5` docs: add final consolidated multi-review (2nd round)
+13. `dec1e56` docs: update TODO with 0.3e post-split cleanup
+14. `e2626ba` fix(0.3e): address remaining findings (AR linkage, tenant_id)
 
 ## Verdict
 
