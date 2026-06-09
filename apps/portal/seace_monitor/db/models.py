@@ -81,10 +81,10 @@ class Entity(Base):
     osce_ultima_actualizacion: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    processes: Mapped[list[Process]] = relationship(back_populates="entity")
+    processes: Mapped[list["FeedItem"]] = relationship(back_populates="entity")
 
 
-class Process(Base):
+class FeedItem(Base):
     __tablename__ = "processes"
     __table_args__ = (
         UniqueConstraint(
@@ -335,7 +335,7 @@ class AnalysisResult(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    process: Mapped[Process] = relationship(back_populates="analysis")
+    process: Mapped["FeedItem"] = relationship(back_populates="analysis")
     pipeline_item: Mapped[PipelineItem | None] = relationship(back_populates="analysis")
 
 
@@ -368,3 +368,7 @@ class TenantFeedDecision(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# Alias de compatibilidad — será eliminado en 0.3e-5
+Process = FeedItem
