@@ -48,6 +48,7 @@ from ..process_storage import (
 )
 from ..portfolio_workspace import (
     DOCUMENT_ROLE_LABELS,
+    INPUT_BUCKET_LABELS,
     PortfolioUpload,
     prepare_portfolio_workspace,
     portfolio_workspace_status,
@@ -1030,6 +1031,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if proc.status not in (ProcessStatus.analizada, ProcessStatus.portafolio):
             raise HTTPException(400, "Solo procesos analizados o en portafolio")
         proc.status = ProcessStatus(estado)
+        if proc.status == ProcessStatus.portafolio:
+            proc.interest_status = InterestStatus.opportunity
+            promote(db, proc)
         db.commit()
         return _workflow_list_redirect(
             "/analizados",
@@ -1067,6 +1071,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             documento_count=count_document_nodes(documentos),
             portfolio=portfolio_workspace_status(proc),
             document_role_labels=DOCUMENT_ROLE_LABELS,
+            input_bucket_labels=INPUT_BUCKET_LABELS,
             ProcessStatus=ProcessStatus,
         )
 
@@ -1103,11 +1108,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             for rel in selected
         }
         upload_role = str(form.get("upload_role") or "")
+        upload_input_bucket = str(form.get("upload_input_bucket") or "")
         uploads = [
             PortfolioUpload(
                 filename=str(upload.filename or ""),
                 content=await upload.read(),
                 document_role=upload_role,
+                input_bucket=upload_input_bucket,
             )
             for upload in upload_files
         ]

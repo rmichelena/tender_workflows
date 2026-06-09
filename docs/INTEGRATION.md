@@ -90,7 +90,7 @@ Variables de entorno: `GEMINI_API_KEY`, `SEACE_HTTP_PROXY` (ver `deploy/.env.exa
 | `descargando` | Descarga en curso |
 | `descargada` | Documentos en disco; pendiente analizar |
 | `analizada` | Fast-path o Paso 1 completado |
-| `portafolio` | Seleccionada para análisis profundo; no equivale obligatoriamente a oportunidad |
+| `portafolio` | Seleccionada para análisis profundo; implica `interest_status=opportunity` |
 | `autorejected` | Rechazada por reglas automáticas de filtro |
 | `descartada` | Descartada; sin datos locales |
 

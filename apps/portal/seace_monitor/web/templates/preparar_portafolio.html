@@ -21,7 +21,7 @@
 <div class="detail-grid">
   <div class="detail-box detail-box-wide">
     <h3>Documentos para staging</h3>
-    <p class="muted">Los documentos originales seleccionados se copiarán a <code>portafolio/inputs/</code>. Los archivos agregados manualmente irán a <code>portafolio/uploads/</code>. Ambos se incluirán en el manifest y deberán convertirse a Markdown.</p>
+    <p class="muted">Todo lo incluido se copiará bajo <code>portafolio/inputs/</code>: documentos oficiales en <code>docs_proceso/</code> y documentos de trabajo del usuario en <code>docs_usuario/</code>.</p>
     <form method="post" action="/analizados/{{ process.id }}/portafolio/preparar" id="form-portafolio" enctype="multipart/form-data">
       {% if documentos %}
       <ul class="doc-list doc-list-selectable doc-list-tree">
@@ -33,6 +33,12 @@
       <div class="upload-panel">
         <label class="form-label" for="upload-files">Uploads adicionales</label>
         <input id="upload-files" class="form-input" type="file" name="upload_files" multiple accept=".pdf,.doc,.docx,.xls,.xlsx"/>
+        <label class="form-label" for="upload-input-bucket">Destino de los uploads</label>
+        <select id="upload-input-bucket" name="upload_input_bucket" class="form-select">
+          {% for value, label in input_bucket_labels.items() %}
+          <option value="{{ value }}" {% if value == 'docs_usuario' %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
         <label class="form-label" for="upload-role">Función de los uploads</label>
         <select id="upload-role" name="upload_role" class="form-select">
           {% for value, label in document_role_labels.items() %}
@@ -57,7 +63,8 @@
       <li><code>{{ portfolio.seed_prompt_path }}</code></li>
       <li><code>{{ portfolio.context_path }}</code></li>
       <li><code>{{ portfolio.inputs_dir }}</code></li>
-      <li><code>{{ portfolio.uploads_dir }}</code></li>
+      <li><code>{{ portfolio.process_inputs_dir }}</code></li>
+      <li><code>{{ portfolio.user_inputs_dir }}</code></li>
     </ul>
   </div>
   {% endif %}

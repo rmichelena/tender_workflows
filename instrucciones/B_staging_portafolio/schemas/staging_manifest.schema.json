@@ -23,6 +23,12 @@
           "dest_path": { "type": "string" },
           "original_name": { "type": "string" },
           "sha256": { "type": "string" },
+          "input_bucket": {
+            "type": "string",
+            "enum": ["docs_proceso", "docs_usuario"],
+            "default": "docs_proceso"
+          },
+          "input_bucket_label": { "type": "string" },
           "document_role": {
             "type": "string",
             "enum": [
@@ -47,6 +53,12 @@
           "dest_path": { "type": "string" },
           "original_name": { "type": "string" },
           "sha256": { "type": "string" },
+          "input_bucket": {
+            "type": "string",
+            "enum": ["docs_proceso", "docs_usuario"],
+            "default": "docs_usuario"
+          },
+          "input_bucket_label": { "type": "string" },
           "document_role": {
             "type": "string",
             "enum": [

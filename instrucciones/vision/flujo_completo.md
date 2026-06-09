@@ -128,7 +128,7 @@ flowchart TB
 2. El sistema intenta asociar el hilo/documentos a un item existente; si no, crea uno nuevo.
 3. Los adjuntos entran como paquete documental versionado.
 4. Free reader perfil `market_study` (planificado): no fuerza cronograma, valor ni requisitos del postor.
-5. Puede pasar a portafolio para BOM/candidatos antes de ser oportunidad.
+5. Puede pasar a portafolio para BOM/candidatos; al hacerlo queda catalogado como oportunidad.
 
 ### Manual — invitación no pública
 

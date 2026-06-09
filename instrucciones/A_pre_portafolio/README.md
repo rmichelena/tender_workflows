@@ -36,7 +36,7 @@ La resolución final debe considerar `entity/source/workflow_profile/stage`; ver
 
 ### Portafolio sin analizar
 
-Desde **`descargada`**, marcar **`portafolio`** dispara free reader con perfil del item si falta resumen. Esto no equivale obligatoriamente a `interest_status=opportunity`; puede usarse para análisis profundo de candidatos.
+Desde **`descargada`**, marcar **`portafolio`** dispara free reader con perfil del item si falta resumen y cataloga el item como `interest_status=opportunity`.
 
 ---
 

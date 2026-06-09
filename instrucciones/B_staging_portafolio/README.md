@@ -12,7 +12,7 @@ Cuando un proceso está en **`portafolio`**, el usuario prepara la transición d
 
 1. Elegir qué documentos de `pre_portafolio/` se copian a `portafolio/inputs/`.
 2. Clasificar la función de cada documento incluido: `bases_iniciales`, `aclaraciones`, `bases_aclaradas`, `especificaciones_tecnicas`, `otros`.
-3. Subir documentos adicionales (EETT no descargados, aclaraciones en papel, etc.) a `portafolio/uploads/`.
+3. Subir documentos adicionales (EETT no descargados, aclaraciones en papel, etc.) y elegir si van a `portafolio/inputs/docs_proceso/` o `portafolio/inputs/docs_usuario/`.
 4. Declarar aclaraciones/addenda/enmiendas (**UI**, no chat con agente — sustituye Gate 0.a legacy).
 5. Generar **`staging_manifest.json`** — fuente de verdad para C.2 y auditoría.
 6. Deducir el escenario de arranque Hermes:
@@ -23,7 +23,7 @@ Cuando un proceso está en **`portafolio`**, el usuario prepara la transición d
 
 Estado objetivo opcional: **`portafolio_preparado`** cuando el manifest está completo y la copia terminó.
 
-**Implementado ahora:** selección + clasificación de documentos existentes y uploads básicos a `portafolio/uploads/`. La subclasificación fina de aclaraciones (`addenda` / `enmienda`) queda como incremento posterior.
+**Implementado ahora:** selección + clasificación de documentos existentes y uploads básicos bajo `portafolio/inputs/`, separados entre `docs_proceso/` y `docs_usuario/`. La subclasificación fina de aclaraciones (`addenda` / `enmienda`) queda como incremento posterior.
 
 ---
 
@@ -35,7 +35,7 @@ Estado objetivo opcional: **`portafolio_preparado`** cuando el manifest está co
 |---------|-------------|
 | Tabla documentos | Lista de archivos en `pre_portafolio/documentos/_extracted/` con checkbox «incluir» |
 | Función documental | Menú por archivo incluido: bases iniciales, aclaraciones, bases aclaradas, EETT, otros |
-| Upload | Archivos adicionales → `portafolio/uploads/` |
+| Upload | Archivos adicionales → `portafolio/inputs/docs_proceso/` o `portafolio/inputs/docs_usuario/` |
 | Aclaraciones | Por archivo upload o existente: tipo `aclaracion` / `addenda` / `enmienda` / `ninguno` |
 | Metadatos | Notas libres, referencia interna |
 | Acción | «Confirmar staging» → copia atómica + manifest |
@@ -58,7 +58,7 @@ Campos principales:
 - `selected_documents[]` — path origen, path destino, hash opcional
 - `selected_documents[].document_role` — función documental elegida por el usuario
 - `portfolio_scenario` — escenario deducido para seed prompt Hermes
-- `uploads[]` — archivos nuevos bajo `portafolio/uploads/`, también sujetos a conversión Markdown
+- `uploads[]` — archivos nuevos bajo `portafolio/inputs/docs_proceso/` o `portafolio/inputs/docs_usuario/`, también sujetos a conversión Markdown
 - `clarifications[]` — `{ file, type, declared_at }`
 - `free_reader_profile` — copia de `pre_portafolio/fast_analysis/profile.json`
 - `prepared_at`, `prepared_by` (futuro multi-user)
@@ -70,8 +70,8 @@ Campos principales:
 | Etapa | Handoff |
 |-------|---------|
 | A | Lee `pre_portafolio/` |
-| B | Escribe `portafolio/inputs/` para originales, `portafolio/uploads/` para agregados manuales + manifest |
-| C | Lee `portafolio/inputs/` y `portafolio/uploads/`; C.2 lee `clarifications[]` |
+| B | Escribe `portafolio/inputs/docs_proceso/` para originales y uploads oficiales, `portafolio/inputs/docs_usuario/` para documentos de trabajo del usuario + manifest |
+| C | Lee todo `portafolio/inputs/`; C.2 lee `clarifications[]` |
 | D | Trabaja bajo `portafolio/` |
 
 ---

@@ -6,7 +6,7 @@ Eres el orquestador de la **etapa C**: normalizar e indexar el expediente en `po
 
 ## Antes de empezar
 
-1. Verificar que etapa **B** completó: existe `portafolio/staging_manifest.json` y `portafolio/inputs/` poblado.
+1. Verificar que etapa **B** completó: existe `portafolio/staging_manifest.json` y `portafolio/inputs/` poblado (`docs_proceso/` y/o `docs_usuario/`).
 2. Leer `../shared/agent_patterns.md`.
 3. Leer `01_runbook.md` (pasos C.1–C.4).
 4. Leer `../shared/params.yaml` y `../shared/model_routing.yaml`.

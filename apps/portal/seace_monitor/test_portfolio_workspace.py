@@ -11,7 +11,9 @@ from .config import AppConfig
 from .db.models import Entity, Process, ProcessStatus
 from .db.session import session_factory
 from .portfolio_workspace import (
+    PROCESS_INPUT_BUCKET,
     PortfolioUpload,
+    USER_INPUT_BUCKET,
     parse_seace_datetime,
     prepare_portfolio_workspace,
 )
@@ -81,8 +83,11 @@ def test_prepare_portfolio_workspace_writes_manifest_context_and_seed(tmp_path: 
 
     proc_dir = tmp_path / "tenants" / "default" / "procesos" / "web-portfolio"
     portfolio_dir = proc_dir / "portafolio"
-    assert (portfolio_dir / "inputs" / "bases.pdf").read_bytes() == b"%PDF-1.4\nbases"
-    assert manifest["selected_documents"][0]["dest_path"] == "portafolio/inputs/bases.pdf"
+    assert (
+        portfolio_dir / "inputs" / "docs_proceso" / "bases.pdf"
+    ).read_bytes() == b"%PDF-1.4\nbases"
+    assert manifest["selected_documents"][0]["dest_path"] == "portafolio/inputs/docs_proceso/bases.pdf"
+    assert manifest["selected_documents"][0]["input_bucket"] == PROCESS_INPUT_BUCKET
     assert manifest["selected_documents"][0]["document_role"] == "bases_iniciales"
     assert manifest["portfolio_scenario"]["id"] == "initial_bases"
     assert (portfolio_dir / "staging_manifest.json").is_file()
@@ -122,6 +127,7 @@ def test_portfolio_prepare_route_generates_workspace(tmp_path: Path):
     )
     assert manifest["process_id"] == process_id
     assert manifest["selected_documents"][0]["source_path"] == "documentos/bases.pdf"
+    assert manifest["selected_documents"][0]["dest_path"] == "portafolio/inputs/docs_proceso/bases.pdf"
     assert manifest["selected_documents"][0]["document_role"] == "bases_aclaradas"
     assert manifest["portfolio_scenario"]["seed_variant"] == "bases_clarifications_integrated"
     assert (proc_dir / "portafolio" / "seed_prompt.md").is_file()
@@ -152,14 +158,14 @@ def test_clarification_role_populates_clarifications_and_seed_variant(tmp_path: 
     assert manifest["portfolio_scenario"]["seed_variant"] == "bases_plus_clarifications"
     assert manifest["clarifications"] == [
         {
-            "file": "portafolio/inputs/anexo.docx",
+            "file": "portafolio/inputs/docs_proceso/anexo.docx",
             "clarification_type": "aclaracion",
             "notes": "Clasificado por usuario en staging de portafolio",
         }
     ]
 
 
-def test_uploads_go_to_uploads_dir_and_participate_in_scenario(tmp_path: Path):
+def test_uploads_go_to_user_inputs_by_default_and_participate_in_scenario(tmp_path: Path):
     cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'upload.db'}")
     create_app(cfg)
     process_id = _seed_portfolio_process(tmp_path)
@@ -185,15 +191,50 @@ def test_uploads_go_to_uploads_dir_and_participate_in_scenario(tmp_path: Path):
         db.close()
 
     proc_dir = tmp_path / "tenants" / "default" / "procesos" / "web-portfolio"
-    assert (proc_dir / "portafolio" / "inputs" / "bases.pdf").is_file()
-    upload_path = proc_dir / "portafolio" / "uploads" / "EETT_c_mara_t_rmica.pdf"
+    assert (proc_dir / "portafolio" / "inputs" / "docs_proceso" / "bases.pdf").is_file()
+    upload_path = proc_dir / "portafolio" / "inputs" / "docs_usuario" / "EETT_c_mara_t_rmica.pdf"
     assert upload_path.read_bytes() == b"%PDF-1.4\nupload"
-    assert manifest["uploads"][0]["dest_path"] == "portafolio/uploads/EETT_c_mara_t_rmica.pdf"
+    assert manifest["uploads"][0]["dest_path"] == "portafolio/inputs/docs_usuario/EETT_c_mara_t_rmica.pdf"
+    assert manifest["uploads"][0]["input_bucket"] == USER_INPUT_BUCKET
     assert manifest["uploads"][0]["document_role"] == "especificaciones_tecnicas"
     context = json.loads(
         (proc_dir / "portafolio" / "context.json").read_text(encoding="utf-8")
     )
-    assert context["paths"]["uploads_dir"].endswith("/portafolio/uploads")
+    assert context["paths"]["inputs_dir"].endswith("/portafolio/inputs")
+    assert context["paths"]["user_inputs_dir"].endswith("/portafolio/inputs/docs_usuario")
+
+
+def test_uploads_can_be_classified_as_process_docs(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'upload-process.db'}")
+    create_app(cfg)
+    process_id = _seed_portfolio_process(tmp_path)
+
+    db: Session = session_factory()
+    try:
+        proc = db.get(Process, process_id)
+        assert proc is not None
+        manifest = prepare_portfolio_workspace(
+            cfg,
+            proc,
+            [],
+            uploads=[
+                PortfolioUpload(
+                    filename="aclaracion oficial.pdf",
+                    content=b"%PDF-1.4\nofficial",
+                    document_role="aclaraciones",
+                    input_bucket=PROCESS_INPUT_BUCKET,
+                )
+            ],
+        )
+    finally:
+        db.close()
+
+    proc_dir = tmp_path / "tenants" / "default" / "procesos" / "web-portfolio"
+    upload_path = proc_dir / "portafolio" / "inputs" / "docs_proceso" / "aclaracion_oficial.pdf"
+    assert upload_path.read_bytes() == b"%PDF-1.4\nofficial"
+    assert manifest["uploads"][0]["dest_path"] == "portafolio/inputs/docs_proceso/aclaracion_oficial.pdf"
+    assert manifest["uploads"][0]["input_bucket"] == PROCESS_INPUT_BUCKET
+    assert manifest["clarifications"][0]["file"] == "portafolio/inputs/docs_proceso/aclaracion_oficial.pdf"
 
 
 def test_technical_specs_without_bases_does_not_claim_initial_bases(tmp_path: Path):
@@ -243,12 +284,13 @@ def test_portfolio_prepare_route_accepts_upload_only(tmp_path: Path):
 
     assert response.status_code == 303
     proc_dir = tmp_path / "tenants" / "default" / "procesos" / "web-portfolio"
-    assert not any((proc_dir / "portafolio" / "inputs").iterdir())
-    assert (proc_dir / "portafolio" / "uploads" / "specs.pdf").is_file()
+    assert not any((proc_dir / "portafolio" / "inputs" / "docs_proceso").iterdir())
+    assert (proc_dir / "portafolio" / "inputs" / "docs_usuario" / "specs.pdf").is_file()
     manifest = json.loads(
         (proc_dir / "portafolio" / "staging_manifest.json").read_text(encoding="utf-8")
     )
     assert manifest["selected_documents"] == []
+    assert manifest["uploads"][0]["dest_path"] == "portafolio/inputs/docs_usuario/specs.pdf"
     assert manifest["uploads"][0]["document_role"] == "especificaciones_tecnicas"
     assert manifest["portfolio_scenario"]["id"] == "technical_specs_only"
 

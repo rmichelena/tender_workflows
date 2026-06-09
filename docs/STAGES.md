@@ -125,12 +125,12 @@ Mailbox dedicado recibe solicitudes preliminares, EETT o versiones nuevas.
 | `descargando` | A | Job de descarga |
 | `descargada` | A | Documentos en disco; puede analizar o ir a portafolio |
 | `analizada` | A | Fast reader completado + chat seguimiento opcional |
-| `portafolio` | A→B | Análisis profundo seleccionado; normalmente hay interés, pero no equivale obligatoriamente a oportunidad |
+| `portafolio` | A→B | Análisis profundo seleccionado; en este portal implica `interest_status=opportunity` |
 | `portafolio_preparado` | B ✓ | *Planificado:* expediente copiado a `portafolio/inputs/` |
 | `autorejected` | — | Rechazado por reglas automáticas de filtro; puede revisarse/restaurarse desde UI |
 | `archivada` / `descartada` | — | Fuera del flujo activo |
 
-`interest_status` puede cambiar en cualquier estado operativo: un item puede estar `descargada` + `candidate`, `analizada` + `opportunity`, o incluso `portafolio` + `candidate` mientras se decide.
+`interest_status` puede cambiar en cualquier estado operativo: un item puede estar `descargada` + `candidate` o `analizada` + `opportunity`. Al marcar `portafolio`, el portal lo cataloga como `opportunity`.
 
 ### Atajo: portafolio sin analizar
 
@@ -181,7 +181,9 @@ Bajo `data/tenants/{tenant_id}/procesos/{process_key}/`:
 
   portafolio/                  # Etapas B–D — expediente de trabajo
     staging_manifest.json      # B: docs elegidos, aclaraciones, uploads
-    inputs/                    # copia seleccionada + archivos extra
+    inputs/                    # insumos sujetos a conversión
+      docs_proceso/            # documentos oficiales del proceso, descargados o subidos
+      docs_usuario/            # documentos de trabajo agregados por el usuario
     overlay_usuario.yaml       # preferencias búsqueda (D.5)
     artifacts/                 # C y D: step_* del runbook
     outputs/

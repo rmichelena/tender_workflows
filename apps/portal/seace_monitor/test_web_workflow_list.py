@@ -251,6 +251,15 @@ def test_cambiar_estado_preserves_sort_and_scroll(tmp_path: Path):
     assert "sort=fecha_publicacion" in location
     assert "dir=desc" in location
     assert "scroll=120" in location
+    db = session_factory()
+    try:
+        proc = db.get(FeedItem, process_id)
+        assert proc is not None
+        assert proc.status == ProcessStatus.portafolio
+        assert proc.interest_status == InterestStatus.opportunity
+        assert proc.promoted_at is not None
+    finally:
+        db.close()
 
 
 def test_descartar_analizado_accepts_sort_dir(tmp_path: Path):

@@ -39,7 +39,7 @@ Un `PipelineItem` se crea al promover un `FeedItem` (acción positiva), copiando
 | `stage` | Etapa de **procesamiento documental** A–D: pre-portafolio, staging, conversión, trabajo agentico. |
 | `lifecycle_phase` | **Fase comercial** del objeto: `pre_licitacion`/`estudio_mercado` → `licitacion` → `adjudicacion` → `ejecucion`. Ortogonal a `status` y `stage`. |
 
-`portafolio` no debe ser sinónimo obligatorio de `opportunity`: normalmente implica interés, pero puede usarse para hacer análisis profundo antes de declarar una oportunidad.
+En este portal, marcar un item como `portafolio` implica `interest_status=opportunity`: ya fue seleccionado para trabajo comercial profundo. Esto no cambia que `Process`/`PipelineItem` sea el objeto base y no se llame "oportunidad" hasta que el usuario tome esa decisión.
 
 `autorejected` es un estado operativo para items rechazados por reglas automáticas de filtro. No reemplaza a `interest_status=rejected`, que representa una decisión de interés comercial.
 
@@ -254,7 +254,7 @@ Cambios de procesamiento:
 Cambios UI:
 
 - Permitir marcar `interest_status` en cualquier item y etapa.
-- No asumir que `portafolio` equivale a oportunidad.
+- Marcar `portafolio` debe setear `interest_status=opportunity`.
 - Mostrar entity como cliente/comprador en fuentes no-SEACE.
 - Diferenciar “nuevo paquete/documentos nuevos” de “nuevo item”.
 

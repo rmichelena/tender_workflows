@@ -20,6 +20,12 @@ from .parser import fechas_listado_from_cronograma_json
 MANIFEST_NAME = "staging_manifest.json"
 SEED_PROMPT_NAME = "seed_prompt.md"
 CONTEXT_NAME = "context.json"
+PROCESS_INPUT_BUCKET = "docs_proceso"
+USER_INPUT_BUCKET = "docs_usuario"
+INPUT_BUCKET_LABELS = {
+    PROCESS_INPUT_BUCKET: "Docs proceso",
+    USER_INPUT_BUCKET: "Docs usuario",
+}
 
 DOCUMENT_ROLE_LABELS = {
     "bases_iniciales": "Bases iniciales",
@@ -39,10 +45,11 @@ class PortfolioWorkspaceStatus:
     prepared: bool
     portfolio_dir: Path | None
     inputs_dir: Path | None
+    process_inputs_dir: Path | None
+    user_inputs_dir: Path | None
     manifest_path: Path | None
     seed_prompt_path: Path | None
     context_path: Path | None
-    uploads_dir: Path | None
     selected_count: int = 0
     upload_count: int = 0
     prepared_at: str | None = None
@@ -53,6 +60,7 @@ class PortfolioUpload:
     filename: str
     content: bytes
     document_role: str = "otros"
+    input_bucket: str = USER_INPUT_BUCKET
 
 
 def portfolio_dir_for_process(process: Process) -> Path:
@@ -63,8 +71,9 @@ def portfolio_dir_for_process(process: Process) -> Path:
 
 def portfolio_workspace_status(process: Process) -> PortfolioWorkspaceStatus:
     if not process.data_dir:
-        return PortfolioWorkspaceStatus(False, None, None, None, None, None, None)
+        return PortfolioWorkspaceStatus(False, None, None, None, None, None, None, None)
     portfolio_dir = Path(process.data_dir) / "portafolio"
+    inputs_dir = portfolio_dir / "inputs"
     manifest_path = portfolio_dir / MANIFEST_NAME
     seed_prompt_path = portfolio_dir / SEED_PROMPT_NAME
     context_path = portfolio_dir / CONTEXT_NAME
@@ -86,11 +95,12 @@ def portfolio_workspace_status(process: Process) -> PortfolioWorkspaceStatus:
     return PortfolioWorkspaceStatus(
         prepared=manifest_path.is_file() and seed_prompt_path.is_file(),
         portfolio_dir=portfolio_dir,
-        inputs_dir=portfolio_dir / "inputs",
+        inputs_dir=inputs_dir,
+        process_inputs_dir=inputs_dir / PROCESS_INPUT_BUCKET,
+        user_inputs_dir=inputs_dir / USER_INPUT_BUCKET,
         manifest_path=manifest_path,
         seed_prompt_path=seed_prompt_path,
         context_path=context_path,
-        uploads_dir=portfolio_dir / "uploads",
         selected_count=selected_count,
         upload_count=upload_count,
         prepared_at=prepared_at,
@@ -131,11 +141,14 @@ def prepare_portfolio_workspace(
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     inputs_dir = portfolio_dir / "inputs"
-    uploads_dir = portfolio_dir / "uploads"
+    process_inputs_dir = inputs_dir / PROCESS_INPUT_BUCKET
+    user_inputs_dir = inputs_dir / USER_INPUT_BUCKET
     tmp_inputs = portfolio_dir / f".inputs_tmp_{uuid4().hex}"
-    tmp_uploads = portfolio_dir / f".uploads_tmp_{uuid4().hex}"
     tmp_inputs.mkdir(parents=True, exist_ok=False)
-    tmp_uploads.mkdir(parents=True, exist_ok=False)
+    tmp_process_inputs = tmp_inputs / PROCESS_INPUT_BUCKET
+    tmp_user_inputs = tmp_inputs / USER_INPUT_BUCKET
+    tmp_process_inputs.mkdir(parents=True, exist_ok=True)
+    tmp_user_inputs.mkdir(parents=True, exist_ok=True)
 
     selected_documents: list[dict] = []
     upload_documents: list[dict] = []
@@ -145,8 +158,8 @@ def prepare_portfolio_workspace(
             rel = source_path.relative_to(docs_dir)
             rel_key = str(rel).replace("\\", "/")
             document_role = normalize_document_role(document_roles.get(rel_key))
-            dest_path = tmp_inputs / rel
-            final_dest_path = inputs_dir / rel
+            dest_path = tmp_process_inputs / rel
+            final_dest_path = process_inputs_dir / rel
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_path, dest_path)
             selected_documents.append(
@@ -156,6 +169,8 @@ def prepare_portfolio_workspace(
                     "original_name": source_path.name,
                     "sha256": _sha256(dest_path),
                     "included": True,
+                    "input_bucket": PROCESS_INPUT_BUCKET,
+                    "input_bucket_label": INPUT_BUCKET_LABELS[PROCESS_INPUT_BUCKET],
                     "document_role": document_role,
                     "document_role_label": DOCUMENT_ROLE_LABELS[document_role],
                 }
@@ -164,26 +179,37 @@ def prepare_portfolio_workspace(
             if not upload.content:
                 raise RuntimeError(f"{upload.filename} está vacío o corrupto.")
             document_role = normalize_document_role(upload.document_role)
+            input_bucket = normalize_input_bucket(upload.input_bucket)
+            bucket_tmp_dir = (
+                tmp_process_inputs
+                if input_bucket == PROCESS_INPUT_BUCKET
+                else tmp_user_inputs
+            )
+            bucket_final_dir = (
+                process_inputs_dir
+                if input_bucket == PROCESS_INPUT_BUCKET
+                else user_inputs_dir
+            )
             dest_path = _unique_child_path(
-                tmp_uploads, _safe_upload_filename(upload.filename)
+                bucket_tmp_dir, _safe_upload_filename(upload.filename)
             )
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             dest_path.write_bytes(upload.content)
-            final_dest_path = uploads_dir / dest_path.name
+            final_dest_path = bucket_final_dir / dest_path.name
             upload_documents.append(
                 {
                     "dest_path": _rel_to_process(proc_dir, final_dest_path),
                     "original_name": upload.filename,
                     "sha256": _sha256(dest_path),
+                    "input_bucket": input_bucket,
+                    "input_bucket_label": INPUT_BUCKET_LABELS[input_bucket],
                     "document_role": document_role,
                     "document_role_label": DOCUMENT_ROLE_LABELS[document_role],
                 }
             )
         _replace_inputs_dir(inputs_dir, tmp_inputs, portfolio_dir)
-        _replace_inputs_dir(uploads_dir, tmp_uploads, portfolio_dir)
     except Exception:
         shutil.rmtree(tmp_inputs, ignore_errors=True)
-        shutil.rmtree(tmp_uploads, ignore_errors=True)
         raise
 
     now = utcnow().astimezone(timezone.utc).isoformat()
@@ -229,6 +255,13 @@ def normalize_document_role(value: str | None) -> str:
     if role in DOCUMENT_ROLE_LABELS:
         return role
     return "otros"
+
+
+def normalize_input_bucket(value: str | None) -> str:
+    bucket = str(value or "").strip()
+    if bucket in INPUT_BUCKET_LABELS:
+        return bucket
+    return USER_INPUT_BUCKET
 
 
 def _safe_upload_filename(filename: str) -> str:
@@ -437,7 +470,12 @@ def _build_context(
             "process_dir": str(proc_dir.resolve()),
             "portfolio_dir": str(portfolio_dir.resolve()),
             "inputs_dir": str((portfolio_dir / "inputs").resolve()),
-            "uploads_dir": str((portfolio_dir / "uploads").resolve()),
+            "process_inputs_dir": str(
+                (portfolio_dir / "inputs" / PROCESS_INPUT_BUCKET).resolve()
+            ),
+            "user_inputs_dir": str(
+                (portfolio_dir / "inputs" / USER_INPUT_BUCKET).resolve()
+            ),
             "manifest": str((portfolio_dir / MANIFEST_NAME).resolve()),
             "context": str((portfolio_dir / CONTEXT_NAME).resolve()),
             "seed_prompt": str((portfolio_dir / SEED_PROMPT_NAME).resolve()),
@@ -487,8 +525,9 @@ Actúas como Hermes dentro del workspace de portafolio de una licitación. El po
 
 - Proceso: `{paths["process_dir"]}`
 - Portafolio: `{paths["portfolio_dir"]}`
-- Inputs originales del proceso: `{paths["inputs_dir"]}`
-- Uploads manuales: `{paths["uploads_dir"]}`
+- Inputs: `{paths["inputs_dir"]}`
+- Docs proceso: `{paths["process_inputs_dir"]}`
+- Docs usuario: `{paths["user_inputs_dir"]}`
 - Manifest staging: `{paths["manifest"]}`
 - Contexto: `{paths["context"]}`
 - Logs: `{paths["logs_dir"]}`
@@ -500,7 +539,7 @@ Actúas como Hermes dentro del workspace de portafolio de una licitación. El po
 1. Lee primero el manifest y el contexto.
 2. Usa los runbooks como playbooks de trabajo, no como un pipeline rígido de backend.
 3. No rehagas staging ni descarga documental; eso ya lo hizo el portal.
-4. Si necesitas normalización/indexación determinística pendiente, usa la etapa C como guía y procesa tanto `inputs/` como `uploads/`; deja logs claros.
+4. Si necesitas normalización/indexación determinística pendiente, usa la etapa C como guía y procesa todo `inputs/`, incluyendo `docs_proceso/` y `docs_usuario/`; deja logs claros.
 5. Para D, conversa con el usuario, decide el siguiente movimiento y ejecuta herramientas/scripts temporales solo cuando el caso lo justifique.
 6. Preserva artefactos intermedios bajo `artifacts/` y resultados finales bajo `outputs/`.
 7. Registra decisiones relevantes en `logs/decision_log.md`.
