@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import inspect as sa_inspect
 
-from .models import PipelineItem, Process
+from .models import AnalysisResult, PipelineItem, Process
 
 if TYPE_CHECKING:  # pragma: no cover
     from sqlalchemy.orm import Session
@@ -112,12 +112,20 @@ def sync_analysis_to_pipeline(session: Session, process: Process) -> None:
 
     Llamar después de `sync_to_pipeline` si el análisis puede haber cambiado.
     """
-    if process.promoted_at is None or process.analysis is None:
+    if process.promoted_at is None or process.id is None:
         return
     pi = (
         session.query(PipelineItem)
         .filter(PipelineItem.origin_feed_id == process.id)
         .one_or_none()
     )
-    if pi is not None and process.analysis.pipeline_item_id is None:
-        process.analysis.pipeline_item_id = pi.id
+    if pi is None:
+        return
+    # Find AnalysisResult by process_id and link to pipeline_item
+    ar = (
+        session.query(AnalysisResult)
+        .filter(AnalysisResult.process_id == process.id)
+        .one_or_none()
+    )
+    if ar is not None and ar.pipeline_item_id is None:
+        ar.pipeline_item_id = pi.id

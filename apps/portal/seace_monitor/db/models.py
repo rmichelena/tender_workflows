@@ -226,6 +226,12 @@ class PipelineItem(Base):
     def source_ref(self, value: str | None) -> None:
         self.origin_source_ref = value
 
+    # ID del Process original para rutas que operan sobre la tabla processes
+    @property
+    def process_id(self) -> int | None:
+        """ID del FeedItem/Process original — usado por rutas de acciones."""
+        return self.origin_feed_id
+
     # --- Clasificación ---
     entity_id: Mapped[int] = mapped_column(
         ForeignKey("entities.id", ondelete="RESTRICT"), index=True

@@ -588,6 +588,10 @@ def init_db(database_url: str) -> None:
         event.listen(_engine, "connect", _configure_sqlite_connection)
 
     _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
+    # Register dual-write hook as before_commit event (covers ALL commit paths)
+    # before_commit runs after flush (PKs assigned) and triggers an auto-flush
+    # for any new objects we add (the PipelineItems)
+    # event removed — dual-write is handled in commit helpers
     Base.metadata.create_all(_engine)
     _ensure_table_columns(_engine, "entities", _ENTITY_COLUMN_ADDITIONS)
     _ensure_table_columns(_engine, "processes", _PROCESS_COLUMN_ADDITIONS)
@@ -750,35 +754,52 @@ def _backfill_pipeline_items(engine) -> None:
 
 
 def _sync_dirty_promoted(session: Session) -> None:
-    """Dual-write (0.3e-2): sincroniza Process promovidos sucios a PipelineItem.
+    """Dual-write (0.3e-2): sincroniza Process promovidos a PipelineItem.
 
-    Inspecciona la sesión de SQLAlchemy para encontrar objetos `Process` que fueron
-    modificados y tienen `promoted_at` seteado. Para cada uno, llama a
-    `sync_to_pipeline`. También detecta AnalysisResult nuevos y sincroniza su
-    process asociado.
+    Se llama antes del commit. Captura objetos sucios/nuevos ANTES de flush,
+    flush para obtener PKs, luego sincroniza y flush de nuevo.
     """
-    from .models import Process as _Process, AnalysisResult as _AR
-    from .pipeline_sync import sync_to_pipeline, sync_analysis_to_pipeline
+    from .models import Process as _Process, AnalysisResult as _AR, PipelineItem as _PI
+    from .pipeline_sync import sync_to_pipeline
+
+    # Capture candidates BEFORE flush (flush moves them to persistent)
+    candidates = [
+        obj for obj in list(session.dirty) + list(session.new)
+        if isinstance(obj, (_Process, _AR))
+    ]
+    if not candidates:
+        return
+
+    # Flush to ensure all PKs are assigned
+    session.flush()
 
     synced_ids: set[int] = set()
+    needs_flush = False
 
-    for obj in session.dirty:
-        if isinstance(obj, _Process) and obj.promoted_at is not None:
+    for obj in candidates:
+        if isinstance(obj, _Process) and obj.promoted_at is not None and obj.id is not None:
             sync_to_pipeline(session, obj)
-            sync_analysis_to_pipeline(session, obj)
             synced_ids.add(obj.id)
-    for obj in session.new:
-        if isinstance(obj, _Process) and obj.promoted_at is not None:
-            sync_to_pipeline(session, obj)
-            sync_analysis_to_pipeline(session, obj)
-            synced_ids.add(obj.id)
+            needs_flush = True
         elif isinstance(obj, _AR):
-            # Nuevo analysis: sincronizar su process si es promovido
-            proc = session.get(_Process, obj.process_id)
-            if proc is not None and proc.promoted_at is not None and proc.id not in synced_ids:
-                sync_to_pipeline(session, proc)
-                sync_analysis_to_pipeline(session, proc)
-                synced_ids.add(proc.id)
+            if obj.process_id is not None:
+                proc = session.get(_Process, obj.process_id)
+                if proc is not None and proc.promoted_at is not None and proc.id not in synced_ids:
+                    sync_to_pipeline(session, proc)
+                    synced_ids.add(proc.id)
+                    needs_flush = True
+                if obj.pipeline_item_id is None and obj.process_id is not None:
+                    pi = (
+                        session.query(_PI)
+                        .filter(_PI.origin_feed_id == obj.process_id)
+                        .one_or_none()
+                    )
+                    if pi is not None:
+                        obj.pipeline_item_id = pi.id
+                        needs_flush = True
+
+    if needs_flush:
+        session.flush()
 
 
 def commit_session_with_retry(
@@ -808,7 +829,14 @@ def commit_session_with_retry(
 def session_factory() -> Session:
     if _SessionLocal is None:
         raise RuntimeError("Base de datos no inicializada. Llama a init_db() primero.")
-    return _SessionLocal()
+    session = _SessionLocal()
+    # Wrap commit to ensure dual-write sync (covers ALL commit paths)
+    _original_commit = session.commit
+    def _commit_with_sync():
+        _sync_dirty_promoted(session)
+        _original_commit()
+    session.commit = _commit_with_sync  # type: ignore[assignment]
+    return session
 
 
 def get_session() -> Generator[Session, None, None]:
