@@ -762,6 +762,8 @@ def _sync_dirty_promoted(session: Session) -> None:
     from .models import FeedItem as _FeedItem, AnalysisResult as _AR, PipelineItem as _PI
     from .pipeline_sync import sync_to_pipeline
 
+    _tenant_id = getattr(session, '_tenant_id', 'default')
+
     # Capture candidates BEFORE flush (flush moves them to persistent)
     candidates = [
         obj for obj in list(session.dirty) + list(session.new)
@@ -778,16 +780,19 @@ def _sync_dirty_promoted(session: Session) -> None:
 
     for obj in candidates:
         if isinstance(obj, _FeedItem) and obj.promoted_at is not None and obj.id is not None:
-            sync_to_pipeline(session, obj)
+            sync_to_pipeline(session, obj, tenant_id=_tenant_id)
             synced_ids.add(obj.id)
             needs_flush = True
         elif isinstance(obj, _AR):
             if obj.process_id is not None:
                 proc = session.get(_FeedItem, obj.process_id)
                 if proc is not None and proc.promoted_at is not None and proc.id not in synced_ids:
-                    pi = sync_to_pipeline(session, proc)
+                    pi = sync_to_pipeline(session, proc, tenant_id=_tenant_id)
                     synced_ids.add(proc.id)
                     needs_flush = True
+                    # Flush to assign PK to newly created PipelineItem
+                    # (autoflush=False means pi.id is None until flush)
+                    session.flush()
                 else:
                     pi = (
                         session.query(_PI)
@@ -825,10 +830,11 @@ def commit_session_with_retry(
             time.sleep(delay * (attempt + 1))
 
 
-def session_factory() -> Session:
+def session_factory(*, tenant_id: str = "default") -> Session:
     if _SessionLocal is None:
         raise RuntimeError("Base de datos no inicializada. Llama a init_db() primero.")
     session = _SessionLocal()
+    session._tenant_id = tenant_id  # type: ignore[attr-defined]
     # Wrap commit to ensure dual-write sync (covers ALL commit paths)
     _original_commit = session.commit
     def _commit_with_sync():

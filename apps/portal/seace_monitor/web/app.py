@@ -109,7 +109,7 @@ def get_config() -> AppConfig:
 
 
 def get_db() -> Session:
-    db = session_factory()
+    db = session_factory(tenant_id=_config.tenant_id)
     try:
         yield db
         db.commit()
@@ -195,7 +195,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if migrate_legacy_layout(_config):
             logger.info("Layout de datos migrado a tenants/%s/", _config.tenant_id)
-        db = session_factory()
+        db = session_factory(tenant_id=_config.tenant_id)
         try:
             bootstrap_entities(db, _config)
             path_updates = migrate_process_data_dir_refs(db, _config)
@@ -279,7 +279,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         badge_session = db
         own_session = False
         if badge_session is None:
-            badge_session = session_factory()
+            badge_session = session_factory(tenant_id=_config.tenant_id)
             own_session = True
         try:
             ctx.setdefault("nav_badges", watchlist_nav_badges(badge_session))
@@ -825,7 +825,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         selected_paths = list(selected)
 
         def _job():
-            session = session_factory()
+            session = session_factory(tenant_id=_config.tenant_id)
             try:
                 runner = AnalysisRunner(_config, session)
                 runner.analyze(

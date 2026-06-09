@@ -72,7 +72,7 @@ def _copy_fields(process: FeedItem, pipeline_item: PipelineItem) -> None:
         setattr(pipeline_item, field, getattr(process, field))
 
 
-def sync_to_pipeline(session: Session, process: FeedItem) -> PipelineItem | None:
+def sync_to_pipeline(session: Session, process: FeedItem, *, tenant_id: str = "default") -> PipelineItem | None:
     """Sincroniza un FeedItem promovido a su PipelineItem correspondiente.
 
     - Si el proceso no está promovido, no hace nada y devuelve None.
