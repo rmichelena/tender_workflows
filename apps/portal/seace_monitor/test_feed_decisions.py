@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from .db.models import Base, Entity, Process, ProcessStatus, TenantFeedDecision
+from .db.models import Base, Entity, FeedItem, ProcessStatus, TenantFeedDecision
 from .db.session import (
     _backfill_tenant_feed_decisions,
     _flip_autorejected_status_to_overlay,
@@ -30,7 +30,7 @@ def _setup():
 
 
 def _proc(entity, *, ref, status, reason=None, exempt=False):
-    return Process(
+    return FeedItem(
         entity_id=entity.id,
         anio=2026,
         source="seace",
@@ -165,7 +165,7 @@ def test_flip_moves_autorejected_with_exempt_overlay_to_publicada():
     session.expire_all()
 
     assert flipped == 1
-    assert session.get(Process, proc.id).status == ProcessStatus.publicada
+    assert session.get(FeedItem, proc.id).status == ProcessStatus.publicada
     assert _decisions(session)[proc.id].decision == "exempt"
 
 
@@ -186,8 +186,8 @@ def test_flip_autorejected_status_moves_to_publicada_idempotently():
 
     assert flipped == 1
     assert flipped_again == 0
-    assert session.get(Process, rejected.id).status == ProcessStatus.publicada
-    assert session.get(Process, descartada.id).status == ProcessStatus.descartada
+    assert session.get(FeedItem, rejected.id).status == ProcessStatus.publicada
+    assert session.get(FeedItem, descartada.id).status == ProcessStatus.descartada
     # La decisión del overlay se conserva (la fuente de verdad del autoreject).
     assert _decisions(session)[rejected.id].decision == "autorejected"
 
@@ -204,7 +204,7 @@ def test_flip_skips_autorejected_without_overlay_decision():
     session.expire_all()
 
     assert flipped == 0
-    assert session.get(Process, orphan.id).status == ProcessStatus.autorejected
+    assert session.get(FeedItem, orphan.id).status == ProcessStatus.autorejected
 
 
 def test_backfill_from_legacy_process_fields_is_idempotent():

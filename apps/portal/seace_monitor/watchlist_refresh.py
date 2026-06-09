@@ -15,11 +15,11 @@ from .scan_options import LIMA, parse_seace_date
 
 if TYPE_CHECKING:
     from .config import AppConfig
-    from .db.models import Process
+    from .db.models import FeedItem
 
 
 def watchlist_refresh_due(
-    proc: "Process", config: "AppConfig", now: datetime | None = None
+    proc: "FeedItem", config: "AppConfig", now: datetime | None = None
 ) -> bool:
     """¿Toca refrescar este proceso del watchlist según su TTL (base o urgente)?"""
     now = _as_utc(now or datetime.now(timezone.utc))
@@ -32,7 +32,7 @@ def watchlist_refresh_due(
 
 
 def watchlist_refresh_seconds(
-    proc: "Process", config: "AppConfig", now: datetime | None = None
+    proc: "FeedItem", config: "AppConfig", now: datetime | None = None
 ) -> int:
     """Segundos de TTL aplicables a este proceso (urgente si hay hito cercano)."""
     if _has_urgent_cronograma_deadline(proc, config, now=now):
@@ -49,7 +49,7 @@ def watchlist_sql_min_stale_before(
 
 
 def _has_urgent_cronograma_deadline(
-    proc: "Process", config: "AppConfig", now: datetime | None = None
+    proc: "FeedItem", config: "AppConfig", now: datetime | None = None
 ) -> bool:
     """¿Algún hito clave dentro de la ventana urgente (antes o después del deadline)?
 
@@ -67,7 +67,7 @@ def _has_urgent_cronograma_deadline(
     return False
 
 
-def _key_deadline_datetimes(proc: "Process") -> list[datetime]:
+def _key_deadline_datetimes(proc: "FeedItem") -> list[datetime]:
     """Fechas fin de consultas y presentación (America/Lima) desde cronograma_json."""
     cronograma = _cronograma_from_json(proc.cronograma_json)
     if not cronograma:

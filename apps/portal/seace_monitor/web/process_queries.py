@@ -1,4 +1,4 @@
-"""Consultas reutilizables sobre Process."""
+"""Consultas reutilizables sobre FeedItem."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.orm.exc import NoResultFound
 
-from ..db.models import Process
+from ..db.models import FeedItem
 
 
 def get_process_or_404(
@@ -15,24 +15,24 @@ def get_process_or_404(
     *,
     with_entity: bool = False,
     with_analysis: bool = False,
-) -> Process:
+) -> FeedItem:
     opts = []
     if with_entity:
-        opts.append(joinedload(Process.entity))
+        opts.append(joinedload(FeedItem.entity))
     if with_analysis:
-        opts.append(joinedload(Process.analysis))
+        opts.append(joinedload(FeedItem.analysis))
     if opts:
         try:
             proc = (
-                db.query(Process)
+                db.query(FeedItem)
                 .options(*opts)
-                .filter(Process.id == process_id)
+                .filter(FeedItem.id == process_id)
                 .one()
             )
         except NoResultFound:
             raise HTTPException(404) from None
     else:
-        proc = db.get(Process, process_id)
+        proc = db.get(FeedItem, process_id)
         if proc is None:
             raise HTTPException(404)
     return proc

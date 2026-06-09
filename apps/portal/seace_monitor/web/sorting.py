@@ -8,7 +8,7 @@ from typing import Any, Callable
 from urllib.parse import urlencode
 
 from ..db.list_views import ProcessListView
-from ..db.models import Process
+from ..db.models import FeedItem
 
 _DATE_TIME_RE = re.compile(
     r"^(\d{2})/(\d{2})/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?"
@@ -146,7 +146,7 @@ def _text(value: str | None) -> str:
     return (value or "").lower()
 
 
-def sort_key(column: str) -> Callable[[Process], tuple[Any, ...]]:
+def sort_key(column: str) -> Callable[[FeedItem], tuple[Any, ...]]:
     if column == "numero":
         return lambda p: (_int_or_zero(p.numero), _text(p.numero))
     if column == "entidad":
@@ -161,8 +161,8 @@ def sort_key(column: str) -> Callable[[Process], tuple[Any, ...]]:
 
 
 def sort_processes(
-    processes: list[Process], sort: str | None, direction: str | None
-) -> list[Process]:
+    processes: list[FeedItem], sort: str | None, direction: str | None
+) -> list[FeedItem]:
     col = normalize_sort(sort)
     desc = normalize_dir(direction, col) == "desc"
     if col in DATE_COLUMNS:

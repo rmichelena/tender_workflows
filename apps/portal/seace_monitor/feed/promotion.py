@@ -1,6 +1,6 @@
 """Promoción feed→pipeline (0.3d).
 
-La promoción es un **latch de un solo sentido** sobre el `Process` (mientras el split
+La promoción es un **latch de un solo sentido** sobre el `FeedItem` (mientras el split
 físico de 0.3e no ocurre): `promoted_at IS NULL` = feed puro (descubrimiento ruidoso,
 purgable); `promoted_at` seteado = trabajo curado (pipeline) que nunca debe purgarse ni
 borrarse como duplicado de feed.
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from ..db.models import InterestStatus, ProcessStatus, utcnow
 
 if TYPE_CHECKING:  # pragma: no cover
-    from ..db.models import Process
+    from ..db.models import FeedItem
 
 # Estados que implican trabajo curado (espejo de `_PROMOTED_STATUSES` en `db/session.py`).
 PROMOTED_STATUSES: frozenset[ProcessStatus] = frozenset(
@@ -34,17 +34,17 @@ PROMOTED_STATUSES: frozenset[ProcessStatus] = frozenset(
 )
 
 
-def is_promoted(process: "Process") -> bool:
+def is_promoted(process: "FeedItem") -> bool:
     """¿El item dejó de ser feed puro? (tiene trabajo curado)."""
     return process.promoted_at is not None
 
 
-def is_feed_pure(process: "Process") -> bool:
+def is_feed_pure(process: "FeedItem") -> bool:
     """¿El item sigue siendo feed puro (descubrimiento, purgable)?"""
     return process.promoted_at is None
 
 
-def should_be_promoted(process: "Process") -> bool:
+def should_be_promoted(process: "FeedItem") -> bool:
     """Predicado puro: ¿el item ya califica como curado por su estado actual?
 
     Espejo del backfill (`_backfill_promoted_at`): status de pipeline, interés marcado,
@@ -62,7 +62,7 @@ def should_be_promoted(process: "Process") -> bool:
     return False
 
 
-def promote(session, process: "Process") -> bool:
+def promote(session, process: "FeedItem") -> bool:
     """Marca el item como promovido (latch). Idempotente: no re-escribe si ya lo está.
 
     Devuelve ``True`` si setea el timestamp (transición feed→pipeline), ``False`` si ya

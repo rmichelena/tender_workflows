@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from .db.models import Process, ProcessStatus
+from .db.models import FeedItem, ProcessStatus
 
 DESCARGADOS_LIST_STATUSES = frozenset(
     {ProcessStatus.descargada, ProcessStatus.descartando}
@@ -19,13 +19,13 @@ ANALIZADOS_LIST_STATUSES = frozenset(
 )
 
 
-def _append_rank(session: Session, proc: Process, attr: str, statuses: frozenset) -> None:
+def _append_rank(session: Session, proc: FeedItem, attr: str, statuses: frozenset) -> None:
     session.flush()
     current_max = (
-        session.query(func.max(getattr(Process, attr)))
+        session.query(func.max(getattr(FeedItem, attr)))
         .filter(
-            Process.status.in_(tuple(statuses)),
-            Process.id != proc.id,
+            FeedItem.status.in_(tuple(statuses)),
+            FeedItem.id != proc.id,
         )
         .scalar()
     )
@@ -36,12 +36,12 @@ def _renumber_list(
     session: Session, statuses: frozenset[ProcessStatus], attr: str
 ) -> None:
     rows = (
-        session.query(Process)
+        session.query(FeedItem)
         .filter(
-            Process.status.in_(tuple(statuses)),
-            getattr(Process, attr).isnot(None),
+            FeedItem.status.in_(tuple(statuses)),
+            getattr(FeedItem, attr).isnot(None),
         )
-        .order_by(getattr(Process, attr).asc(), Process.id.asc())
+        .order_by(getattr(FeedItem, attr).asc(), FeedItem.id.asc())
         .all()
     )
     for index, row in enumerate(rows, start=1):
@@ -49,13 +49,13 @@ def _renumber_list(
     session.flush()
 
 
-def enter_descargados_list(session: Session, proc: Process) -> None:
+def enter_descargados_list(session: Session, proc: FeedItem) -> None:
     if proc.status not in DESCARGADOS_LIST_STATUSES:
         return
     _append_rank(session, proc, "list_rank_descargados", DESCARGADOS_LIST_STATUSES)
 
 
-def leave_descargados_list(session: Session, proc: Process) -> None:
+def leave_descargados_list(session: Session, proc: FeedItem) -> None:
     if proc.list_rank_descargados is None:
         return
     proc.list_rank_descargados = None
@@ -63,13 +63,13 @@ def leave_descargados_list(session: Session, proc: Process) -> None:
     _renumber_list(session, DESCARGADOS_LIST_STATUSES, "list_rank_descargados")
 
 
-def enter_analizados_list(session: Session, proc: Process) -> None:
+def enter_analizados_list(session: Session, proc: FeedItem) -> None:
     if proc.status not in ANALIZADOS_LIST_STATUSES:
         return
     _append_rank(session, proc, "list_rank_analizados", ANALIZADOS_LIST_STATUSES)
 
 
-def leave_analizados_list(session: Session, proc: Process) -> None:
+def leave_analizados_list(session: Session, proc: FeedItem) -> None:
     if proc.list_rank_analizados is None:
         return
     proc.list_rank_analizados = None
@@ -77,7 +77,7 @@ def leave_analizados_list(session: Session, proc: Process) -> None:
     _renumber_list(session, ANALIZADOS_LIST_STATUSES, "list_rank_analizados")
 
 
-def clear_list_ranks(proc: Process) -> None:
+def clear_list_ranks(proc: FeedItem) -> None:
     proc.list_rank_descargados = None
     proc.list_rank_analizados = None
 
@@ -90,22 +90,22 @@ def backfill_list_ranks(session: Session) -> int:
         (ANALIZADOS_LIST_STATUSES, "list_rank_analizados"),
     ):
         missing = (
-            session.query(Process.id)
+            session.query(FeedItem.id)
             .filter(
-                Process.status.in_(tuple(statuses)),
-                getattr(Process, attr).is_(None),
+                FeedItem.status.in_(tuple(statuses)),
+                getattr(FeedItem, attr).is_(None),
             )
             .first()
         )
         if missing is None:
             continue
         rows = (
-            session.query(Process)
-            .filter(Process.status.in_(tuple(statuses)))
+            session.query(FeedItem)
+            .filter(FeedItem.status.in_(tuple(statuses)))
             .order_by(
-                getattr(Process, attr).asc().nulls_last(),
-                Process.updated_at.asc(),
-                Process.id.asc(),
+                getattr(FeedItem, attr).asc().nulls_last(),
+                FeedItem.updated_at.asc(),
+                FeedItem.id.asc(),
             )
             .all()
         )

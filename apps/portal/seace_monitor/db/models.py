@@ -369,6 +369,4 @@ class TenantFeedDecision(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
 
-
-# Alias de compatibilidad — será eliminado en 0.3e-5
-Process = FeedItem
+Process = FeedItem  # TODO: eliminar en cleanup final

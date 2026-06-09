@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 
 from ..config import AppConfig
-from ..db.models import Process
+from ..db.models import FeedItem
 from ..parser import clean_cronograma_etapa, fechas_listado_from_cronograma_json
 from ..tender_repo import resolve_tender_repo_root
 from .document_prep import (
@@ -66,7 +66,7 @@ def _section_block(profile: dict[str, Any], sections: dict[str, Any]) -> str:
 
 
 def _profiles_for_process(
-    config: AppConfig, process: Process
+    config: AppConfig, process: FeedItem
 ) -> tuple[Path, dict[str, Any], dict[str, Any], bool]:
     repo = _repo_root(config)
     profiles_path = repo / PROFILES_REL
@@ -89,7 +89,7 @@ def _profiles_for_process(
     return repo / PROMPT_REL, raw, {}, False
 
 
-def _load_system_prompt(config: AppConfig, process: Process) -> str:
+def _load_system_prompt(config: AppConfig, process: FeedItem) -> str:
     path, profiles_raw, profile, _matched = _profiles_for_process(config, process)
     if path.exists():
         base = path.read_text(encoding="utf-8")
@@ -118,7 +118,7 @@ def _load_system_prompt(config: AppConfig, process: Process) -> str:
     )
 
 
-def _build_user_context(process: Process, source_paths: list[Path]) -> str:
+def _build_user_context(process: FeedItem, source_paths: list[Path]) -> str:
     today, year, iso = today_anchor_peru()
     source = process.source or "seace"
     lines = [
@@ -173,7 +173,7 @@ def run_gemini_free_reader(
     config: AppConfig,
     upload_paths: list[Path],
     source_paths: list[Path],
-    process: Process,
+    process: FeedItem,
 ) -> tuple[str, list, str]:
     """Genera resumen. Retorna (markdown, uploaded_files, bootstrap_user_text)."""
     fast_cfg = config.analysis.fast_path
@@ -220,7 +220,7 @@ def run_gemini_free_reader(
     return text.strip(), uploaded_files, user
 
 
-def append_seace_cronograma(markdown: str, process: Process) -> str:
+def append_seace_cronograma(markdown: str, process: FeedItem) -> str:
     if (process.source or "seace") != "seace":
         return markdown
     if not process.cronograma_json:
@@ -285,7 +285,7 @@ def run_fast_analysis(
     config: AppConfig,
     proc_dir: Path,
     documents_dir: Path,
-    process: Process,
+    process: FeedItem,
     selected_rel_paths: list[str],
 ) -> dict[str, Any]:
     workspace = proc_dir / "fast_analysis"

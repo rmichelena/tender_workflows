@@ -1,4 +1,4 @@
-"""Tests para dual-write 0.3e-2: Process promovido → PipelineItem auto-sync."""
+"""Tests para dual-write 0.3e-2: FeedItem promovido → PipelineItem auto-sync."""
 
 import pytest
 from datetime import datetime, timezone
@@ -11,7 +11,7 @@ from seace_monitor.db.models import (
     Base,
     Entity,
     PipelineItem,
-    Process,
+    FeedItem,
     ProcessStatus,
     InterestStatus,
     utcnow,
@@ -47,7 +47,7 @@ def _make_promoted(eng, **overrides):
             data_dir="/data/test",
         )
         defaults.update(overrides)
-        proc = Process(**defaults)
+        proc = FeedItem(**defaults)
         s.add(proc)
         s.commit()
         return proc.id
@@ -56,13 +56,13 @@ def _make_promoted(eng, **overrides):
 
 
 class TestDualWrite:
-    """El before_flush event sincroniza Process→PipelineItem en todos los commits."""
+    """El before_flush event sincroniza FeedItem→PipelineItem en todos los commits."""
 
     def test_status_change_syncs(self, db):
         pid = _make_promoted(db, status=ProcessStatus.descargada)
         s = session_factory()
         try:
-            proc = s.get(Process, pid)
+            proc = s.get(FeedItem, pid)
             proc.status = ProcessStatus.analizada
             s.commit()
         finally:
@@ -76,7 +76,7 @@ class TestDualWrite:
         pid = _make_promoted(db)
         s = session_factory()
         try:
-            proc = s.get(Process, pid)
+            proc = s.get(FeedItem, pid)
             proc.data_dir = "/data/new_path"
             s.commit()
         finally:
@@ -90,7 +90,7 @@ class TestDualWrite:
         pid = _make_promoted(db)
         s = session_factory()
         try:
-            proc = s.get(Process, pid)
+            proc = s.get(FeedItem, pid)
             proc.interest_status = InterestStatus.opportunity
             s.commit()
         finally:
@@ -104,7 +104,7 @@ class TestDualWrite:
         pid = _make_promoted(db)
         s = session_factory()
         try:
-            proc = s.get(Process, pid)
+            proc = s.get(FeedItem, pid)
             proc.watch_unread = True
             proc.watch_changelog_json = '[{"t":"test"}]'
             s.commit()
@@ -125,7 +125,7 @@ class TestDualWrite:
             entity = Entity(ruc="12345678901", nombre="Test", activa=True)
             s.add(entity)
             s.flush()
-            proc = Process(
+            proc = FeedItem(
                 entity_id=entity.id, anio=2026, source="seace",
                 source_ref="S002", nomenclatura="LP-02-2026",
                 status=ProcessStatus.publicada, promoted_at=None,
@@ -143,7 +143,7 @@ class TestDualWrite:
         pid = _make_promoted(db, status=ProcessStatus.analizada)
         s = session_factory()
         try:
-            proc = s.get(Process, pid)
+            proc = s.get(FeedItem, pid)
             ar = AnalysisResult(process_id=pid, status="done", alcance="test")
             s.add(ar)
             s.commit()
@@ -161,7 +161,7 @@ class TestDualWrite:
         for status in [ProcessStatus.analizada, ProcessStatus.portafolio, ProcessStatus.archivada]:
             s = session_factory()
             try:
-                proc = s.get(Process, pid)
+                proc = s.get(FeedItem, pid)
                 proc.status = status
                 s.commit()
             finally:
@@ -177,7 +177,7 @@ class TestDualWrite:
         pid = _make_promoted(db, source_ref="REF-XYZ")
         s = session_factory()
         try:
-            proc = s.get(Process, pid)
+            proc = s.get(FeedItem, pid)
             proc.data_dir = "/data/updated"
             s.commit()
         finally:
@@ -189,13 +189,13 @@ class TestDualWrite:
         s.close()
 
     def test_new_promoted_process_without_prior_flush(self, db):
-        """Nuevo Process promovido creado y commiteado sin flush previo → PipelineItem correcto."""
+        """Nuevo FeedItem promovido creado y commiteado sin flush previo → PipelineItem correcto."""
         s = session_factory()
         try:
             entity = Entity(ruc="99999999999", nombre="FlushTest", activa=True)
             s.add(entity)
             s.flush()
-            proc = Process(
+            proc = FeedItem(
                 entity_id=entity.id, anio=2026, source="seace",
                 source_ref="FLUSH-1", nomenclatura="LP-FLUSH-2026",
                 status=ProcessStatus.descargada, promoted_at=utcnow(),

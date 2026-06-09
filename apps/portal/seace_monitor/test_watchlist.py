@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .analysis.analysis_history import archive_analysis_before_rerun
 from .client import ProcessRow
 from .config import AppConfig
-from .db.models import AnalysisResult, Base, Entity, Process, ProcessStatus
+from .db.models import AnalysisResult, Base, Entity, FeedItem, ProcessStatus
 from .parser import CronogramaEtapa, Documento, FichaData
 from .watchlist import (
     _download_new_documents,
@@ -104,7 +104,7 @@ def test_parse_cronograma_new_and_removed_stages():
 
 
 def test_mark_watchlist_read_clears_flag():
-    proc = Process(
+    proc = FeedItem(
         entity_id=1,
         anio=2026,
         nid_proceso="1",
@@ -147,11 +147,11 @@ def _sample_process(
     docs: list[dict],
     watch_unread: bool = False,
     prev_docs_json: str | None = None,
-) -> Process:
+) -> FeedItem:
     entity = session.query(Entity).one()
     proc_dir = tmp_path / "proc"
     proc_dir.mkdir(parents=True)
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         nid_proceso="nid-1",

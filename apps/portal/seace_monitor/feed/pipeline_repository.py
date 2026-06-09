@@ -2,7 +2,7 @@
 
 El pipeline contiene los items que el usuario ha reclamado (descargado, analizado,
 archivado, portafolio). En esta fase del refactor, las lecturas de pipeline cambian
-de `processes`/`Process` a `pipeline_items`/`PipelineItem`.
+de `processes`/`FeedItem` a `pipeline_items`/`PipelineItem`.
 
 Este módulo es el equivalente de `feed/repository.py` pero para el pipeline.
 """

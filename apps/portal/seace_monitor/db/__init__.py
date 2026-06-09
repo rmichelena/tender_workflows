@@ -1,4 +1,4 @@
-from .models import AnalysisResult, Entity, FeedItem, PipelineItem, Process, ProcessStatus
+from .models import AnalysisResult, Entity, FeedItem, PipelineItem, FeedItem, ProcessStatus
 from .session import get_session, init_db
 
 __all__ = [
@@ -6,7 +6,7 @@ __all__ = [
     "Entity",
     "FeedItem",
     "PipelineItem",
-    "Process",
+    "FeedItem",
     "ProcessStatus",
     "get_session",
     "init_db",

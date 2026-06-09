@@ -1,7 +1,7 @@
 """Renderizado compartido de listas de workflow (descargados, analizados, archivados).
 
 Las listas de pipeline leen de `PipelineItem` (0.3e-3); las de feed siguen leyendo
-`Process` vía `FeedRepository`.
+`FeedItem` vía `FeedRepository`.
 """
 
 from __future__ import annotations

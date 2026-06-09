@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from ..analysis.runner import AnalysisRunner
     from ..config import AppConfig
-    from ..db.models import Process
+    from ..db.models import FeedItem
 
 
 class UnknownIngestSource(ValueError):
@@ -56,7 +56,7 @@ class SourceAdapter(Protocol):
     scan_priority: int
     capabilities: IngestCapabilities
 
-    def can_open(self, process: "Process") -> bool:
+    def can_open(self, process: "FeedItem") -> bool:
         """¿Se puede abrir la ficha origen de este proceso desde la UI?"""
         ...
 
@@ -92,7 +92,7 @@ class SourceAdapter(Protocol):
     # migrará al adapter/módulos compartidos en una sub-fase posterior.
 
     def resolve_document_index(
-        self, runner: "AnalysisRunner", process: "Process"
+        self, runner: "AnalysisRunner", process: "FeedItem"
     ) -> list[dict]:
         """Resuelve la lista de documentos a descargar (puede mutar `process`).
 

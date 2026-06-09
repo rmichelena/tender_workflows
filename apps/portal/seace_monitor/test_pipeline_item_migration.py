@@ -9,7 +9,7 @@ from seace_monitor.db.models import (
     Base,
     Entity,
     PipelineItem,
-    Process,
+    FeedItem,
     ProcessStatus,
     InterestStatus,
     utcnow,
@@ -73,7 +73,7 @@ class TestBackfillPipelineItems:
         Base.metadata.create_all(eng)
 
         from sqlalchemy.orm import Session
-        from seace_monitor.db.models import Entity, Process, ProcessStatus, utcnow
+        from seace_monitor.db.models import Entity, FeedItem, ProcessStatus, utcnow
 
         with Session(eng) as s:
             entity = Entity(ruc="11111111111", nombre="E1", activa=True)
@@ -81,7 +81,7 @@ class TestBackfillPipelineItems:
             s.flush()
 
             # promoted process
-            p = Process(
+            p = FeedItem(
                 entity_id=entity.id,
                 anio=2026,
                 source="seace",
@@ -94,7 +94,7 @@ class TestBackfillPipelineItems:
             s.add(p)
 
             # feed-pure process (should NOT be copied)
-            p2 = Process(
+            p2 = FeedItem(
                 entity_id=entity.id,
                 anio=2026,
                 source="seace",
@@ -126,13 +126,13 @@ class TestBackfillPipelineItems:
         Base.metadata.create_all(eng)
 
         from sqlalchemy.orm import Session
-        from seace_monitor.db.models import Entity, Process, ProcessStatus, utcnow
+        from seace_monitor.db.models import Entity, FeedItem, ProcessStatus, utcnow
 
         with Session(eng) as s:
             entity = Entity(ruc="11111111111", nombre="E1", activa=True)
             s.add(entity)
             s.flush()
-            p = Process(
+            p = FeedItem(
                 entity_id=entity.id,
                 anio=2026,
                 source="seace",
@@ -158,13 +158,13 @@ class TestBackfillPipelineItems:
         Base.metadata.create_all(eng)
 
         from sqlalchemy.orm import Session
-        from seace_monitor.db.models import Entity, Process, ProcessStatus, AnalysisResult, utcnow
+        from seace_monitor.db.models import Entity, FeedItem, ProcessStatus, AnalysisResult, utcnow
 
         with Session(eng) as s:
             entity = Entity(ruc="11111111111", nombre="E1", activa=True)
             s.add(entity)
             s.flush()
-            p = Process(
+            p = FeedItem(
                 entity_id=entity.id,
                 anio=2026,
                 source="seace",
@@ -201,13 +201,13 @@ class TestBackfillPipelineItems:
         Base.metadata.create_all(eng)
 
         from sqlalchemy.orm import Session
-        from seace_monitor.db.models import Entity, Process, ProcessStatus
+        from seace_monitor.db.models import Entity, FeedItem, ProcessStatus
 
         with Session(eng) as s:
             entity = Entity(ruc="11111111111", nombre="E1", activa=True)
             s.add(entity)
             s.flush()
-            p = Process(
+            p = FeedItem(
                 entity_id=entity.id,
                 anio=2026,
                 source="seace",

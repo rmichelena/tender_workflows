@@ -190,7 +190,7 @@ def _backfill_process_pipeline_fields(engine) -> None:
 def _backfill_tenant_feed_decisions(engine) -> None:
     """Backfill idempotente del overlay desde los campos de autoreject en `processes`.
 
-    Paso 0.3b: copia las decisiones ya materializadas en `Process` al overlay
+    Paso 0.3b: copia las decisiones ya materializadas en `FeedItem` al overlay
     `tenant_feed_decisions` (tenant `default`). `exempt` y `autorejected` son disjuntos
     (un proceso eximido no queda en estado autorejected). Reejecutable: salta los que ya
     tienen decisión.
@@ -250,7 +250,7 @@ def _backfill_tenant_feed_decisions(engine) -> None:
 
 
 def _purge_orphan_feed_decisions(engine) -> int:
-    """Elimina decisiones del overlay que referencian un `Process` inexistente.
+    """Elimina decisiones del overlay que referencian un `FeedItem` inexistente.
 
     El feed (hoy `processes`) puede borrar items (p. ej. el duplicado que elimina
     `adopt_republication`); como `feed_item_id` no tiene foreign key, esas decisiones
@@ -346,12 +346,12 @@ def _process_migration_copy_defaults() -> dict[str, str]:
 
 
 def _process_migration_select_sql(old_cols: set[str]) -> tuple[str, str]:
-    from .models import Process
+    from .models import FeedItem
 
     copy_defaults = _process_migration_copy_defaults()
     insert_cols: list[str] = []
     select_exprs: list[str] = []
-    for col in Process.__table__.columns:
+    for col in FeedItem.__table__.columns:
         name = col.name
         insert_cols.append(name)
         if name in old_cols:
@@ -378,7 +378,7 @@ def _sqlite_table_create_sql(engine, table_name: str) -> str | None:
 
 def _sqlite_recreate_table_from_model(engine, model) -> None:
     """Recrea una tabla SQLite conservando filas (resetea FKs rotos)."""
-    from .models import Entity, PipelineItem, Process
+    from .models import Entity, PipelineItem, FeedItem
 
     table_name = model.__tablename__
     insp = inspect(engine)
@@ -392,7 +392,7 @@ def _sqlite_recreate_table_from_model(engine, model) -> None:
     temp_md = MetaData()
     # Stubs para resolver FKs al compilar CREATE (tablas ya existen en disco).
     Entity.__table__.to_metadata(temp_md)
-    Process.__table__.to_metadata(temp_md)
+    FeedItem.__table__.to_metadata(temp_md)
     PipelineItem.__table__.to_metadata(temp_md)
     new_table = model.__table__.to_metadata(temp_md, name=f"{table_name}_new")
     with engine.begin() as conn:
@@ -457,7 +457,7 @@ def _sqlite_recover_failed_processes_rebuild(engine) -> bool:
 
 def _sqlite_rebuild_processes_table(engine) -> None:
     """Recrea `processes` con el esquema actual (nid_proceso nullable, identidad por source)."""
-    from .models import Entity, Process
+    from .models import Entity, FeedItem
 
     _ensure_table_columns(engine, "processes", _PROCESS_COLUMN_ADDITIONS)
     _backfill_process_pipeline_fields(engine)
@@ -469,7 +469,7 @@ def _sqlite_rebuild_processes_table(engine) -> None:
     # Stub de `entities` en el MetaData temporal: SQLAlchemy necesita resolver la FK al
     # compilar el CREATE de `processes_new` (la tabla ya existe en disco).
     Entity.__table__.to_metadata(temp_md)
-    processes_new = Process.__table__.to_metadata(temp_md, name="processes_new")
+    processes_new = FeedItem.__table__.to_metadata(temp_md, name="processes_new")
     with engine.begin() as conn:
         conn.execute(text("PRAGMA foreign_keys=OFF"))
         conn.execute(text("DROP TABLE IF EXISTS processes_new"))
@@ -754,18 +754,18 @@ def _backfill_pipeline_items(engine) -> None:
 
 
 def _sync_dirty_promoted(session: Session) -> None:
-    """Dual-write (0.3e-2): sincroniza Process promovidos a PipelineItem.
+    """Dual-write (0.3e-2): sincroniza FeedItem promovidos a PipelineItem.
 
     Se llama antes del commit. Captura objetos sucios/nuevos ANTES de flush,
     flush para obtener PKs, luego sincroniza y flush de nuevo.
     """
-    from .models import Process as _Process, AnalysisResult as _AR, PipelineItem as _PI
+    from .models import FeedItem as _FeedItem, AnalysisResult as _AR, PipelineItem as _PI
     from .pipeline_sync import sync_to_pipeline
 
     # Capture candidates BEFORE flush (flush moves them to persistent)
     candidates = [
         obj for obj in list(session.dirty) + list(session.new)
-        if isinstance(obj, (_Process, _AR))
+        if isinstance(obj, (_FeedItem, _AR))
     ]
     if not candidates:
         return
@@ -777,13 +777,13 @@ def _sync_dirty_promoted(session: Session) -> None:
     needs_flush = False
 
     for obj in candidates:
-        if isinstance(obj, _Process) and obj.promoted_at is not None and obj.id is not None:
+        if isinstance(obj, _FeedItem) and obj.promoted_at is not None and obj.id is not None:
             sync_to_pipeline(session, obj)
             synced_ids.add(obj.id)
             needs_flush = True
         elif isinstance(obj, _AR):
             if obj.process_id is not None:
-                proc = session.get(_Process, obj.process_id)
+                proc = session.get(_FeedItem, obj.process_id)
                 if proc is not None and proc.promoted_at is not None and proc.id not in synced_ids:
                     pi = sync_to_pipeline(session, proc)
                     synced_ids.add(proc.id)
@@ -807,7 +807,7 @@ def commit_session_with_retry(
 ) -> None:
     """Commit con reintentos ante bloqueos transitorios de SQLite.
 
-    Antes del commit, sincroniza los Process promovidos sucios a PipelineItem
+    Antes del commit, sincroniza los FeedItem promovidos sucios a PipelineItem
     (dual-write 0.3e-2). Solo procesa objetos que están en la sesión (new/dirty).
     """
     for attempt in range(attempts):

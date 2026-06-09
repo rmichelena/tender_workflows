@@ -5,12 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..parser import fechas_listado_from_cronograma_json
-from .models import PipelineItem, Process
+from .models import PipelineItem, FeedItem
 
 
 @dataclass(frozen=True)
 class ProcessListView:
-    process: Process | PipelineItem
+    process: FeedItem | PipelineItem
     fin_consultas: str
     fin_presentacion: str
     watch_unread: bool = False
@@ -18,7 +18,7 @@ class ProcessListView:
 
 
 def build_process_list_views(
-    processes: list[Process], *, rank_attr: str | None = None
+    processes: list[FeedItem], *, rank_attr: str | None = None
 ) -> list[ProcessListView]:
     views: list[ProcessListView] = []
     for proc in processes:

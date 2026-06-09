@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     from ..analysis.runner import AnalysisRunner
     from ..config import AppConfig
-    from ..db.models import Process
+    from ..db.models import FeedItem
 
 
 @dataclass(frozen=True)
@@ -33,13 +33,13 @@ class SeaceIngestAdapter:
         fetch_by_reference=True,
     )
 
-    def can_open(self, process: "Process") -> bool:
+    def can_open(self, process: "FeedItem") -> bool:
         from ..seace_search import normalize_nomenclatura
 
         return bool(process.entity and normalize_nomenclatura(process.nomenclatura))
 
     def resolve_document_index(
-        self, runner: "AnalysisRunner", process: "Process"
+        self, runner: "AnalysisRunner", process: "FeedItem"
     ) -> list[dict]:
         # Abre la ficha SEACE en vivo, refresca metadatos del proceso y devuelve docs.
         return runner._fetch_documentos_from_seace(process, process.entity.ruc)

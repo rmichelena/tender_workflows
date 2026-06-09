@@ -8,7 +8,7 @@ import requests
 
 from .client import FichaResult, ProcessRow, SeaceClient
 from .config import AppConfig
-from .db.models import Process
+from .db.models import FeedItem
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def client_for_entity(
 
 def client_for_process(
     config: AppConfig,
-    process: Process,
+    process: FeedItem,
     *,
     http_session: requests.Session | None = None,
 ) -> SeaceClient:
@@ -90,10 +90,10 @@ def search_list_row_by_nomenclatura(
 
 def resolve_process_row(
     config: AppConfig,
-    process: Process,
+    process: FeedItem,
     client: SeaceClient | None = None,
 ) -> tuple[ProcessRow, SeaceClient]:
-    """Resuelve la fila de listado SEACE para un Process almacenado."""
+    """Resuelve la fila de listado SEACE para un FeedItem almacenado."""
     if client is None:
         client = client_for_process(config, process)
     row = search_list_row_by_nomenclatura(
@@ -106,7 +106,7 @@ def resolve_process_row(
 
 def open_ficha_for_process(
     config: AppConfig,
-    process: Process,
+    process: FeedItem,
     *,
     client: SeaceClient | None = None,
     http_session: requests.Session | None = None,
@@ -124,7 +124,7 @@ def open_ficha_for_process(
     return row, client.open_ficha(row), client
 
 
-def apply_list_row_to_process(process: Process, row: ProcessRow) -> None:
+def apply_list_row_to_process(process: FeedItem, row: ProcessRow) -> None:
     process.nid_proceso = row.nid_proceso
     process.link_id = row.link_id
     process.nid_convocatoria = row.nid_convocatoria
@@ -134,7 +134,7 @@ def apply_list_row_to_process(process: Process, row: ProcessRow) -> None:
         process.fecha_publicacion = row.fecha_publicacion
 
 
-def log_resolved_row_change(process: Process, row: ProcessRow, *, context: str) -> None:
+def log_resolved_row_change(process: FeedItem, row: ProcessRow, *, context: str) -> None:
     if row.link_id == (process.link_id or "") and row.nid_proceso == process.nid_proceso:
         return
     logger.info(

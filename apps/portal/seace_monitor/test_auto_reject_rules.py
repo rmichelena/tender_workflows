@@ -13,15 +13,15 @@ from .auto_reject import (
 )
 from .client import FichaResult, ProcessRow
 from .config import AppConfig
-from .db.models import Base, Entity, Process, ProcessStatus, TenantFeedDecision
+from .db.models import Base, Entity, FeedItem, ProcessStatus, TenantFeedDecision
 from .parser import FichaData
 from .scan_options import ScanOptions
 from .scanner import MultiEntityScanner
 
 
-def _process(*, objeto: str, descripcion: str, entidad: str = "Entidad") -> tuple[Process, Entity]:
+def _process(*, objeto: str, descripcion: str, entidad: str = "Entidad") -> tuple[FeedItem, Entity]:
     entity = Entity(ruc="20123456789", nombre=entidad, activa=True)
-    process = Process(
+    process = FeedItem(
         entity_id=1,
         anio=2026,
         nid_proceso="1",
@@ -198,7 +198,7 @@ def test_apply_auto_reject_skips_overlay_exempt_without_legacy_flag():
     entity = Entity(ruc="20123456789", nombre="Entidad", activa=True)
     session.add(entity)
     session.flush()
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         source="seace",
@@ -242,7 +242,7 @@ def test_process_auto_reject_reason_defaults_and_backfills():
     session.add(entity)
     session.flush()
     session.add(
-        Process(
+        FeedItem(
             entity_id=entity.id,
             anio=2026,
             nid_proceso="1",
@@ -251,7 +251,7 @@ def test_process_auto_reject_reason_defaults_and_backfills():
     )
     session.commit()
 
-    proc = session.query(Process).one()
+    proc = session.query(FeedItem).one()
     assert proc.auto_reject_reason is None
     assert proc.auto_reject_exempt is False
 
@@ -350,7 +350,7 @@ def test_scanner_applies_auto_reject_rules_after_upsert(monkeypatch):
     )
 
     assert created is True
-    proc = session.query(Process).one()
+    proc = session.query(FeedItem).one()
     # 0.3c-3: el scanner ya no muta status; la decisión vive en el overlay.
     assert proc.status == ProcessStatus.publicada
     decision = (

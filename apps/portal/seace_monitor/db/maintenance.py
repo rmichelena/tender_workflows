@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
-from .models import AnalysisResult, Process, ProcessStatus, utcnow
+from .models import AnalysisResult, FeedItem, ProcessStatus, utcnow
 
 
 def recover_stale_analyses(
@@ -34,7 +34,7 @@ def recover_stale_analyses(
         )
         analysis.finished_at = utcnow()
         if config is not None:
-            proc = session.get(Process, analysis.process_id)
+            proc = session.get(FeedItem, analysis.process_id)
             if proc is not None and proc.data_dir:
                 from ..analysis.gemini_session import (
                     clean_run_scoped_artifacts,
@@ -67,7 +67,7 @@ def abandon_stale_analysis_run(
     analysis.status = "error"
     analysis.error_message = message
     analysis.finished_at = utcnow()
-    proc = session.get(Process, process_id)
+    proc = session.get(FeedItem, process_id)
     if proc is not None and proc.status not in (
         ProcessStatus.descargada,
         ProcessStatus.portafolio,

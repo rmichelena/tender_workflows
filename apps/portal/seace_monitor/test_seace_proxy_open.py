@@ -6,13 +6,13 @@ from unittest.mock import MagicMock, patch
 
 from .client import FichaResult, ProcessRow
 from .config import AppConfig
-from .db.models import Entity, Process
+from .db.models import Entity, FeedItem
 from .web.seace_proxy import _try_server_open_ficha
 
 
 def test_seace_open_uses_open_ficha_for_process_after_pagination():
     entity = Entity(ruc="20122476309", nombre="BCR", activa=True)
-    process = Process(
+    process = FeedItem(
         id=29,
         entity=entity,
         entity_id=1,

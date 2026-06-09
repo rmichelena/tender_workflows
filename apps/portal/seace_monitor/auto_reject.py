@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 import yaml
 
 from .config import AppConfig
-from .db.models import Entity, Process, ProcessStatus
+from .db.models import Entity, FeedItem, ProcessStatus
 from .tenant_paths import tenant_settings_dir
 
 DEFAULT_RULES_PATH = Path(__file__).with_name("auto_reject_rules.yaml")
@@ -51,7 +51,7 @@ def _contains_term(text: str, term: str) -> bool:
 
 
 class _Context:
-    def __init__(self, process: Process, entity: Entity | None) -> None:
+    def __init__(self, process: FeedItem, entity: Entity | None) -> None:
         self.fields = {
             "objeto": _normalize(process.objeto),
             "descripcion": _normalize(process.descripcion),
@@ -218,7 +218,7 @@ class _Parser:
         return _Term(token)
 
 
-def evaluate_query(query: str, process: Process, entity: Entity | None = None) -> bool:
+def evaluate_query(query: str, process: FeedItem, entity: Entity | None = None) -> bool:
     return _Parser(query).parse().evaluate(_Context(process, entity))
 
 
@@ -279,7 +279,7 @@ def load_auto_reject_rules(config: AppConfig) -> list[AutoRejectRule]:
 
 
 def first_matching_rule(
-    process: Process, entity: Entity | None, rules: list[AutoRejectRule]
+    process: FeedItem, entity: Entity | None, rules: list[AutoRejectRule]
 ) -> AutoRejectRule | None:
     for rule in rules:
         if evaluate_query(rule.query, process, entity):
@@ -293,7 +293,7 @@ def autoreject_reason_text(rule: AutoRejectRule) -> str:
 
 
 def apply_auto_reject_rules(
-    process: Process,
+    process: FeedItem,
     entity: Entity | None,
     rules: list[AutoRejectRule],
     session: "Session | None" = None,
@@ -302,7 +302,7 @@ def apply_auto_reject_rules(
     feed.
 
     El estado del autoreject vive en el overlay por tenant (`TenantFeedDecision`), no en
-    `Process.status`. El caller registra la decisión vía `record_autoreject_decision`.
+    `FeedItem.status`. El caller registra la decisión vía `record_autoreject_decision`.
     Los guards consultan el overlay (si hay ``session``) y el campo legacy
     ``auto_reject_exempt`` durante la transición.
     """
@@ -315,7 +315,7 @@ def apply_auto_reject_rules(
     return first_matching_rule(process, entity, rules)
 
 
-def _overlay_exempt(session: "Session", process: Process) -> bool:
+def _overlay_exempt(session: "Session", process: FeedItem) -> bool:
     from .feed.decisions import DECISION_EXEMPT
     from .feed.repository import FeedRepository
 
