@@ -378,7 +378,7 @@ def _sqlite_table_create_sql(engine, table_name: str) -> str | None:
 
 def _sqlite_recreate_table_from_model(engine, model) -> None:
     """Recrea una tabla SQLite conservando filas (resetea FKs rotos)."""
-    from .models import Entity, Process
+    from .models import Entity, PipelineItem, Process
 
     table_name = model.__tablename__
     insp = inspect(engine)
@@ -393,6 +393,7 @@ def _sqlite_recreate_table_from_model(engine, model) -> None:
     # Stubs para resolver FKs al compilar CREATE (tablas ya existen en disco).
     Entity.__table__.to_metadata(temp_md)
     Process.__table__.to_metadata(temp_md)
+    PipelineItem.__table__.to_metadata(temp_md)
     new_table = model.__table__.to_metadata(temp_md, name=f"{table_name}_new")
     with engine.begin() as conn:
         conn.execute(text("PRAGMA foreign_keys=OFF"))
@@ -661,6 +662,25 @@ def _backfill_pipeline_items(engine) -> None:
     ]
     # Columnas leídas de processes (incluye source/source_ref para el mapeo)
     select_cols = ["source", "source_ref"] + copy_cols
+
+    # Ensure unique index on origin_feed_id (review finding: idempotency guard)
+    pi_cols_set = {col["name"] for col in insp.get_columns("pipeline_items")}
+    if "origin_feed_id" in pi_cols_set:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_pipeline_origin_feed_id "
+                "ON pipeline_items (origin_feed_id)"
+            ))
+
+    # Ensure index on analysis_results.pipeline_item_id (review finding: ADD COLUMN no FK)
+    if "analysis_results" in tables:
+        ar_cols_set = {col["name"] for col in insp.get_columns("analysis_results")}
+        if "pipeline_item_id" in ar_cols_set:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_analysis_results_pipeline_item_id "
+                    "ON analysis_results (pipeline_item_id)"
+                ))
 
     # Verificar que processes tiene promoted_at
     proc_cols = {col["name"] for col in insp.get_columns("processes")}

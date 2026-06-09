@@ -1,7 +1,6 @@
 """Tests para la migración 0.3e-1: PipelineItem model + backfill from processes."""
 
 import pytest
-from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, inspect
 
@@ -28,37 +27,6 @@ def engine(db_url):
     eng = create_engine(db_url)
     Base.metadata.create_all(eng)
     return eng
-
-
-def _seed_promoted_process(eng, **overrides):
-    """Inserta un Process promoted + Entity asociada."""
-    with eng.begin() as conn:
-        conn.execute(
-            conn.execute.__self__.execute.__func__  # just use text
-            if False else None
-        ) if False else None
-    # Use ORM-style via session
-    from sqlalchemy.orm import Session
-    with Session(eng) as s:
-        entity = Entity(ruc="12345678901", nombre="Test Entity", activa=True)
-        s.add(entity)
-        s.flush()
-        defaults = dict(
-            entity_id=entity.id,
-            anio=2026,
-            source="seace",
-            source_ref="12345",
-            nomenclatura="LP-01-2026",
-            objeto="Test objeto",
-            status=ProcessStatus.descargada,
-            promoted_at=utcnow(),
-            data_dir="/data/test",
-        )
-        defaults.update(overrides)
-        proc = Process(**defaults)
-        s.add(proc)
-        s.flush()
-        return proc.id, entity.id
 
 
 class TestPipelineItemModel:
