@@ -85,6 +85,17 @@ class Entity(Base):
 
 
 class FeedItem(Base):
+    """Feed/discovery item (tabla processes).
+
+    ``process_id`` es un alias uniforme para ``id`` — permite que
+    templates usen ``process.process_id`` tanto con FeedItem como
+    con PipelineItem (donde retorna ``origin_feed_id``).
+    """
+
+    @property
+    def process_id(self) -> int:
+        return self.id
+
     __tablename__ = "processes"
     __table_args__ = (
         UniqueConstraint(

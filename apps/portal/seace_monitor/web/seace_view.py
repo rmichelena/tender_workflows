@@ -48,4 +48,4 @@ def source_view_url(process: FeedItem) -> str:
         return adapter.portal_url
     from .seace_proxy import seace_view_path
 
-    return seace_view_path(process.id)
+    return seace_view_path(getattr(process, 'process_id', process.id))

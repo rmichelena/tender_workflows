@@ -812,7 +812,6 @@ def commit_session_with_retry(
     """
     for attempt in range(attempts):
         try:
-            _sync_dirty_promoted(session)
             session.commit()
             return
         except OperationalError as exc:
