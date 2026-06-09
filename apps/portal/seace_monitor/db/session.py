@@ -55,7 +55,10 @@ _PROCESS_COLUMN_ADDITIONS = (
     ("promoted_at", "DATETIME"),
 )
 
-_ANALYSIS_COLUMN_ADDITIONS = (("run_id", "VARCHAR(36)"),)
+_ANALYSIS_COLUMN_ADDITIONS = (
+    ("run_id", "VARCHAR(36)"),
+    ("pipeline_item_id", "INTEGER"),
+)
 
 _ENTITY_COLUMN_ADDITIONS = (
     ("estado_osce", "VARCHAR(32)"),
@@ -602,6 +605,7 @@ def init_db(database_url: str) -> None:
                 session.commit()
     if _engine.dialect.name == "sqlite":
         _ensure_sqlite_indexes(_engine)
+    _backfill_pipeline_items(_engine)
 
 
 def _ensure_sqlite_indexes(engine) -> None:
@@ -623,6 +627,106 @@ def _ensure_sqlite_indexes(engine) -> None:
     with engine.begin() as conn:
         for stmt in statements:
             conn.execute(text(stmt))
+
+
+def _backfill_pipeline_items(engine) -> None:
+    """Migración one-shot (0.3e-1): copia promoted rows de processes → pipeline_items.
+
+    Idempotente: solo inserta filas que no existen (por origin_feed_id). También
+    backfillea `analysis_results.pipeline_item_id` para los items que ya tienen análisis.
+    No toca la tabla `processes` — el dual-write viene en 0.3e-2.
+    """
+    insp = inspect(engine)
+    tables = insp.get_table_names()
+    if "pipeline_items" not in tables or "processes" not in tables:
+        return
+
+    # Columnas a copiar (excluimos id, promoted_at que tiene default).
+    # source/source_ref van como origin_source/origin_source_ref (no como columnas directas).
+    copy_cols = [
+        "entity_id", "anio", "status",
+        "workflow_profile", "interest_status", "lifecycle_phase",
+        "nid_proceso", "nid_convocatoria", "nid_sistema", "link_id",
+        "ntipo", "ficha_id", "numero", "fecha_publicacion",
+        "nomenclatura", "reiniciado_desde", "objeto", "descripcion",
+        "cuantia", "moneda", "version_seace",
+        "fecha_consultas", "fecha_presentacion", "cronograma_json",
+        "documentos_json", "ficha_url",
+        "content_hash", "data_dir",
+        "watch_unread", "watch_checked_at",
+        "watch_cronograma_prev_json", "watch_documentos_prev_json",
+        "watch_changelog_json",
+        "list_rank_descargados", "list_rank_analizados",
+        "first_seen_at", "updated_at", "promoted_at",
+    ]
+    # Columnas leídas de processes (incluye source/source_ref para el mapeo)
+    select_cols = ["source", "source_ref"] + copy_cols
+
+    # Verificar que processes tiene promoted_at
+    proc_cols = {col["name"] for col in insp.get_columns("processes")}
+    if "promoted_at" not in proc_cols:
+        return
+
+    # Solo copiar promoted (promoted_at IS NOT NULL) que no existan ya
+    with engine.begin() as conn:
+        existing = {
+            row[0] for row in conn.execute(
+                text("SELECT origin_feed_id FROM pipeline_items WHERE origin_feed_id IS NOT NULL")
+            )
+        }
+
+        rows = conn.execute(
+            text(
+                "SELECT id, " + ", ".join(select_cols) + " "
+                "FROM processes WHERE promoted_at IS NOT NULL"
+            )
+        ).fetchall()
+
+        if not rows:
+            return
+
+        pi_cols = ["origin_feed_id", "origin_source", "origin_source_ref", "tenant_id"] + copy_cols
+        if engine.dialect.name == "sqlite":
+            insert_sql = (
+                "INSERT OR IGNORE INTO pipeline_items ("
+                + ", ".join(pi_cols)
+                + ") VALUES ("
+                + ", ".join(f":{c}" for c in pi_cols)
+                + ")"
+            )
+        else:
+            insert_sql = (
+                "INSERT INTO pipeline_items ("
+                + ", ".join(pi_cols)
+                + ") SELECT "
+                + ", ".join(f":{c}" for c in pi_cols)
+                + " WHERE NOT EXISTS (SELECT 1 FROM pipeline_items WHERE origin_feed_id = :origin_feed_id)"
+            )
+
+        # row layout: [0]=id, [1]=source, [2]=source_ref, [3:]=copy_cols
+        for row in rows:
+            feed_id = row[0]
+            if feed_id in existing:
+                continue
+            vals = {"origin_feed_id": feed_id, "tenant_id": "default"}
+            vals["origin_source"] = row[1] or "seace"
+            vals["origin_source_ref"] = row[2]
+            for i, col in enumerate(copy_cols):
+                vals[col] = row[3 + i]
+            conn.execute(text(insert_sql), vals)
+
+    # Backfill analysis_results.pipeline_item_id
+    if "analysis_results" in tables:
+        ar_cols = {col["name"] for col in insp.get_columns("analysis_results")}
+        if "pipeline_item_id" in ar_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE analysis_results SET pipeline_item_id = "
+                        "(SELECT pi.id FROM pipeline_items pi WHERE pi.origin_feed_id = analysis_results.process_id) "
+                        "WHERE pipeline_item_id IS NULL AND process_id IS NOT NULL"
+                    )
+                )
 
 
 def commit_session_with_retry(
