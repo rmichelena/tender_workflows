@@ -209,6 +209,23 @@ class PipelineItem(Base):
     origin_source: Mapped[str] = mapped_column(String(32), default="seace")
     origin_source_ref: Mapped[str | None] = mapped_column(String(256))
 
+    # Alias de compatibilidad (templates/code acceden a .source)
+    @property
+    def source(self) -> str:
+        return self.origin_source
+
+    @source.setter
+    def source(self, value: str) -> None:
+        self.origin_source = value
+
+    @property
+    def source_ref(self) -> str | None:
+        return self.origin_source_ref
+
+    @source_ref.setter
+    def source_ref(self, value: str | None) -> None:
+        self.origin_source_ref = value
+
     # --- Clasificación ---
     entity_id: Mapped[int] = mapped_column(
         ForeignKey("entities.id", ondelete="RESTRICT"), index=True

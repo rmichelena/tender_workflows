@@ -18,8 +18,11 @@ from .web.app import create_app
 def _seed_analizado(tmp_path: Path) -> int:
     db: Session = session_factory()
     try:
+        entity = Entity(ruc="20123456789", nombre="ENTIDAD TEST", activa=True)
+        db.add(entity)
+        db.flush()
         proc = Process(
-            entity_id=1,
+            entity_id=entity.id,
             anio=2026,
             nid_proceso="web-1",
             nomenclatura="WEB-1",
@@ -27,6 +30,12 @@ def _seed_analizado(tmp_path: Path) -> int:
             list_rank_analizados=1,
         )
         db.add(proc)
+        db.commit()
+        from seace_monitor.feed.promotion import promote
+        from seace_monitor.db.pipeline_sync import sync_to_pipeline
+        promote(db, proc)
+        db.commit()
+        sync_to_pipeline(db, proc)
         db.commit()
         return proc.id
     finally:
@@ -80,6 +89,13 @@ def _seed_workflow_list_process(status: ProcessStatus, *, rank_attr: str) -> int
         )
         setattr(proc, rank_attr, 1)
         db.add(proc)
+        db.commit()
+        # Promote + dual-write: create PipelineItem for pipeline statuses
+        from seace_monitor.feed.promotion import promote
+        from seace_monitor.db.pipeline_sync import sync_to_pipeline
+        promote(db, proc)
+        db.commit()
+        sync_to_pipeline(db, proc)
         db.commit()
         return proc.id
     finally:
