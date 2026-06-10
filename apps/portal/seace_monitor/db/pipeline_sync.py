@@ -96,7 +96,7 @@ def sync_to_pipeline(session: Session, process: FeedItem, *, tenant_id: str = "d
             origin_feed_id=process.id,
             origin_source=process.source or "seace",
             origin_source_ref=process.source_ref,
-            tenant_id="default",
+            tenant_id=tenant_id,
             promoted_at=process.promoted_at,
             first_seen_at=process.first_seen_at,
         )
