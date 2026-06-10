@@ -9,11 +9,11 @@
         {% if p.status.value == 'descartando' %}
         <button type="button" class="btn btn-secondary btn-sm" disabled>Descartando…</button>
         {% elif p.analysis and p.analysis.status == 'running' %}
-        <a href="/descargados/{{ p.id }}" class="btn btn-analyzing btn-sm">Analizando</a>
+        <a href="/descargados/{{ p.process_id }}" class="btn btn-analyzing btn-sm">Analizando</a>
         {% else %}
-        <a href="/descargados/{{ p.id }}" class="btn btn-primary btn-sm">Ver / Analizar</a>
+        <a href="/descargados/{{ p.process_id }}" class="btn btn-primary btn-sm">Ver / Analizar</a>
         {% endif %}
-        <form method="post" action="/descargados/{{ p.id }}/descartar" class="js-keep-scroll js-descartar-form">
+        <form method="post" action="/descargados/{{ p.process_id }}/descartar" class="js-keep-scroll js-descartar-form">
           <input type="hidden" name="scroll" value=""/>
           <input type="hidden" name="sort" value="{{ sort }}"/>
           <input type="hidden" name="dir" value="{{ sort_dir }}"/>

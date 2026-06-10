@@ -19,7 +19,7 @@ from .adp_downloader import download_adp_documents
 from .adp_parser import parse_adp_html
 from .adp_scanner import ADP_PORTAL_SOURCE, _adp_doc_to_dict, _adp_process_to_cronograma
 from .config import AppConfig
-from .db.models import Process, ProcessStatus, utcnow
+from .db.models import FeedItem, ProcessStatus, utcnow
 from .document_storage import write_manifest
 
 logger = logging.getLogger(__name__)
@@ -99,14 +99,14 @@ def _refresh_adp_watchlist_inner(
     now = utcnow()
     sql_threshold = watchlist_sql_min_stale_before(config, now=now)
     candidates = (
-        session.query(Process)
-        .options(joinedload(Process.entity))
-        .filter(Process.source == ADP_PORTAL_SOURCE)
-        .filter(Process.status.in_(tuple(WATCHLIST_STATUSES)))
+        session.query(FeedItem)
+        .options(joinedload(FeedItem.entity))
+        .filter(FeedItem.source == ADP_PORTAL_SOURCE)
+        .filter(FeedItem.status.in_(tuple(WATCHLIST_STATUSES)))
         .filter(
             or_(
-                Process.watch_checked_at.is_(None),
-                Process.watch_checked_at < sql_threshold,
+                FeedItem.watch_checked_at.is_(None),
+                FeedItem.watch_checked_at < sql_threshold,
             )
         )
         .all()
@@ -150,7 +150,7 @@ def _refresh_adp_watchlist_inner(
 def _refresh_process(
     config: AppConfig,
     session: Session,
-    proc: Process,
+    proc: FeedItem,
     all_parsed: dict[str, tuple[int, object]],
     client: AdpClient,
 ) -> bool:

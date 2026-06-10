@@ -107,10 +107,10 @@ def remap_process_data_dir(config: AppConfig, data_dir: str | None) -> str | Non
 
 def migrate_process_data_dir_refs(session, config: AppConfig) -> int:
     """Actualiza data_dir en BD tras migración de carpetas."""
-    from .db.models import Process
+    from .db.models import FeedItem
 
     updated = 0
-    for proc in session.query(Process).filter(Process.data_dir.isnot(None)):
+    for proc in session.query(FeedItem).filter(FeedItem.data_dir.isnot(None)):
         new_path = remap_process_data_dir(config, proc.data_dir)
         if new_path and new_path != proc.data_dir:
             proc.data_dir = new_path

@@ -17,7 +17,7 @@ from ..analysis.gemini_session import (
     send_chat_message,
 )
 from ..config import AppConfig
-from ..db.models import Process, ProcessStatus
+from ..db.models import FeedItem, ProcessStatus
 from .markdown_render import render_chat_reply, render_markdown
 
 
@@ -34,7 +34,7 @@ _CHAT_STATUSES = frozenset(
 )
 
 
-def _proc_dir(process: Process) -> Path:
+def _proc_dir(process: FeedItem) -> Path:
     if not process.data_dir:
         raise HTTPException(400, "Proceso sin archivos locales")
     return Path(process.data_dir)
@@ -60,7 +60,7 @@ def api_chat_payload(session: GeminiSession | None) -> dict[str, Any]:
 def register_analysis_chat_routes(app, config: AppConfig, get_db):
     @app.get("/api/analizados/{process_id}/chat")
     def get_chat(process_id: int, db: Session = Depends(get_db)):
-        proc = db.get(Process, process_id)
+        proc = db.get(FeedItem, process_id)
         if proc is None:
             raise HTTPException(404)
         if proc.status not in _CHAT_STATUSES:
@@ -76,7 +76,7 @@ def register_analysis_chat_routes(app, config: AppConfig, get_db):
         body: ChatMessageRequest,
         db: Session = Depends(get_db),
     ):
-        proc = db.get(Process, process_id)
+        proc = db.get(FeedItem, process_id)
         if proc is None:
             raise HTTPException(404)
         if proc.status not in _CHAT_STATUSES:

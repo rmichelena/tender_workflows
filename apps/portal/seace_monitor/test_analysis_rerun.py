@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .analysis.runner import AnalysisRunner
 from .client import ProcessRow
 from .config import AppConfig
-from .db.models import AnalysisResult, Base, Entity, Process, ProcessStatus
+from .db.models import AnalysisResult, Base, Entity, FeedItem, ProcessStatus
 from .parser import CronogramaEtapa, Documento, FichaData
 
 
@@ -51,7 +51,7 @@ def test_analyze_restores_done_analysis_when_prior_snapshot_provided(
         ),
         encoding="utf-8",
     )
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         nid_proceso="nid-1",
@@ -97,7 +97,7 @@ def test_analyze_restores_done_analysis_when_prior_snapshot_provided(
 
 def _setup_descargado_process(
     analysis_session: Session, tmp_path: Path, *, nid: str = "nid-1"
-) -> tuple[AppConfig, Process]:
+) -> tuple[AppConfig, FeedItem]:
     cfg = AppConfig()
     entity = analysis_session.query(Entity).one()
     proc_dir = tmp_path / nid
@@ -110,7 +110,7 @@ def _setup_descargado_process(
         ),
         encoding="utf-8",
     )
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         nid_proceso=nid,
@@ -187,7 +187,7 @@ def test_download_fetches_documents_with_current_row_from_later_page(
 ):
     cfg = AppConfig()
     entity = analysis_session.query(Entity).one()
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         nid_proceso="target-nid",
@@ -252,7 +252,7 @@ def test_download_persists_cronograma_from_ficha(
 ):
     cfg = AppConfig()
     entity = analysis_session.query(Entity).one()
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         nid_proceso="target-nid",
@@ -332,7 +332,7 @@ def test_download_uses_continued_process_row_matched_by_nomenclatura(
 ):
     cfg = AppConfig()
     entity = analysis_session.query(Entity).one()
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         nid_proceso="old-nid",
@@ -393,7 +393,7 @@ def test_download_uses_continued_process_row_matched_by_nomenclatura(
 def test_download_commits_before_and_after_seace_fetch(analysis_session: Session):
     cfg = AppConfig()
     entity = analysis_session.query(Entity).one()
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         nid_proceso="target-nid",

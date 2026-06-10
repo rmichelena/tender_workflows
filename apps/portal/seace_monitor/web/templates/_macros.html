@@ -41,7 +41,7 @@
   <tbody>
     {% for item in processes %}
     {% set p = item.process %}
-    <tr data-process-id="{{ p.id }}" class="{% if item.watch_unread %}row-unread{% endif %}"{% if pending_status and pending_data_attr and p.status.value == pending_status %} data-{{ pending_data_attr }}="1"{% endif %}>
+    <tr data-process-id="{{ p.process_id }}" class="{% if item.watch_unread %}row-unread{% endif %}"{% if pending_status and pending_data_attr and p.status.value == pending_status %} data-{{ pending_data_attr }}="1"{% endif %}>
       {{ workflow_list_cells(item, p) }}
       <td class="actions-cell">
         <div class="actions-stack js-action-row">

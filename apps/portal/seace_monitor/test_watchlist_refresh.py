@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from .config import AppConfig
-from .db.models import Base, Entity, Process, ProcessStatus
+from .db.models import Base, Entity, FeedItem, ProcessStatus
 from .ingest import get_adapter
 from .watchlist_refresh import (
     watchlist_refresh_due,
@@ -39,7 +39,7 @@ def _proc(entity, **kwargs):
         status=ProcessStatus.descargada,
     )
     defaults.update(kwargs)
-    return Process(**defaults)
+    return FeedItem(**defaults)
 
 
 def test_urgent_ttl_when_presentacion_within_horizon():

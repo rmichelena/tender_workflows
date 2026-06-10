@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from .analysis.document_prep import validate_gemini_upload_size
-from .db.models import Process
+from .db.models import FeedItem
 from .web.detail_data import (
     _assign_default_selection,
     build_document_tree,
@@ -85,7 +85,7 @@ def test_build_document_tree_marks_analyzed_paths(tmp_path: Path):
     (docs / "a.pdf").write_bytes(b"%PDF")
     (docs / "b.pdf").write_bytes(b"%PDF")
 
-    proc = Process(
+    proc = FeedItem(
         id=1,
         data_dir=str(tmp_path),
         documentos_json=json.dumps(
@@ -122,7 +122,7 @@ def test_list_analyzable_files_uses_saved_selection(tmp_path: Path):
     (docs / "a.pdf").write_bytes(b"%PDF-1.4")
     (docs / "b.docx").write_bytes(b"docx")
 
-    proc = Process(id=1, data_dir=str(tmp_path), documentos_json="[]")
+    proc = FeedItem(id=1, data_dir=str(tmp_path), documentos_json="[]")
     save_analysis_selection(tmp_path, ["b.docx"])
     rows = list_analyzable_files(proc, checked_paths={"b.docx"})
     checked = [row.rel_path for row in rows if row.default_checked]
@@ -138,7 +138,7 @@ def test_build_document_tree_nests_zip_contents(tmp_path: Path):
     (extract / "inner.pdf").write_bytes(b"%PDF")
     (extract / "inner.docx").write_bytes(b"docx")
 
-    proc = Process(
+    proc = FeedItem(
         id=1,
         data_dir=str(tmp_path),
         documentos_json=json.dumps(

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from .config import AppConfig
-from .db.models import Entity, Process, ProcessStatus, TenantFeedDecision
+from .db.models import Entity, FeedItem, ProcessStatus, TenantFeedDecision
 from .db.session import session_factory
 from .web.app import create_app
 
@@ -21,19 +21,19 @@ def _seed(db: Session) -> None:
     db.flush()
     db.add_all(
         [
-            Process(
+            FeedItem(
                 entity_id=1, anio=2026, source="seace", source_ref="s1",
                 nid_proceso="s1", nomenclatura="LP-1",
                 objeto="Servicio", descripcion="SERVICIO DE LIMPIEZA DE OFICINAS",
                 status=ProcessStatus.publicada,
             ),
-            Process(
+            FeedItem(
                 entity_id=1, anio=2026, source="seace", source_ref="s2",
                 nid_proceso="s2", nomenclatura="LP-2",
                 objeto="Bien", descripcion="EQUIPOS DE RAYOS X",
                 status=ProcessStatus.publicada,
             ),
-            Process(
+            FeedItem(
                 entity_id=2, anio=2026, source="adp_portal", source_ref="a1",
                 nomenclatura="ADP-1",
                 objeto="Servicios", descripcion="SERVICIO DE LIMPIEZA INTEGRAL",
@@ -46,7 +46,7 @@ def _seed(db: Session) -> None:
 
 def _status(db, nomenclatura):
     return (
-        db.query(Process).filter(Process.nomenclatura == nomenclatura).one().status
+        db.query(FeedItem).filter(FeedItem.nomenclatura == nomenclatura).one().status
     )
 
 
@@ -112,7 +112,7 @@ def test_apply_existing_only_selected_channel(tmp_path: Path):
         assert len(decisions) == 1
         assert decisions[0].decision == "autorejected"
         assert decisions[0].rule_id == "limpieza"
-        lp1 = db.query(Process).filter_by(nomenclatura="LP-1").one()
+        lp1 = db.query(FeedItem).filter_by(nomenclatura="LP-1").one()
         assert decisions[0].feed_item_id == lp1.id
     finally:
         db.close()
@@ -129,13 +129,13 @@ def test_apply_isolates_per_item_failure(tmp_path: Path, monkeypatch):
         db.flush()
         db.add_all(
             [
-                Process(
+                FeedItem(
                     entity_id=1, anio=2026, source="seace", source_ref="s1",
                     nid_proceso="s1", nomenclatura="LP-1",
                     objeto="Servicio", descripcion="SERVICIO DE LIMPIEZA A",
                     status=ProcessStatus.publicada,
                 ),
-                Process(
+                FeedItem(
                     entity_id=1, anio=2026, source="seace", source_ref="s3",
                     nid_proceso="s3", nomenclatura="LP-3",
                     objeto="Servicio", descripcion="SERVICIO DE LIMPIEZA B",
@@ -181,7 +181,7 @@ def test_apply_isolates_per_item_failure(tmp_path: Path, monkeypatch):
         decisions = db.query(TenantFeedDecision).all()
         assert {d.decision for d in decisions} == {"autorejected"}
         assert len(decisions) == 1
-        lp3 = db.query(Process).filter_by(nomenclatura="LP-3").one()
+        lp3 = db.query(FeedItem).filter_by(nomenclatura="LP-3").one()
         assert decisions[0].feed_item_id == lp3.id
     finally:
         db.close()
@@ -198,7 +198,7 @@ def test_apply_skips_already_overlay_autorejected(tmp_path: Path):
     try:
         db.add(Entity(id=1, ruc="20100000001", nombre="Entidad SEACE", activa=True))
         db.flush()
-        proc = Process(
+        proc = FeedItem(
             entity_id=1, anio=2026, source="seace", source_ref="s1",
             nid_proceso="s1", nomenclatura="LP-1",
             objeto="Servicio", descripcion="SERVICIO DE LIMPIEZA DE OFICINAS",

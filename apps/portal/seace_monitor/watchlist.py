@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from .config import AppConfig
 from .analysis.document_prep import ARCHIVE_SUFFIXES, extract_archives
-from .db.models import Process, ProcessStatus, utcnow
+from .db.models import FeedItem, ProcessStatus, utcnow
 from .document_storage import (
     download_and_store_document,
     looks_like_size_label,
@@ -104,7 +104,7 @@ def _json_list_has_items(raw_json: str | None) -> bool:
     return isinstance(raw, list) and bool(raw)
 
 
-def _validate_watchlist_ficha(process: Process, ficha) -> None:
+def _validate_watchlist_ficha(process: FeedItem, ficha) -> None:
     had_content = _json_list_has_items(process.cronograma_json) or _json_list_has_items(
         process.documentos_json
     )
@@ -155,7 +155,7 @@ def _merge_parsed_docs_with_storage(
     return merged
 
 
-def mark_watchlist_read(process: Process) -> None:
+def mark_watchlist_read(process: FeedItem) -> None:
     process.watch_unread = False
     process.watch_cronograma_prev_json = None
     process.watch_documentos_prev_json = None
@@ -163,18 +163,18 @@ def mark_watchlist_read(process: Process) -> None:
 
 def watchlist_nav_badges(session: Session) -> dict[str, int]:
     descargados = (
-        session.query(Process)
+        session.query(FeedItem)
         .filter(
-            Process.status == ProcessStatus.descargada,
-            Process.watch_unread.is_(True),
+            FeedItem.status == ProcessStatus.descargada,
+            FeedItem.watch_unread.is_(True),
         )
         .count()
     )
     analizados = (
-        session.query(Process)
+        session.query(FeedItem)
         .filter(
-            Process.status.in_((ProcessStatus.analizada, ProcessStatus.portafolio)),
-            Process.watch_unread.is_(True),
+            FeedItem.status.in_((ProcessStatus.analizada, ProcessStatus.portafolio)),
+            FeedItem.watch_unread.is_(True),
         )
         .count()
     )
@@ -191,13 +191,13 @@ def refresh_watchlist_processes(config: AppConfig, session: Session) -> int:
     sql_threshold = watchlist_sql_min_stale_before(config, now=now)
     # Pre-filtro SQL con el TTL mínimo (urgente); refinar en Python por proceso.
     candidates = (
-        session.query(Process)
-        .options(joinedload(Process.entity))
-        .filter(Process.status.in_(tuple(WATCHLIST_STATUSES)))
+        session.query(FeedItem)
+        .options(joinedload(FeedItem.entity))
+        .filter(FeedItem.status.in_(tuple(WATCHLIST_STATUSES)))
         .filter(
             or_(
-                Process.watch_checked_at.is_(None),
-                Process.watch_checked_at < sql_threshold,
+                FeedItem.watch_checked_at.is_(None),
+                FeedItem.watch_checked_at < sql_threshold,
             )
         )
         .all()
@@ -221,7 +221,7 @@ def refresh_watchlist_processes(config: AppConfig, session: Session) -> int:
     return updated
 
 
-def _repair_document_metadata(process: Process) -> bool:
+def _repair_document_metadata(process: FeedItem) -> bool:
     """Corrige nombres erróneos en documentos_json usando manifest/disco."""
     if not process.data_dir or not process.documentos_json:
         return False
@@ -311,7 +311,7 @@ def _partition_preserved_removed(
 
 
 def _refresh_watchlist_process(
-    config: AppConfig, session: Session, process: Process
+    config: AppConfig, session: Session, process: FeedItem
 ) -> bool:
     if not process.entity:
         return False
@@ -460,7 +460,7 @@ def _ensure_archives_extracted(docs_dir: Path) -> None:
 
 def _download_new_documents(
     config: AppConfig,
-    process: Process,
+    process: FeedItem,
     docs: list[dict],
     *,
     old_documentos_json: str | None,

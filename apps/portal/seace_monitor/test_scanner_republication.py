@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from .client import ProcessRow
-from .db.models import Base, Entity, Process, ProcessStatus
+from .db.models import Base, Entity, FeedItem, ProcessStatus
 from .feed import FeedRepository
 from .scanner import (
     _REPUBLICATION_CLAIMED_STATUSES,
@@ -55,7 +55,7 @@ def _row(nid: str, nomenclatura: str, reiniciado_desde: str = "") -> ProcessRow:
 
 
 def _proc(entity, *, source_ref, nid, nomenclatura, status, data_dir=None):
-    return Process(
+    return FeedItem(
         entity_id=entity.id,
         anio=2026,
         source="seace",
@@ -90,7 +90,7 @@ def test_adopt_deletes_publicada_duplicate_and_adopts_nid():
     )
     session.commit()
 
-    assert session.get(Process, dup_id) is None  # duplicado eliminado
+    assert session.get(FeedItem, dup_id) is None  # duplicado eliminado
     assert claimed.source_ref == "1018219"  # identidad adoptada
     assert claimed.nid_proceso == "1018219"
     assert claimed.status == ProcessStatus.analizada  # se conserva el item trabajado
@@ -134,7 +134,7 @@ def test_adopt_keeps_nonremovable_existing_without_changing_identity():
     adopt_republication(session, claimed, existing, _row("1018219", NOM))
     session.commit()
 
-    assert session.get(Process, existing_id) is not None  # no se borra
+    assert session.get(FeedItem, existing_id) is not None  # no se borra
     assert claimed.source_ref == "1001133"  # identidad sin cambios (evita colisión)
 
 
@@ -250,7 +250,7 @@ def test_adopt_merges_two_publicada_deleting_older_duplicate():
     adopt_republication(session, new, old, _row("100", NOM))
     session.commit()
 
-    assert session.get(Process, old_id) is None  # duplicado viejo eliminado
+    assert session.get(FeedItem, old_id) is None  # duplicado viejo eliminado
     assert new.source_ref == "200"  # no regresa a nid viejo
 
 
@@ -325,7 +325,7 @@ def test_scan_dedupes_publicada_within_single_scan(monkeypatch):
     scanner._scan_entity(entity, ScanOptions())
     session.commit()
 
-    procs = session.query(Process).filter(Process.nomenclatura == NOM).all()
+    procs = session.query(FeedItem).filter(FeedItem.nomenclatura == NOM).all()
     assert len(procs) == 1  # una sola publicada pese a dos nids en el mismo scan
     assert procs[0].source_ref == "200"  # adopta el nid más reciente
 
@@ -360,7 +360,7 @@ def test_adopt_clears_overlay_decision_of_deleted_duplicate():
     adopt_republication(session, claimed, dup, _row("1018219", NOM))
     session.commit()
 
-    assert session.get(Process, dup_id) is None
+    assert session.get(FeedItem, dup_id) is None
     assert session.query(TenantFeedDecision).filter_by(feed_item_id=dup_id).count() == 0
 
 
@@ -388,7 +388,7 @@ def test_adopt_does_not_delete_autorejected_publicada_duplicate():
     adopt_republication(session, pub, auto, _row("100", NOM), {auto_id})
     session.commit()
 
-    assert session.get(Process, auto_id) is not None  # NO se borró
+    assert session.get(FeedItem, auto_id) is not None  # NO se borró
     assert (
         session.query(TenantFeedDecision).filter_by(feed_item_id=auto_id).count() == 1
     )
@@ -551,4 +551,4 @@ def test_adopt_does_not_delete_promoted_publicada_duplicate():
     adopt_republication(session, claimed, promo, _row("100", NOM))
     session.commit()
     # El promovido NO se borra aunque parezca duplicado publicada sin datos.
-    assert session.get(Process, promo_id) is not None
+    assert session.get(FeedItem, promo_id) is not None

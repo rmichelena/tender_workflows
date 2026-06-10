@@ -9,7 +9,7 @@ from .db.models import (
     Base,
     Entity,
     InterestStatus,
-    Process,
+    FeedItem,
     ProcessStatus,
     _default_source_ref,
 )
@@ -30,7 +30,7 @@ def test_process_defaults_to_seace_source_ref_from_nid():
     session.add(entity)
     session.flush()
 
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         nid_proceso="123456",
@@ -39,7 +39,7 @@ def test_process_defaults_to_seace_source_ref_from_nid():
     session.add(proc)
     session.commit()
 
-    saved = session.query(Process).one()
+    saved = session.query(FeedItem).one()
     assert saved.source == "seace"
     assert saved.source_ref == "123456"
     assert saved.workflow_profile == "public_tender"
@@ -114,13 +114,13 @@ def test_process_defaults_to_licitacion_lifecycle_phase():
     entity = Entity(ruc="20123456789", nombre="Entidad", activa=True)
     session.add(entity)
     session.flush()
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id, anio=2026, nid_proceso="1", nomenclatura="AS-SM-1-2026"
     )
     session.add(proc)
     session.commit()
 
-    assert session.query(Process).one().lifecycle_phase == LifecyclePhase.licitacion
+    assert session.query(FeedItem).one().lifecycle_phase == LifecyclePhase.licitacion
 
 
 def test_backfills_lifecycle_phase_for_existing_process_rows(tmp_path: Path):
@@ -538,7 +538,7 @@ def test_non_seace_process_persists_without_nid_proceso():
     session.flush()
 
     message_id = "very-long-message-id@mail.example.com"
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         source="email",
@@ -549,7 +549,7 @@ def test_non_seace_process_persists_without_nid_proceso():
     session.add(proc)
     session.commit()
 
-    saved = session.query(Process).one()
+    saved = session.query(FeedItem).one()
     assert saved.source == "email"
     assert saved.source_ref == message_id
     assert saved.nid_proceso is None
@@ -565,7 +565,7 @@ def test_process_source_identity_unique_per_entity(tmp_path: Path):
     session.add(entity)
     session.flush()
     session.add(
-        Process(
+        FeedItem(
             entity_id=entity.id,
             anio=2026,
             source="email",
@@ -576,7 +576,7 @@ def test_process_source_identity_unique_per_entity(tmp_path: Path):
     )
     session.commit()
     session.add(
-        Process(
+        FeedItem(
             entity_id=entity.id,
             anio=2026,
             source="email",

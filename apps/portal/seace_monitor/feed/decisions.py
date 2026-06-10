@@ -1,9 +1,9 @@
 """Overlay de decisiones por tenant sobre el feed (paso 0.3b).
 
-Hoy las decisiones de autoreject viven en `Process` (`status='autorejected'`,
+Hoy las decisiones de autoreject viven en `FeedItem` (`status='autorejected'`,
 `auto_reject_exempt`, `auto_reject_reason`). El split feed/pipeline las mueve a un
 overlay por tenant (`TenantFeedDecision`) para que el feed sea compartido y agnóstico al
-tenant. En 0.3b mantenemos **doble escritura**: seguimos mutando `Process` (los reads no
+tenant. En 0.3b mantenemos **doble escritura**: seguimos mutando `FeedItem` (los reads no
 cambian) y, en paralelo, registramos la decisión en el overlay; en 0.3c los reads pasarán
 al overlay y el scanner dejará de mutar el feed.
 """
@@ -17,14 +17,14 @@ from ..db.models import TenantFeedDecision
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
-    from ..db.models import Process
+    from ..db.models import FeedItem
 
 DEFAULT_TENANT_ID = "default"
 DECISION_AUTOREJECTED = "autorejected"
 DECISION_EXEMPT = "exempt"
 
 
-def _feed_item_id(session: "Session", process: "Process") -> int | None:
+def _feed_item_id(session: "Session", process: "FeedItem") -> int | None:
     if process.id is None:
         session.flush()
     return process.id
@@ -32,7 +32,7 @@ def _feed_item_id(session: "Session", process: "Process") -> int | None:
 
 def _upsert_decision(
     session: "Session",
-    process: "Process",
+    process: "FeedItem",
     decision: str,
     *,
     rule_id: str | None,
@@ -69,7 +69,7 @@ def _upsert_decision(
 
 def record_autoreject_decision(
     session: "Session",
-    process: "Process",
+    process: "FeedItem",
     *,
     rule_id: str | None,
     reason: str | None,
@@ -88,7 +88,7 @@ def record_autoreject_decision(
 
 def record_exempt_decision(
     session: "Session",
-    process: "Process",
+    process: "FeedItem",
     *,
     tenant_id: str = DEFAULT_TENANT_ID,
 ) -> None:
@@ -105,7 +105,7 @@ def record_exempt_decision(
 
 def clear_feed_decision(
     session: "Session",
-    process: "Process",
+    process: "FeedItem",
     *,
     tenant_id: str = DEFAULT_TENANT_ID,
 ) -> None:
@@ -118,7 +118,7 @@ def clear_feed_decision(
     ).delete()
 
 
-def clear_all_feed_decisions(session: "Session", process: "Process") -> None:
+def clear_all_feed_decisions(session: "Session", process: "FeedItem") -> None:
     """Borra las decisiones de **todos** los tenants sobre un feed item.
 
     El feed es compartido y sin FK al overlay: cuando el item se elimina (p. ej. el

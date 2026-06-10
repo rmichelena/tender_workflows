@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from .config import AppConfig
 from .db.maintenance import is_stale_running_analysis
-from .db.models import Process, ProcessStatus
+from .db.models import FeedItem, ProcessStatus
 from .process_storage import archive_analyzed_process, discard_process_downloads
 from .scan_options import RemovedEntityPolicy
 
@@ -36,7 +36,7 @@ class EntityCleanupResult:
     deferred: int
 
 
-def _process_is_busy(proc: Process, stale_seconds: int) -> bool:
+def _process_is_busy(proc: FeedItem, stale_seconds: int) -> bool:
     if proc.status in (
         ProcessStatus.descargando,
         ProcessStatus.descartando,
@@ -54,8 +54,8 @@ def count_processes_for_entities(
     if not entity_ids:
         return EntityProcessCounts(0, 0, 0)
     rows = (
-        session.query(Process.status, Process.id)
-        .filter(Process.entity_id.in_(entity_ids))
+        session.query(FeedItem.status, FeedItem.id)
+        .filter(FeedItem.entity_id.in_(entity_ids))
         .all()
     )
     publicados = descargados = analizados = 0
@@ -84,7 +84,7 @@ def apply_removed_entity_policy(
     if not entity_ids or policy == RemovedEntityPolicy.keep_all:
         return EntityCleanupResult(0, 0)
     stale_seconds = config.stale_analysis_seconds
-    q = session.query(Process).filter(Process.entity_id.in_(entity_ids))
+    q = session.query(FeedItem).filter(FeedItem.entity_id.in_(entity_ids))
     affected = deferred = 0
     for proc in q.all():
         if _process_is_busy(proc, stale_seconds):

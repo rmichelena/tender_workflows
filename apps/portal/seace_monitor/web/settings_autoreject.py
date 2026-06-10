@@ -18,7 +18,7 @@ from ..auto_reject import (
     validate_rules_yaml,
 )
 from ..config import AppConfig
-from ..db.models import Process, ProcessStatus
+from ..db.models import FeedItem, ProcessStatus
 from ..feed import FeedRepository, record_autoreject_decision
 from ..ingest import get_adapter, registered_sources
 
@@ -106,16 +106,16 @@ def register_autoreject_settings_routes(app, config: AppConfig, render, _get_db)
             # re-evaluarlos (mismo criterio que /publicaciones).
             autorejected_ids = FeedRepository(db).effective_autorejected_ids()
             q = (
-                db.query(Process)
-                .options(joinedload(Process.entity))
+                db.query(FeedItem)
+                .options(joinedload(FeedItem.entity))
                 .filter(
-                    Process.status == ProcessStatus.publicada,
-                    Process.auto_reject_exempt.is_(False),
-                    Process.source.in_(selected),
+                    FeedItem.status == ProcessStatus.publicada,
+                    FeedItem.auto_reject_exempt.is_(False),
+                    FeedItem.source.in_(selected),
                 )
             )
             if autorejected_ids:
-                q = q.filter(Process.id.notin_(autorejected_ids))
+                q = q.filter(FeedItem.id.notin_(autorejected_ids))
             procesos = q.all()
             # Savepoint por proceso: el fallo en uno (p. ej. violación de constraint) no
             # debe descartar las decisiones ya aplicadas al resto del lote.

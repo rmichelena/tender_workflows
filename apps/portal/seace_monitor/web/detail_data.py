@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ..parser import clean_cronograma_etapa, fechas_listado_from_cronograma_json
 from ..watchlist_changelog import changelog_entry_at_label
-from ..db.models import Process
+from ..db.models import FeedItem
 from ..document_storage import (
     MANIFEST_NAME,
     display_name_for_path,
@@ -202,7 +202,7 @@ def incluye_display_text(text: str | None) -> str | None:
     return text.strip()
 
 
-def _documents_dir(process: Process) -> Path | None:
+def _documents_dir(process: FeedItem) -> Path | None:
     if not process.data_dir:
         return None
     docs_dir = Path(process.data_dir) / "documentos"
@@ -456,7 +456,7 @@ def _mark_new_document_nodes(
 
 
 def build_document_tree(
-    process: Process,
+    process: FeedItem,
     *,
     checked_paths: set[str] | None = None,
     analyzed_paths: set[str] | None = None,
@@ -553,7 +553,7 @@ def filter_new_document_nodes(nodes: list[DocumentoNodo]) -> list[DocumentoNodo]
 
 
 def list_analyzable_files(
-    process: Process,
+    process: FeedItem,
     *,
     checked_paths: set[str] | None = None,
     prev_documentos_json: str | None = None,
@@ -567,7 +567,7 @@ def list_analyzable_files(
 
 
 def list_downloaded_documents(
-    process: Process, *, prev_documentos_json: str | None = None
+    process: FeedItem, *, prev_documentos_json: str | None = None
 ) -> list[DocumentoDescargado]:
     """Lista plana legacy; preferir build_document_tree en vistas de detalle."""
     flat: list[DocumentoDescargado] = []
@@ -604,7 +604,7 @@ def list_downloaded_documents(
     return flat
 
 
-def fechas_listado(process: Process) -> tuple[str, str]:
+def fechas_listado(process: FeedItem) -> tuple[str, str]:
     """Fechas de fin (consultas y presentación) para columnas de listado."""
     fechas = fechas_listado_from_cronograma_json(
         process.cronograma_json,
@@ -680,7 +680,7 @@ def parse_cronograma(
     return rows
 
 
-def resolve_document_path(process: Process, filename: str) -> Path | None:
+def resolve_document_path(process: FeedItem, filename: str) -> Path | None:
     docs_dir = _documents_dir(process)
     if not docs_dir:
         return None
@@ -695,7 +695,7 @@ def resolve_document_path(process: Process, filename: str) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def download_filename_for_path(process: Process, path: Path) -> str:
+def download_filename_for_path(process: FeedItem, path: Path) -> str:
     docs_dir = _documents_dir(process)
     if docs_dir is None:
         return path.name

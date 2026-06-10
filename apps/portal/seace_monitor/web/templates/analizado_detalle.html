@@ -66,7 +66,7 @@
 </div>
 
 {% if process.analysis and process.analysis.status == 'done' %}
-<div class="detail-box detail-chat" id="analysis-chat" data-process-id="{{ process.id }}">
+<div class="detail-box detail-chat" id="analysis-chat" data-process-id="{{ process.process_id }}">
   <h3>Preguntas sobre las bases</h3>
   <p id="chat-unavailable" class="muted chat-unavailable"{% if chat.available %} hidden{% endif %}>
     {{ chat.message or 'El chat estará disponible tras re-analizar el proceso con Gemini.' }}
@@ -100,7 +100,7 @@
   <h3>Documentos descargados ({{ documento_count }})</h3>
   {% if documentos %}
   <ul class="doc-list doc-list-tree">
-    {{ doc_tree(documentos, process.id, doc_route) }}
+    {{ doc_tree(documentos, process.process_id, doc_route) }}
   </ul>
   {% else %}
   <p class="muted">Sin documentos registrados.</p>
@@ -111,9 +111,9 @@
 <div class="detail-box detail-box-wide">
   <h3>Volver a analizar</h3>
   <p class="muted">Selecciona documentos (los nuevos vienen marcados). El análisis anterior se archiva con timestamp.</p>
-  <form method="post" action="/descargados/{{ process.id }}/analizar">
+  <form method="post" action="/descargados/{{ process.process_id }}/analizar">
     <ul class="doc-list doc-list-selectable doc-list-tree">
-      {{ doc_tree(archivos, process.id, doc_route, selectable=true) }}
+      {{ doc_tree(archivos, process.process_id, doc_route, selectable=true) }}
     </ul>
     <p style="margin-top:1rem">
       <button type="submit" class="btn btn-primary">Volver a analizar seleccionados</button>
@@ -127,22 +127,22 @@
 <p style="margin-top:1.5rem">
   <a href="{{ back_href }}" class="btn btn-secondary">← Volver</a>
   {% if is_archived %}
-  <form method="post" action="/archivados/{{ process.id }}/restaurar" style="display:inline">
+  <form method="post" action="/archivados/{{ process.process_id }}/restaurar" style="display:inline">
     <button type="submit" class="btn btn-primary">Restaurar</button>
   </form>
   {% else %}
   {% if process.status.value == 'analizada' %}
-  <form method="post" action="/analizados/{{ process.id }}/estado" style="display:inline">
+  <form method="post" action="/analizados/{{ process.process_id }}/estado" style="display:inline">
     <input type="hidden" name="estado" value="portafolio"/>
     <button type="submit" class="btn btn-primary">Marcar portafolio</button>
   </form>
   {% elif process.status.value == 'portafolio' %}
-  <form method="post" action="/analizados/{{ process.id }}/estado" style="display:inline">
+  <form method="post" action="/analizados/{{ process.process_id }}/estado" style="display:inline">
     <input type="hidden" name="estado" value="analizada"/>
     <button type="submit" class="btn btn-secondary">Quitar portafolio</button>
   </form>
   {% endif %}
-  <form method="post" action="/analizados/{{ process.id }}/archivar" style="display:inline">
+  <form method="post" action="/analizados/{{ process.process_id }}/archivar" style="display:inline">
     <button type="submit" class="btn btn-danger">Archivar</button>
   </form>
   {% endif %}

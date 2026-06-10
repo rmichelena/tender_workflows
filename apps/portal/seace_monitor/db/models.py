@@ -81,10 +81,21 @@ class Entity(Base):
     osce_ultima_actualizacion: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    processes: Mapped[list[Process]] = relationship(back_populates="entity")
+    processes: Mapped[list["FeedItem"]] = relationship(back_populates="entity")
 
 
-class Process(Base):
+class FeedItem(Base):
+    """Feed/discovery item (tabla processes).
+
+    ``process_id`` es un alias uniforme para ``id`` — permite que
+    templates usen ``process.process_id`` tanto con FeedItem como
+    con PipelineItem (donde retorna ``origin_feed_id``).
+    """
+
+    @property
+    def process_id(self) -> int:
+        return self.id
+
     __tablename__ = "processes"
     __table_args__ = (
         UniqueConstraint(
@@ -184,12 +195,141 @@ class Process(Base):
     )
 
 
+class PipelineItem(Base):
+    """Contexto de trabajo curado (pipeline), privado por tenant.
+
+    Se crea por **promoción** desde un `FeedItem` (hoy `Process`) ante una acción
+    positiva del usuario (descargar/analizar/marcar interés). El snapshot del feed
+    se copia **sin foreign key** — el feed puede purgarse sin romper el pipeline.
+    """
+    __tablename__ = "pipeline_items"
+    __table_args__ = (
+        Index("ix_pipeline_items_status_entity", "status", "entity_id"),
+        Index("ix_pipeline_items_tenant_status", "tenant_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64), default="default", index=True
+    )
+
+    # --- Origen (snapshot del feed, SIN FK) ---
+    origin_feed_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
+    )
+    origin_source: Mapped[str] = mapped_column(String(32), default="seace")
+    origin_source_ref: Mapped[str | None] = mapped_column(String(256))
+
+    # Alias de compatibilidad (templates/code acceden a .source)
+    @property
+    def source(self) -> str:
+        return self.origin_source
+
+    @source.setter
+    def source(self, value: str) -> None:
+        self.origin_source = value
+
+    @property
+    def source_ref(self) -> str | None:
+        return self.origin_source_ref
+
+    @source_ref.setter
+    def source_ref(self, value: str | None) -> None:
+        self.origin_source_ref = value
+
+    # ID del Process original para rutas que operan sobre la tabla processes
+    @property
+    def process_id(self) -> int | None:
+        """ID del FeedItem/Process original — usado por rutas de acciones."""
+        return self.origin_feed_id
+
+    # --- Clasificación ---
+    entity_id: Mapped[int] = mapped_column(
+        ForeignKey("entities.id", ondelete="RESTRICT"), index=True
+    )
+    anio: Mapped[int] = mapped_column(Integer, index=True)
+    workflow_profile: Mapped[str] = mapped_column(
+        String(64), default="public_tender", index=True
+    )
+    interest_status: Mapped[InterestStatus] = mapped_column(
+        Enum(InterestStatus, native_enum=False), default=InterestStatus.none, index=True
+    )
+    lifecycle_phase: Mapped[LifecyclePhase] = mapped_column(
+        Enum(LifecyclePhase, native_enum=False),
+        default=LifecyclePhase.licitacion,
+        index=True,
+    )
+
+    # --- Estado operativo del portal ---
+    status: Mapped[ProcessStatus] = mapped_column(
+        Enum(ProcessStatus, native_enum=False), default=ProcessStatus.publicada, index=True
+    )
+
+    # --- Campos SEACE / fuente (denormalizados) ---
+    nid_proceso: Mapped[str | None] = mapped_column(String(32), index=True)
+    nid_convocatoria: Mapped[str | None] = mapped_column(Text)
+    nid_sistema: Mapped[str | None] = mapped_column(String(8))
+    link_id: Mapped[str | None] = mapped_column(String(128))
+    ntipo: Mapped[str | None] = mapped_column(String(8))
+    ficha_id: Mapped[str | None] = mapped_column(String(36))
+    numero: Mapped[str | None] = mapped_column(String(16))
+    fecha_publicacion: Mapped[str | None] = mapped_column(String(32))
+    nomenclatura: Mapped[str] = mapped_column(String(256), index=True)
+    reiniciado_desde: Mapped[str | None] = mapped_column(String(256))
+    objeto: Mapped[str | None] = mapped_column(String(256), index=True)
+    descripcion: Mapped[str | None] = mapped_column(Text)
+    cuantia: Mapped[str | None] = mapped_column(String(64))
+    moneda: Mapped[str | None] = mapped_column(String(64))
+    version_seace: Mapped[str | None] = mapped_column(String(8))
+
+    # --- Cronograma y documentos ---
+    fecha_consultas: Mapped[str | None] = mapped_column(String(64))
+    fecha_presentacion: Mapped[str | None] = mapped_column(String(64))
+    cronograma_json: Mapped[str | None] = mapped_column(Text)
+    documentos_json: Mapped[str | None] = mapped_column(Text)
+    ficha_url: Mapped[str | None] = mapped_column(String(512))
+
+    # --- Contenido y almacenamiento ---
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    data_dir: Mapped[str | None] = mapped_column(String(512))
+
+    # --- Watchlist ---
+    watch_unread: Mapped[bool] = mapped_column(default=False, index=True)
+    watch_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    watch_cronograma_prev_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    watch_documentos_prev_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    watch_changelog_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- List ordering ---
+    list_rank_descargados: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    list_rank_analizados: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # --- Timestamps ---
+    promoted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    entity: Mapped[Entity] = relationship()
+    analysis: Mapped[AnalysisResult | None] = relationship(
+        back_populates="pipeline_item", uselist=False
+    )
+
+
 class AnalysisResult(Base):
     __tablename__ = "analysis_results"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     process_id: Mapped[int] = mapped_column(
         ForeignKey("processes.id"), unique=True, index=True
+    )
+    pipeline_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pipeline_items.id"), unique=True, nullable=True, index=True
     )
     status: Mapped[str] = mapped_column(String(32), default="pending")  # pending|running|done|error
     run_id: Mapped[str | None] = mapped_column(String(36))
@@ -206,7 +346,8 @@ class AnalysisResult(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    process: Mapped[Process] = relationship(back_populates="analysis")
+    process: Mapped["FeedItem"] = relationship(back_populates="analysis")
+    pipeline_item: Mapped[PipelineItem | None] = relationship(back_populates="analysis")
 
 
 class TenantFeedDecision(Base):
@@ -238,3 +379,5 @@ class TenantFeedDecision(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+Process = FeedItem  # TODO: eliminar en cleanup final

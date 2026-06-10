@@ -10,7 +10,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from .config import AppConfig
-from .db.models import Process, ProcessStatus, utcnow
+from .db.models import FeedItem, ProcessStatus, utcnow
 from .list_order import (
     clear_list_ranks,
     enter_analizados_list,
@@ -55,7 +55,7 @@ def resolve_process_data_dir(config: AppConfig, data_dir: str | None) -> Path | 
 
 
 def _delete_resolved_path(path: Path | None) -> bool:
-    """Borra ruta ya resuelta en disco (sin tocar el modelo Process)."""
+    """Borra ruta ya resuelta en disco (sin tocar el modelo FeedItem)."""
     if path is None:
         return False
     if path.is_dir():
@@ -83,7 +83,7 @@ def _unique_subdir(parent: Path, base_name: str, process_id: int) -> Path:
         stamp += 1
 
 
-def delete_process_data_dir(config: AppConfig, process: Process) -> bool:
+def delete_process_data_dir(config: AppConfig, process: FeedItem) -> bool:
     """Borra la carpeta del proceso y limpia `data_dir` en el modelo."""
     path = resolve_process_data_dir(config, process.data_dir)
     process.data_dir = None
@@ -100,13 +100,13 @@ def delete_process_data_dir(config: AppConfig, process: Process) -> bool:
     return False
 
 
-def clear_process_download_metadata(process: Process) -> None:
+def clear_process_download_metadata(process: FeedItem) -> None:
     """Quita metadatos de descarga en BD (documentos, ruta)."""
     process.documentos_json = None
     process.data_dir = None
 
 
-def clear_process_watch_metadata(process: Process) -> None:
+def clear_process_watch_metadata(process: FeedItem) -> None:
     """Quita flags/historial SEACE asociados a una descarga local."""
     process.watch_unread = False
     process.watch_cronograma_prev_json = None
@@ -114,13 +114,13 @@ def clear_process_watch_metadata(process: Process) -> None:
     process.watch_changelog_json = None
 
 
-def delete_process_analysis(session: Session, process: Process) -> None:
+def delete_process_analysis(session: Session, process: FeedItem) -> None:
     if process.analysis is not None:
         session.delete(process.analysis)
         process.analysis = None
 
 
-def cleanup_stale_process_data(config: AppConfig, processes: list[Process]) -> int:
+def cleanup_stale_process_data(config: AppConfig, processes: list[FeedItem]) -> int:
     """Quita data_dir en BD/disco para procesos que no deben conservar archivos."""
     removed = 0
     for proc in processes:
@@ -158,14 +158,14 @@ def cleanup_orphan_trash_dirs(config: AppConfig, *, keep_paths: set[Path]) -> in
     return cleanup_orphan_dirs(config, trash_root(config), keep_paths=keep_paths)
 
 
-def process_data_dir_exists(config: AppConfig, process: Process) -> bool:
+def process_data_dir_exists(config: AppConfig, process: FeedItem) -> bool:
     if not process.data_dir:
         return False
     path = resolve_process_data_dir(config, process.data_dir)
     return path is not None and path.is_dir()
 
 
-def resolve_restore_status(config: AppConfig, process: Process) -> ProcessStatus:
+def resolve_restore_status(config: AppConfig, process: FeedItem) -> ProcessStatus:
     """Estado al restaurar desde descartados según archivos reales en disco."""
     if not process_data_dir_exists(config, process):
         return ProcessStatus.publicada
@@ -175,7 +175,7 @@ def resolve_restore_status(config: AppConfig, process: Process) -> ProcessStatus
 
 
 def discard_process_downloads(
-    config: AppConfig, process: Process, session: Session
+    config: AppConfig, process: FeedItem, session: Session
 ) -> None:
     """Descarte desde descargada: limpia BD primero, luego borra disco."""
     path = resolve_process_data_dir(config, process.data_dir)
@@ -194,7 +194,7 @@ def discard_process_downloads(
 
 
 def archive_analyzed_process(
-    config: AppConfig, process: Process, session: Session
+    config: AppConfig, process: FeedItem, session: Session
 ) -> None:
     """Archiva analizado/portafolio: mueve carpeta a trash/, conserva análisis."""
     if process.status == ProcessStatus.archivada:
@@ -212,7 +212,7 @@ def archive_analyzed_process(
 
 
 def restore_archived_process(
-    config: AppConfig, process: Process, session: Session
+    config: AppConfig, process: FeedItem, session: Session
 ) -> None:
     """Restaura desde archivados: devuelve carpeta a procesos/ y estado analizada."""
     src = resolve_process_data_dir(config, process.data_dir)
@@ -248,7 +248,7 @@ def recover_stale_workflow_transitions(
     cutoff = utcnow() - timedelta(seconds=stale_seconds)
     recovered = 0
     transitional = (ProcessStatus.archivando, ProcessStatus.descartando)
-    for proc in session.query(Process).filter(Process.status.in_(transitional)):
+    for proc in session.query(FeedItem).filter(FeedItem.status.in_(transitional)):
         updated = proc.updated_at
         if updated.tzinfo is None:
             updated = updated.replace(tzinfo=timezone.utc)
@@ -302,7 +302,7 @@ def recover_stale_downloads(
 
     cutoff = utcnow() - timedelta(seconds=stale_seconds)
     recovered = 0
-    for proc in session.query(Process).filter(Process.status == ProcessStatus.descargando):
+    for proc in session.query(FeedItem).filter(FeedItem.status == ProcessStatus.descargando):
         updated = proc.updated_at
         if updated.tzinfo is None:
             updated = updated.replace(tzinfo=timezone.utc)
@@ -331,7 +331,7 @@ def repair_processes_missing_data(config: AppConfig, session: Session) -> int:
         ProcessStatus.archivando,
     }
     repaired = 0
-    for proc in session.query(Process).filter(Process.status.in_(needs_data)):
+    for proc in session.query(FeedItem).filter(FeedItem.status.in_(needs_data)):
         if process_data_dir_exists(config, proc):
             continue
         clear_process_download_metadata(proc)
@@ -345,7 +345,7 @@ def repair_processes_missing_data(config: AppConfig, session: Session) -> int:
 def repair_archived_processes(config: AppConfig, session: Session) -> int:
     """Archivados sin carpeta en trash → analizada (si hay análisis) o publicada."""
     repaired = 0
-    for proc in session.query(Process).filter(Process.status == ProcessStatus.archivada):
+    for proc in session.query(FeedItem).filter(FeedItem.status == ProcessStatus.archivada):
         if process_data_dir_exists(config, proc):
             continue
         clear_process_download_metadata(proc)
@@ -362,7 +362,7 @@ def repair_archived_processes(config: AppConfig, session: Session) -> int:
 def repair_discarded_processes(config: AppConfig, session: Session) -> int:
     """Descartados con restos de descarga/análisis en BD o disco."""
     repaired = 0
-    for proc in session.query(Process).filter(Process.status == ProcessStatus.descartada):
+    for proc in session.query(FeedItem).filter(FeedItem.status == ProcessStatus.descartada):
         if (
             proc.data_dir is None
             and proc.documentos_json is None
@@ -378,7 +378,7 @@ def repair_discarded_processes(config: AppConfig, session: Session) -> int:
 
 def purge_all_stale_process_data(config: AppConfig, session: Session) -> tuple[int, int]:
     """Retroactivo: procesos descartados/publicados con data_dir + dirs huérfanas."""
-    processes = session.query(Process).all()
+    processes = session.query(FeedItem).all()
     db_cleaned = cleanup_stale_process_data(config, processes)
 
     keep_paths: set[Path] = set()

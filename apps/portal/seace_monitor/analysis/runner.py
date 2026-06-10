@@ -11,7 +11,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from ..config import AppConfig
-from ..db.models import AnalysisResult, Process, ProcessStatus, utcnow
+from ..db.models import AnalysisResult, FeedItem, ProcessStatus, utcnow
 from ..ingest import get_adapter
 from ..list_order import (
     enter_analizados_list,
@@ -56,7 +56,7 @@ _ANALYSIS_SNAPSHOT_FIELDS = (
 )
 
 
-def process_data_dir(config: AppConfig, process: Process) -> Path:
+def process_data_dir(config: AppConfig, process: FeedItem) -> Path:
     nid = (process.nid_proceso or str(process.id)).strip()
     safe = "".join(
         c if c.isalnum() or c in "-_" else "_" for c in process.nomenclatura
@@ -78,8 +78,8 @@ class AnalysisRunner:
         self.config = config
         self.session = session
 
-    def download(self, process_id: int) -> Process:
-        process = self.session.get(Process, process_id)
+    def download(self, process_id: int) -> FeedItem:
+        process = self.session.get(FeedItem, process_id)
         if process is None:
             raise ValueError(f"Proceso {process_id} no encontrado")
         if process.status not in (
@@ -106,7 +106,7 @@ class AnalysisRunner:
             adapter.fetch_documents(self, docs, docs_dir)
         except Exception:
             cleanup_partial_downloads(docs_dir)
-            process = self.session.get(Process, process_id)
+            process = self.session.get(FeedItem, process_id)
             if process is not None:
                 delete_process_data_dir(self.config, process)
                 clear_process_download_metadata(process)
@@ -115,7 +115,7 @@ class AnalysisRunner:
                 self.session.commit()
             raise
 
-        process = self.session.get(Process, process_id)
+        process = self.session.get(FeedItem, process_id)
         if process is None:
             raise ValueError(f"Proceso {process_id} no encontrado")
         process.documentos_json = json.dumps(docs, ensure_ascii=False)
@@ -135,7 +135,7 @@ class AnalysisRunner:
         run_id: str | None = None,
         prior_snapshot: dict | None = None,
     ) -> AnalysisResult:
-        process = self.session.get(Process, process_id)
+        process = self.session.get(FeedItem, process_id)
         if process is None:
             raise ValueError(f"Proceso {process_id} no encontrado")
 
@@ -179,7 +179,7 @@ class AnalysisRunner:
                         run_id,
                     )
                     return analysis
-                process = self.session.get(Process, process_id)
+                process = self.session.get(FeedItem, process_id)
                 if process is None:
                     raise RuntimeError(
                         f"Proceso {process_id} desapareció durante el análisis"
@@ -200,7 +200,7 @@ class AnalysisRunner:
             raise
         except Exception as exc:
             if self._is_current_run(process_id, run_id):
-                process = self.session.get(Process, process_id)
+                process = self.session.get(FeedItem, process_id)
                 if process is not None:
                     analysis = process.analysis
                     if analysis is not None:
@@ -263,7 +263,7 @@ class AnalysisRunner:
             and analysis.status == "running"
         )
 
-    def _resolve_document_list(self, process: Process, ruc: str) -> list[dict]:
+    def _resolve_document_list(self, process: FeedItem, ruc: str) -> list[dict]:
         if not process.nid_convocatoria or not process.link_id:
             raise RuntimeError(
                 "Sin metadatos SEACE para abrir la ficha. Vuelve a escanear el proceso."
@@ -290,7 +290,7 @@ class AnalysisRunner:
             prefer_canonical_archivo(docs_dir, doc)
         write_manifest(docs_dir, docs)
 
-    def _fetch_documentos_from_seace(self, process: Process, ruc: str) -> list[dict]:
+    def _fetch_documentos_from_seace(self, process: FeedItem, ruc: str) -> list[dict]:
         from dataclasses import asdict
 
         row, ficha, client = open_ficha_for_process(self.config, process)
@@ -315,13 +315,13 @@ class AnalysisRunner:
         process.content_hash = parsed.content_hash()
         return [asdict(d) for d in parsed.documentos]
 
-    def _refresh_documentos(self, process: Process, ruc: str) -> list[dict]:
+    def _refresh_documentos(self, process: FeedItem, ruc: str) -> list[dict]:
         docs = self._fetch_documentos_from_seace(process, ruc)
         process.documentos_json = json.dumps(docs, ensure_ascii=False)
         self.session.flush()
         return docs
 
-    def _fetch_documentos_from_adp(self, process: Process) -> list[dict]:
+    def _fetch_documentos_from_adp(self, process: FeedItem) -> list[dict]:
         """Obtiene documentos desde el portal ADP (ya parseados en documentos_json)."""
         if not process.documentos_json:
             raise RuntimeError(
@@ -346,7 +346,7 @@ class AnalysisRunner:
         self,
         proc_dir: Path,
         documents_dir: Path,
-        process: Process,
+        process: FeedItem,
         selected_rel_paths: list[str],
     ) -> dict:
         """Ejecuta fast-path Gemini o pipeline tender_procurement legacy."""

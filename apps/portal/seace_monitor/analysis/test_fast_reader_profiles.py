@@ -10,7 +10,7 @@ from seace_monitor.analysis.fast_reader import (
     append_seace_cronograma,
 )
 from seace_monitor.config import AppConfig
-from seace_monitor.db.models import Process
+from seace_monitor.db.models import FeedItem
 
 
 def _config(repo_root: Path) -> AppConfig:
@@ -45,7 +45,7 @@ profiles:
         "Prompt privado\n{{SECTIONS_BLOCK}}\n",
         encoding="utf-8",
     )
-    proc = Process(source="private_portal", source_ref="ABC-123", nid_proceso="ABC-123")
+    proc = FeedItem(source="private_portal", source_ref="ABC-123", nid_proceso="ABC-123")
 
     prompt = _load_system_prompt(_config(tmp_path), proc)
 
@@ -88,7 +88,7 @@ profiles:
         return original_read_text(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", count_profile_reads)
-    proc = Process(source="private_portal", source_ref="ABC-123", nid_proceso="ABC-123")
+    proc = FeedItem(source="private_portal", source_ref="ABC-123", nid_proceso="ABC-123")
 
     _load_system_prompt(_config(tmp_path), proc)
 
@@ -109,7 +109,7 @@ profiles: {}
         encoding="utf-8",
     )
     (prompts / "seace_free_reader.md").write_text("Prompt SEACE", encoding="utf-8")
-    proc = Process(source="unknown_portal", source_ref="ABC-123", nid_proceso="ABC-123")
+    proc = FeedItem(source="unknown_portal", source_ref="ABC-123", nid_proceso="ABC-123")
 
     with caplog.at_level(logging.WARNING):
         _load_system_prompt(_config(tmp_path), proc)
@@ -118,7 +118,7 @@ profiles: {}
 
 
 def test_build_user_context_is_not_seace_specific_for_private_sources():
-    proc = Process(
+    proc = FeedItem(
         source="private_portal",
         source_ref="ABC-123",
         nid_proceso="ABC-123",
@@ -134,7 +134,7 @@ def test_build_user_context_is_not_seace_specific_for_private_sources():
 
 
 def test_append_seace_cronograma_only_applies_to_seace_sources():
-    proc = Process(
+    proc = FeedItem(
         source="private_portal",
         source_ref="ABC-123",
         nid_proceso="ABC-123",

@@ -55,7 +55,10 @@ _PROCESS_COLUMN_ADDITIONS = (
     ("promoted_at", "DATETIME"),
 )
 
-_ANALYSIS_COLUMN_ADDITIONS = (("run_id", "VARCHAR(36)"),)
+_ANALYSIS_COLUMN_ADDITIONS = (
+    ("run_id", "VARCHAR(36)"),
+    ("pipeline_item_id", "INTEGER"),
+)
 
 _ENTITY_COLUMN_ADDITIONS = (
     ("estado_osce", "VARCHAR(32)"),
@@ -187,7 +190,7 @@ def _backfill_process_pipeline_fields(engine) -> None:
 def _backfill_tenant_feed_decisions(engine) -> None:
     """Backfill idempotente del overlay desde los campos de autoreject en `processes`.
 
-    Paso 0.3b: copia las decisiones ya materializadas en `Process` al overlay
+    Paso 0.3b: copia las decisiones ya materializadas en `FeedItem` al overlay
     `tenant_feed_decisions` (tenant `default`). `exempt` y `autorejected` son disjuntos
     (un proceso eximido no queda en estado autorejected). Reejecutable: salta los que ya
     tienen decisión.
@@ -247,7 +250,7 @@ def _backfill_tenant_feed_decisions(engine) -> None:
 
 
 def _purge_orphan_feed_decisions(engine) -> int:
-    """Elimina decisiones del overlay que referencian un `Process` inexistente.
+    """Elimina decisiones del overlay que referencian un `FeedItem` inexistente.
 
     El feed (hoy `processes`) puede borrar items (p. ej. el duplicado que elimina
     `adopt_republication`); como `feed_item_id` no tiene foreign key, esas decisiones
@@ -343,12 +346,12 @@ def _process_migration_copy_defaults() -> dict[str, str]:
 
 
 def _process_migration_select_sql(old_cols: set[str]) -> tuple[str, str]:
-    from .models import Process
+    from .models import FeedItem
 
     copy_defaults = _process_migration_copy_defaults()
     insert_cols: list[str] = []
     select_exprs: list[str] = []
-    for col in Process.__table__.columns:
+    for col in FeedItem.__table__.columns:
         name = col.name
         insert_cols.append(name)
         if name in old_cols:
@@ -375,7 +378,7 @@ def _sqlite_table_create_sql(engine, table_name: str) -> str | None:
 
 def _sqlite_recreate_table_from_model(engine, model) -> None:
     """Recrea una tabla SQLite conservando filas (resetea FKs rotos)."""
-    from .models import Entity, Process
+    from .models import Entity, PipelineItem, FeedItem
 
     table_name = model.__tablename__
     insp = inspect(engine)
@@ -389,7 +392,8 @@ def _sqlite_recreate_table_from_model(engine, model) -> None:
     temp_md = MetaData()
     # Stubs para resolver FKs al compilar CREATE (tablas ya existen en disco).
     Entity.__table__.to_metadata(temp_md)
-    Process.__table__.to_metadata(temp_md)
+    FeedItem.__table__.to_metadata(temp_md)
+    PipelineItem.__table__.to_metadata(temp_md)
     new_table = model.__table__.to_metadata(temp_md, name=f"{table_name}_new")
     with engine.begin() as conn:
         conn.execute(text("PRAGMA foreign_keys=OFF"))
@@ -453,7 +457,7 @@ def _sqlite_recover_failed_processes_rebuild(engine) -> bool:
 
 def _sqlite_rebuild_processes_table(engine) -> None:
     """Recrea `processes` con el esquema actual (nid_proceso nullable, identidad por source)."""
-    from .models import Entity, Process
+    from .models import Entity, FeedItem
 
     _ensure_table_columns(engine, "processes", _PROCESS_COLUMN_ADDITIONS)
     _backfill_process_pipeline_fields(engine)
@@ -465,7 +469,7 @@ def _sqlite_rebuild_processes_table(engine) -> None:
     # Stub de `entities` en el MetaData temporal: SQLAlchemy necesita resolver la FK al
     # compilar el CREATE de `processes_new` (la tabla ya existe en disco).
     Entity.__table__.to_metadata(temp_md)
-    processes_new = Process.__table__.to_metadata(temp_md, name="processes_new")
+    processes_new = FeedItem.__table__.to_metadata(temp_md, name="processes_new")
     with engine.begin() as conn:
         conn.execute(text("PRAGMA foreign_keys=OFF"))
         conn.execute(text("DROP TABLE IF EXISTS processes_new"))
@@ -584,6 +588,10 @@ def init_db(database_url: str) -> None:
         event.listen(_engine, "connect", _configure_sqlite_connection)
 
     _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
+    # Register dual-write hook as before_commit event (covers ALL commit paths)
+    # before_commit runs after flush (PKs assigned) and triggers an auto-flush
+    # for any new objects we add (the PipelineItems)
+    # event removed — dual-write is handled in commit helpers
     Base.metadata.create_all(_engine)
     _ensure_table_columns(_engine, "entities", _ENTITY_COLUMN_ADDITIONS)
     _ensure_table_columns(_engine, "processes", _PROCESS_COLUMN_ADDITIONS)
@@ -602,6 +610,7 @@ def init_db(database_url: str) -> None:
                 session.commit()
     if _engine.dialect.name == "sqlite":
         _ensure_sqlite_indexes(_engine)
+    _backfill_pipeline_items(_engine)
 
 
 def _ensure_sqlite_indexes(engine) -> None:
@@ -625,10 +634,187 @@ def _ensure_sqlite_indexes(engine) -> None:
             conn.execute(text(stmt))
 
 
+def _backfill_pipeline_items(engine) -> None:
+    """Migración one-shot (0.3e-1): copia promoted rows de processes → pipeline_items.
+
+    Idempotente: solo inserta filas que no existen (por origin_feed_id). También
+    backfillea `analysis_results.pipeline_item_id` para los items que ya tienen análisis.
+    No toca la tabla `processes` — el dual-write viene en 0.3e-2.
+    """
+    insp = inspect(engine)
+    tables = insp.get_table_names()
+    if "pipeline_items" not in tables or "processes" not in tables:
+        return
+
+    # Columnas a copiar (excluimos id, promoted_at que tiene default).
+    # source/source_ref van como origin_source/origin_source_ref (no como columnas directas).
+    copy_cols = [
+        "entity_id", "anio", "status",
+        "workflow_profile", "interest_status", "lifecycle_phase",
+        "nid_proceso", "nid_convocatoria", "nid_sistema", "link_id",
+        "ntipo", "ficha_id", "numero", "fecha_publicacion",
+        "nomenclatura", "reiniciado_desde", "objeto", "descripcion",
+        "cuantia", "moneda", "version_seace",
+        "fecha_consultas", "fecha_presentacion", "cronograma_json",
+        "documentos_json", "ficha_url",
+        "content_hash", "data_dir",
+        "watch_unread", "watch_checked_at",
+        "watch_cronograma_prev_json", "watch_documentos_prev_json",
+        "watch_changelog_json",
+        "list_rank_descargados", "list_rank_analizados",
+        "first_seen_at", "updated_at", "promoted_at",
+    ]
+    # Columnas leídas de processes (incluye source/source_ref para el mapeo)
+    select_cols = ["source", "source_ref"] + copy_cols
+
+    # Ensure unique index on origin_feed_id (review finding: idempotency guard)
+    pi_cols_set = {col["name"] for col in insp.get_columns("pipeline_items")}
+    if "origin_feed_id" in pi_cols_set:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_pipeline_origin_feed_id "
+                "ON pipeline_items (origin_feed_id)"
+            ))
+
+    # Ensure index on analysis_results.pipeline_item_id (review finding: ADD COLUMN no FK)
+    if "analysis_results" in tables:
+        ar_cols_set = {col["name"] for col in insp.get_columns("analysis_results")}
+        if "pipeline_item_id" in ar_cols_set:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_analysis_results_pipeline_item_id "
+                    "ON analysis_results (pipeline_item_id)"
+                ))
+
+    # Verificar que processes tiene promoted_at
+    proc_cols = {col["name"] for col in insp.get_columns("processes")}
+    if "promoted_at" not in proc_cols:
+        return
+
+    # Solo copiar promoted (promoted_at IS NOT NULL) que no existan ya
+    with engine.begin() as conn:
+        existing = {
+            row[0] for row in conn.execute(
+                text("SELECT origin_feed_id FROM pipeline_items WHERE origin_feed_id IS NOT NULL")
+            )
+        }
+
+        rows = conn.execute(
+            text(
+                "SELECT id, " + ", ".join(select_cols) + " "
+                "FROM processes WHERE promoted_at IS NOT NULL"
+            )
+        ).fetchall()
+
+        if not rows:
+            return
+
+        pi_cols = ["origin_feed_id", "origin_source", "origin_source_ref", "tenant_id"] + copy_cols
+        if engine.dialect.name == "sqlite":
+            insert_sql = (
+                "INSERT OR IGNORE INTO pipeline_items ("
+                + ", ".join(pi_cols)
+                + ") VALUES ("
+                + ", ".join(f":{c}" for c in pi_cols)
+                + ")"
+            )
+        else:
+            insert_sql = (
+                "INSERT INTO pipeline_items ("
+                + ", ".join(pi_cols)
+                + ") SELECT "
+                + ", ".join(f":{c}" for c in pi_cols)
+                + " WHERE NOT EXISTS (SELECT 1 FROM pipeline_items WHERE origin_feed_id = :origin_feed_id)"
+            )
+
+        # row layout: [0]=id, [1]=source, [2]=source_ref, [3:]=copy_cols
+        for row in rows:
+            feed_id = row[0]
+            if feed_id in existing:
+                continue
+            vals = {"origin_feed_id": feed_id, "tenant_id": "default"}
+            vals["origin_source"] = row[1] or "seace"
+            vals["origin_source_ref"] = row[2]
+            for i, col in enumerate(copy_cols):
+                vals[col] = row[3 + i]
+            conn.execute(text(insert_sql), vals)
+
+    # Backfill analysis_results.pipeline_item_id
+    if "analysis_results" in tables:
+        ar_cols = {col["name"] for col in insp.get_columns("analysis_results")}
+        if "pipeline_item_id" in ar_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE analysis_results SET pipeline_item_id = "
+                        "(SELECT pi.id FROM pipeline_items pi WHERE pi.origin_feed_id = analysis_results.process_id) "
+                        "WHERE pipeline_item_id IS NULL AND process_id IS NOT NULL"
+                    )
+                )
+
+
+def _sync_dirty_promoted(session: Session) -> None:
+    """Dual-write (0.3e-2): sincroniza FeedItem promovidos a PipelineItem.
+
+    Se llama antes del commit. Captura objetos sucios/nuevos ANTES de flush,
+    flush para obtener PKs, luego sincroniza y flush de nuevo.
+    """
+    from .models import FeedItem as _FeedItem, AnalysisResult as _AR, PipelineItem as _PI
+    from .pipeline_sync import sync_to_pipeline
+
+    _tenant_id = getattr(session, '_tenant_id', 'default')
+
+    # Capture candidates BEFORE flush (flush moves them to persistent)
+    candidates = [
+        obj for obj in list(session.dirty) + list(session.new)
+        if isinstance(obj, (_FeedItem, _AR))
+    ]
+    if not candidates:
+        return
+
+    # Flush to ensure all PKs are assigned
+    session.flush()
+
+    synced_ids: set[int] = set()
+    needs_flush = False
+
+    for obj in candidates:
+        if isinstance(obj, _FeedItem) and obj.promoted_at is not None and obj.id is not None:
+            sync_to_pipeline(session, obj, tenant_id=_tenant_id)
+            synced_ids.add(obj.id)
+            needs_flush = True
+        elif isinstance(obj, _AR):
+            if obj.process_id is not None:
+                proc = session.get(_FeedItem, obj.process_id)
+                if proc is not None and proc.promoted_at is not None and proc.id not in synced_ids:
+                    pi = sync_to_pipeline(session, proc, tenant_id=_tenant_id)
+                    synced_ids.add(proc.id)
+                    needs_flush = True
+                    # Flush to assign PK to newly created PipelineItem
+                    # (autoflush=False means pi.id is None until flush)
+                    session.flush()
+                else:
+                    pi = (
+                        session.query(_PI)
+                        .filter(_PI.origin_feed_id == obj.process_id)
+                        .one_or_none()
+                    )
+                if obj.pipeline_item_id is None and pi is not None:
+                    obj.pipeline_item_id = pi.id
+                    needs_flush = True
+
+    if needs_flush:
+        session.flush()
+
+
 def commit_session_with_retry(
     session: Session, *, attempts: int = 8, delay: float = 0.25
 ) -> None:
-    """Commit con reintentos ante bloqueos transitorios de SQLite."""
+    """Commit con reintentos ante bloqueos transitorios de SQLite.
+
+    Antes del commit, sincroniza los FeedItem promovidos sucios a PipelineItem
+    (dual-write 0.3e-2). Solo procesa objetos que están en la sesión (new/dirty).
+    """
     for attempt in range(attempts):
         try:
             session.commit()
@@ -644,10 +830,18 @@ def commit_session_with_retry(
             time.sleep(delay * (attempt + 1))
 
 
-def session_factory() -> Session:
+def session_factory(*, tenant_id: str = "default") -> Session:
     if _SessionLocal is None:
         raise RuntimeError("Base de datos no inicializada. Llama a init_db() primero.")
-    return _SessionLocal()
+    session = _SessionLocal()
+    session._tenant_id = tenant_id  # type: ignore[attr-defined]
+    # Wrap commit to ensure dual-write sync (covers ALL commit paths)
+    _original_commit = session.commit
+    def _commit_with_sync():
+        _sync_dirty_promoted(session)
+        _original_commit()
+    session.commit = _commit_with_sync  # type: ignore[assignment]
+    return session
 
 
 def get_session() -> Generator[Session, None, None]:

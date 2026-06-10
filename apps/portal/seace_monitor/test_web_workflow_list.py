@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from .config import AppConfig
-from .db.models import Entity, InterestStatus, Process, ProcessStatus
+from .db.models import Entity, InterestStatus, FeedItem, ProcessStatus
 from .db.session import session_factory
 from .web.app import create_app
 
@@ -18,8 +18,11 @@ from .web.app import create_app
 def _seed_analizado(tmp_path: Path) -> int:
     db: Session = session_factory()
     try:
-        proc = Process(
-            entity_id=1,
+        entity = Entity(ruc="20123456789", nombre="ENTIDAD TEST", activa=True)
+        db.add(entity)
+        db.flush()
+        proc = FeedItem(
+            entity_id=entity.id,
             anio=2026,
             nid_proceso="web-1",
             nomenclatura="WEB-1",
@@ -27,6 +30,12 @@ def _seed_analizado(tmp_path: Path) -> int:
             list_rank_analizados=1,
         )
         db.add(proc)
+        db.commit()
+        from seace_monitor.feed.promotion import promote
+        from seace_monitor.db.pipeline_sync import sync_to_pipeline
+        promote(db, proc)
+        db.commit()
+        sync_to_pipeline(db, proc)
         db.commit()
         return proc.id
     finally:
@@ -54,7 +63,7 @@ def _seed_workflow_list_process(status: ProcessStatus, *, rank_attr: str) -> int
         entity = Entity(ruc="20123456789", nombre="ENTIDAD TEST", activa=True)
         db.add(entity)
         db.flush()
-        proc = Process(
+        proc = FeedItem(
             entity_id=entity.id,
             anio=2026,
             nid_proceso=f"list-{status.value}",
@@ -81,6 +90,13 @@ def _seed_workflow_list_process(status: ProcessStatus, *, rank_attr: str) -> int
         setattr(proc, rank_attr, 1)
         db.add(proc)
         db.commit()
+        # Promote + dual-write: create PipelineItem for pipeline statuses
+        from seace_monitor.feed.promotion import promote
+        from seace_monitor.db.pipeline_sync import sync_to_pipeline
+        promote(db, proc)
+        db.commit()
+        sync_to_pipeline(db, proc)
+        db.commit()
         return proc.id
     finally:
         db.close()
@@ -95,7 +111,7 @@ def test_publicaciones_list_has_no_correlativo_or_numero_column(tmp_path: Path):
         db.add(entity)
         db.flush()
         db.add(
-            Process(
+            FeedItem(
                 entity_id=entity.id,
                 anio=2026,
                 nid_proceso="pub-1",
@@ -282,7 +298,7 @@ def test_update_interest_status_preserves_list_context(tmp_path: Path):
     assert response.headers["location"] == "/analizados?sort=fecha_publicacion&dir=desc&scroll=80"
     db = session_factory()
     try:
-        proc = db.get(Process, process_id)
+        proc = db.get(FeedItem, process_id)
         assert proc is not None
         assert proc.interest_status == InterestStatus.candidate
     finally:
@@ -295,7 +311,7 @@ def test_analizados_list_shows_interest_status(tmp_path: Path):
     process_id = _seed_analizado(tmp_path)
     db = session_factory()
     try:
-        proc = db.get(Process, process_id)
+        proc = db.get(FeedItem, process_id)
         assert proc is not None
         proc.interest_status = InterestStatus.opportunity
         db.commit()
@@ -313,7 +329,7 @@ def test_descartados_includes_autorejected_processes(tmp_path: Path):
     app = create_app(cfg)
     db: Session = session_factory()
     try:
-        proc = Process(
+        proc = FeedItem(
             entity_id=1,
             anio=2026,
             nid_proceso="auto-1",
@@ -341,7 +357,7 @@ def test_descartados_can_filter_autorejected_only(tmp_path: Path):
     try:
         db.add_all(
             [
-                Process(
+                FeedItem(
                     entity_id=1,
                     anio=2026,
                     nid_proceso="auto-filter",
@@ -349,7 +365,7 @@ def test_descartados_can_filter_autorejected_only(tmp_path: Path):
                     status=ProcessStatus.autorejected,
                     auto_reject_reason="servicio_limpieza: Servicios de limpieza fuera de foco",
                 ),
-                Process(
+                FeedItem(
                     entity_id=1,
                     anio=2026,
                     nid_proceso="discarded-filter",
@@ -375,7 +391,7 @@ def test_restaurar_autorejected_sets_auto_reject_exempt(tmp_path: Path):
     app = create_app(cfg)
     db: Session = session_factory()
     try:
-        proc = Process(
+        proc = FeedItem(
             entity_id=1,
             anio=2026,
             nid_proceso="auto-2",
@@ -399,7 +415,7 @@ def test_restaurar_autorejected_sets_auto_reject_exempt(tmp_path: Path):
     assert response.headers["location"] == "/descartados?estado=autorejected"
     db = session_factory()
     try:
-        proc = db.get(Process, process_id)
+        proc = db.get(FeedItem, process_id)
         assert proc is not None
         assert proc.status == ProcessStatus.publicada
         assert proc.auto_reject_exempt is True
@@ -413,7 +429,7 @@ def test_descartar_autorejected_marks_process_as_discarded(tmp_path: Path):
     app = create_app(cfg)
     db: Session = session_factory()
     try:
-        proc = Process(
+        proc = FeedItem(
             entity_id=1,
             anio=2026,
             nid_proceso="auto-3",
@@ -437,7 +453,7 @@ def test_descartar_autorejected_marks_process_as_discarded(tmp_path: Path):
     assert response.headers["location"] == "/descartados?estado=autorejected"
     db = session_factory()
     try:
-        proc = db.get(Process, process_id)
+        proc = db.get(FeedItem, process_id)
         assert proc is not None
         assert proc.status == ProcessStatus.descartada
         assert proc.auto_reject_reason is None
@@ -456,7 +472,7 @@ def _seed_overlay_autorejected(tmp_path: Path, db_name: str):
         entity = Entity(ruc="20999999999", nombre="ENTIDAD OVERLAY", activa=True)
         db.add(entity)
         db.flush()
-        proc = Process(
+        proc = FeedItem(
             entity_id=entity.id,
             anio=2026,
             source="seace",
@@ -527,7 +543,7 @@ def test_overlay_autorejected_can_be_restored_and_discarded(tmp_path: Path):
     assert resp.status_code == 303
     db = session_factory()
     try:
-        proc = db.get(Process, pid)
+        proc = db.get(FeedItem, pid)
         assert proc.status == ProcessStatus.descartada
     finally:
         db.close()
@@ -544,7 +560,7 @@ def test_overlay_autorejected_descartar_from_publicaciones_redirects(tmp_path: P
     assert resp.headers["location"] == "/descartados?estado=autorejected"
     db = session_factory()
     try:
-        assert db.get(Process, pid).status == ProcessStatus.publicada
+        assert db.get(FeedItem, pid).status == ProcessStatus.publicada
     finally:
         db.close()
 
@@ -559,7 +575,7 @@ def test_overlay_autorejected_descargar_redirects(tmp_path: Path):
     db = session_factory()
     try:
         # No entra al pipeline de descarga.
-        assert db.get(Process, pid).status == ProcessStatus.publicada
+        assert db.get(FeedItem, pid).status == ProcessStatus.publicada
     finally:
         db.close()
 
@@ -588,7 +604,7 @@ def test_descartar_autorejected_clears_all_tenant_overlay(tmp_path: Path):
     assert resp.status_code == 303
     db = session_factory()
     try:
-        proc = db.get(Process, pid)
+        proc = db.get(FeedItem, pid)
         assert proc.status == ProcessStatus.descartada
         assert proc.auto_reject_exempt is False
         assert db.query(TenantFeedDecision).filter_by(feed_item_id=pid).count() == 0
@@ -608,7 +624,7 @@ def test_restore_promotes_item(tmp_path: Path):
     assert resp.status_code == 303
     db = session_factory()
     try:
-        proc = db.get(Process, pid)
+        proc = db.get(FeedItem, pid)
         assert proc.status == ProcessStatus.publicada
         assert proc.auto_reject_exempt is True
         assert proc.promoted_at is not None
@@ -626,7 +642,7 @@ def test_overlay_autorejected_restore_sets_exempt(tmp_path: Path):
     assert resp.status_code == 303
     db = session_factory()
     try:
-        proc = db.get(Process, pid)
+        proc = db.get(FeedItem, pid)
         assert proc.auto_reject_exempt is True
     finally:
         db.close()

@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from .config import AppConfig
-from .db.models import AnalysisResult, Base, Entity, Process, ProcessStatus
+from .db.models import AnalysisResult, Base, Entity, FeedItem, ProcessStatus
 from .document_storage import (
     prefer_canonical_archivo,
     prepare_download_dest,
@@ -33,8 +33,8 @@ def _proc_dir(tmp_path: Path, name: str = "123_TEST") -> Path:
     return tmp_path / "tenants" / "default" / "procesos" / name
 
 
-def _proc(data_dir: str | None, status: ProcessStatus = ProcessStatus.descartada) -> Process:
-    p = Process(
+def _proc(data_dir: str | None, status: ProcessStatus = ProcessStatus.descartada) -> FeedItem:
+    p = FeedItem(
         entity_id=1,
         anio=2026,
         nid_proceso="123",
@@ -46,7 +46,7 @@ def _proc(data_dir: str | None, status: ProcessStatus = ProcessStatus.descartada
     return p
 
 
-def _with_analysis(proc: Process, status: str = "done") -> Process:
+def _with_analysis(proc: FeedItem, status: str = "done") -> FeedItem:
     proc.__dict__["analysis"] = AnalysisResult(status=status)
     return proc
 
@@ -65,7 +65,7 @@ def _sqlite_session(tmp_path: Path):
 def test_restore_archived_missing_dir_assigns_rank(tmp_path: Path):
     cfg = _cfg(tmp_path)
     db, entity = _sqlite_session(tmp_path)
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         nid_proceso="123",
@@ -89,7 +89,7 @@ def test_restore_archived_missing_dir_assigns_rank(tmp_path: Path):
 def test_repair_archived_missing_dir_assigns_rank(tmp_path: Path):
     cfg = _cfg(tmp_path)
     db, entity = _sqlite_session(tmp_path)
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         nid_proceso="456",

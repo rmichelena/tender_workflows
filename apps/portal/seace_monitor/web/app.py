@@ -26,7 +26,7 @@ from ..db.maintenance import (
     is_stale_running_analysis,
     recover_stale_analyses,
 )
-from ..db.models import AnalysisResult, Entity, InterestStatus, Process, ProcessStatus
+from ..db.models import AnalysisResult, Entity, InterestStatus, FeedItem, ProcessStatus
 from ..db.session import init_db, session_factory
 from ..feed import (
     FeedRepository,
@@ -109,7 +109,7 @@ def get_config() -> AppConfig:
 
 
 def get_db() -> Session:
-    db = session_factory()
+    db = session_factory(tenant_id=_config.tenant_id)
     try:
         yield db
         db.commit()
@@ -129,13 +129,13 @@ def _cached_autorejected_ids(request: Request, db: Session) -> set[int]:
     return ids
 
 
-def _is_effectively_autorejected(request: Request, db: Session, proc: Process) -> bool:
+def _is_effectively_autorejected(request: Request, db: Session, proc: FeedItem) -> bool:
     if proc.id is None:
         return False
     return proc.id in _cached_autorejected_ids(request, db)
 
 
-def _build_analisis_detail_context(proc: Process, *, mark_read: bool) -> dict:
+def _build_analisis_detail_context(proc: FeedItem, *, mark_read: bool) -> dict:
     prev_cron = proc.watch_cronograma_prev_json if proc.watch_unread else None
     prev_docs = proc.watch_documentos_prev_json if proc.watch_unread else None
     if mark_read and proc.watch_unread:
@@ -195,7 +195,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if migrate_legacy_layout(_config):
             logger.info("Layout de datos migrado a tenants/%s/", _config.tenant_id)
-        db = session_factory()
+        db = session_factory(tenant_id=_config.tenant_id)
         try:
             bootstrap_entities(db, _config)
             path_updates = migrate_process_data_dir_refs(db, _config)
@@ -279,7 +279,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         badge_session = db
         own_session = False
         if badge_session is None:
-            badge_session = session_factory()
+            badge_session = session_factory(tenant_id=_config.tenant_id)
             own_session = True
         try:
             ctx.setdefault("nav_badges", watchlist_nav_badges(badge_session))
@@ -291,7 +291,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request, db: Session = Depends(get_db)):
         counts = {
-            s.value: db.query(Process).filter(Process.status == s).count()
+            s.value: db.query(FeedItem).filter(FeedItem.status == s).count()
             for s in ProcessStatus
         }
         # Bi-régimen (0.3c-2): autorejected/publicada por decisión efectiva. Hoy coincide
@@ -299,17 +299,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # estos overrides evitan inflar "publicada" y vaciar "autorejected".
         autorejected_ids = _cached_autorejected_ids(request, db)
         counts[ProcessStatus.autorejected.value] = len(autorejected_ids)
-        publicada_q = db.query(Process).filter(
-            Process.status == ProcessStatus.publicada
+        publicada_q = db.query(FeedItem).filter(
+            FeedItem.status == ProcessStatus.publicada
         )
         if autorejected_ids:
-            publicada_q = publicada_q.filter(Process.id.notin_(autorejected_ids))
+            publicada_q = publicada_q.filter(FeedItem.id.notin_(autorejected_ids))
         counts[ProcessStatus.publicada.value] = publicada_q.count()
         entities = db.query(Entity).filter(Entity.activa.is_(True)).count()
-        recent_q = db.query(Process).options(joinedload(Process.entity))
+        recent_q = db.query(FeedItem).options(joinedload(FeedItem.entity))
         if autorejected_ids:
-            recent_q = recent_q.filter(Process.id.notin_(autorejected_ids))
-        recent = recent_q.order_by(Process.first_seen_at.desc()).limit(10).all()
+            recent_q = recent_q.filter(FeedItem.id.notin_(autorejected_ids))
+        recent = recent_q.order_by(FeedItem.first_seen_at.desc()).limit(10).all()
         return render(
             request,
             "dashboard.html",
@@ -336,16 +336,16 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # status=publicada y se filtran por el overlay.
         autorejected_ids = _cached_autorejected_ids(request, db)
         q = (
-            db.query(Process)
-            .options(joinedload(Process.entity))
+            db.query(FeedItem)
+            .options(joinedload(FeedItem.entity))
             .filter(
-                Process.status.in_(
+                FeedItem.status.in_(
                     [ProcessStatus.publicada, ProcessStatus.descargando]
                 )
             )
         )
         if autorejected_ids:
-            q = q.filter(Process.id.notin_(autorejected_ids))
+            q = q.filter(FeedItem.id.notin_(autorejected_ids))
         workflow_statuses = [ProcessStatus.publicada, ProcessStatus.descargando]
         valid_estado_values = {s.value for s in workflow_statuses}
         if estado:
@@ -354,14 +354,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     400,
                     "Estado no válido para publicaciones (publicada o descargando)",
                 )
-            q = q.filter(Process.status == ProcessStatus(estado))
+            q = q.filter(FeedItem.status == ProcessStatus(estado))
         if entidad:
             q = q.filter(
-                Process.entity_id
+                FeedItem.entity_id
                 == db.query(Entity.id).filter(Entity.ruc == entidad).scalar_subquery()
             )
         if objeto:
-            q = q.filter(Process.objeto == objeto)
+            q = q.filter(FeedItem.objeto == objeto)
         sort_col = normalize_sort_for_columns(sort, PUBLICACIONES_SORT_COLUMNS)
         sort_dir = normalize_dir(dir, sort_col)
         rows = q.all()
@@ -370,25 +370,25 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         entities_q = (
             db.query(Entity)
-            .join(Process, Process.entity_id == Entity.id)
+            .join(FeedItem, FeedItem.entity_id == Entity.id)
             .filter(
-                Process.status.in_(
+                FeedItem.status.in_(
                     [ProcessStatus.publicada, ProcessStatus.descargando]
                 )
             )
         )
         if autorejected_ids:
-            entities_q = entities_q.filter(Process.id.notin_(autorejected_ids))
+            entities_q = entities_q.filter(FeedItem.id.notin_(autorejected_ids))
         entities = entities_q.distinct().order_by(Entity.nombre).all()
-        objetos_q = db.query(Process.objeto).filter(
-            Process.status.in_([ProcessStatus.publicada, ProcessStatus.descargando]),
-            Process.objeto.isnot(None),
-            Process.objeto != "",
+        objetos_q = db.query(FeedItem.objeto).filter(
+            FeedItem.status.in_([ProcessStatus.publicada, ProcessStatus.descargando]),
+            FeedItem.objeto.isnot(None),
+            FeedItem.objeto != "",
         )
         if autorejected_ids:
-            objetos_q = objetos_q.filter(Process.id.notin_(autorejected_ids))
+            objetos_q = objetos_q.filter(FeedItem.id.notin_(autorejected_ids))
         objetos = [
-            row[0] for row in objetos_q.distinct().order_by(Process.objeto).all()
+            row[0] for row in objetos_q.distinct().order_by(FeedItem.objeto).all()
         ]
         filtro_estado = estado or ""
         filtro_entidad = entidad or ""
@@ -528,30 +528,30 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         repo = FeedRepository(db)
         autorejected_ids = _cached_autorejected_ids(request, db)
         autoreject_reasons = repo.autoreject_reasons()
-        base = db.query(Process).options(
-            joinedload(Process.entity), joinedload(Process.analysis)
+        base = db.query(FeedItem).options(
+            joinedload(FeedItem.entity), joinedload(FeedItem.analysis)
         )
         # "autorejected" = en el conjunto efectivo y NO descartado manualmente (un descarte
         # definitivo limpia el overlay, pero el guard evita estados anómalos sin limpiar).
         autorejected_pred = (
             and_(
-                Process.id.in_(autorejected_ids),
-                Process.status != ProcessStatus.descartada,
+                FeedItem.id.in_(autorejected_ids),
+                FeedItem.status != ProcessStatus.descartada,
             )
             if autorejected_ids
             else false()
         )
         if estado == "descartada":
-            q = base.filter(Process.status == ProcessStatus.descartada)
+            q = base.filter(FeedItem.status == ProcessStatus.descartada)
             if autorejected_ids:
-                q = q.filter(Process.id.notin_(autorejected_ids))
+                q = q.filter(FeedItem.id.notin_(autorejected_ids))
         elif estado == "autorejected":
             q = base.filter(autorejected_pred)
         else:
             q = base.filter(
-                or_(Process.status == ProcessStatus.descartada, autorejected_pred)
+                or_(FeedItem.status == ProcessStatus.descartada, autorejected_pred)
             )
-        rows = q.order_by(Process.updated_at.desc()).all()
+        rows = q.order_by(FeedItem.updated_at.desc()).all()
         return render(
             request,
             "descartados.html",
@@ -594,7 +594,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         db: Session = Depends(get_db),
         estado: str = Form(""),
     ):
-        proc = db.get(Process, process_id)
+        proc = db.get(FeedItem, process_id)
         if proc is None:
             raise HTTPException(404)
         if proc.status == ProcessStatus.descartada:
@@ -611,11 +611,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.get("/archivados", response_class=HTMLResponse)
     def archivados(request: Request, db: Session = Depends(get_db)):
+        from ..feed.pipeline_repository import PipelineRepository
+        from ..db.models import PipelineItem
         rows = (
-            db.query(Process)
-            .options(joinedload(Process.entity), joinedload(Process.analysis))
-            .filter(Process.status == ProcessStatus.archivada)
-            .order_by(Process.updated_at.desc())
+            PipelineRepository(db)
+            .query_by_status([ProcessStatus.archivada])
+            .options(joinedload(PipelineItem.entity), joinedload(PipelineItem.analysis))
+            .order_by(PipelineItem.updated_at.desc())
             .all()
         )
         return render(
@@ -823,7 +825,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         selected_paths = list(selected)
 
         def _job():
-            session = session_factory()
+            session = session_factory(tenant_id=_config.tenant_id)
             try:
                 runner = AnalysisRunner(_config, session)
                 runner.analyze(
@@ -859,7 +861,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     def _discard_downloaded(
         db: Session,
-        proc: Process,
+        proc: FeedItem,
         background_tasks: BackgroundTasks,
         *,
         redirect: str,
@@ -887,7 +889,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     def _archive_analyzed(
         db: Session,
-        proc: Process,
+        proc: FeedItem,
         background_tasks: BackgroundTasks,
         *,
         redirect: str,
@@ -976,9 +978,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if open_id:
             try:
                 process_for_open = (
-                    db.query(Process)
-                    .options(joinedload(Process.entity))
-                    .filter(Process.id == int(open_id))
+                    db.query(FeedItem)
+                    .options(joinedload(FeedItem.entity))
+                    .filter(FeedItem.id == int(open_id))
                     .one_or_none()
                 )
             except ValueError:
@@ -1092,14 +1094,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     @app.get("/api/stats")
     def api_stats(db: Session = Depends(get_db)):
         by_status = (
-            db.query(Process.status, func.count(Process.id))
-            .group_by(Process.status)
+            db.query(FeedItem.status, func.count(FeedItem.id))
+            .group_by(FeedItem.status)
             .all()
         )
         return {
             "by_status": {s.value: c for s, c in by_status},
             "entities": db.query(Entity).count(),
-            "total": db.query(Process).count(),
+            "total": db.query(FeedItem).count(),
         }
 
     register_process_document_routes(app, "descargados", get_db)

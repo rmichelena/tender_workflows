@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from .config import AppConfig
-from .db.models import Process
+from .db.models import FeedItem
 from .document_storage import (
     allocate_unique_path,
     download_and_store_document,
@@ -116,7 +116,7 @@ def _redownload_bad_named_doc(
     return True
 
 
-def repair_process_documents(process: Process, *, http_proxy: str | None = None) -> dict:
+def repair_process_documents(process: FeedItem, *, http_proxy: str | None = None) -> dict:
     stats = {"repaired": False, "redownloaded": 0, "removed_orphans": 0}
     if not process.data_dir:
         return stats
@@ -157,7 +157,7 @@ def repair_all_process_documents(session: Session, *, http_proxy: str | None = N
         "redownloaded": 0,
         "removed_orphans": 0,
     }
-    for proc in session.query(Process).filter(Process.data_dir.isnot(None)).all():
+    for proc in session.query(FeedItem).filter(FeedItem.data_dir.isnot(None)).all():
         totals["processes"] += 1
         stats = repair_process_documents(proc, http_proxy=http_proxy)
         if stats["repaired"]:

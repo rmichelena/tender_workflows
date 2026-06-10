@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from datetime import datetime, timezone
 
-from .db.models import Base, Entity, Process, ProcessStatus
+from .db.models import Base, Entity, FeedItem, ProcessStatus
 from .feed import FeedRepository, record_autoreject_decision, record_exempt_decision
 
 
@@ -27,7 +27,7 @@ def _entity(session, ruc="20123456789"):
 def test_find_by_ref_matches_source_identity():
     session = _session()
     entity = _entity(session)
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         source="seace",
@@ -48,15 +48,15 @@ def test_find_by_ref_matches_source_identity():
 def test_query_by_status_filters_status_and_optional_source():
     session = _session()
     entity = _entity(session)
-    seace_pub = Process(
+    seace_pub = FeedItem(
         entity_id=entity.id, anio=2026, source="seace", source_ref="1",
         nid_proceso="1", nomenclatura="LP-1", status=ProcessStatus.publicada,
     )
-    adp_pub = Process(
+    adp_pub = FeedItem(
         entity_id=entity.id, anio=2026, source="adp_portal", source_ref="A1",
         nid_proceso=None, nomenclatura="ADP-1", status=ProcessStatus.publicada,
     )
-    descartada = Process(
+    descartada = FeedItem(
         entity_id=entity.id, anio=2026, source="seace", source_ref="2",
         nid_proceso="2", nomenclatura="LP-2", status=ProcessStatus.descartada,
     )
@@ -74,7 +74,7 @@ def test_query_by_status_filters_status_and_optional_source():
 
 
 def _proc(session, entity, *, ref, status, exempt=False):
-    proc = Process(
+    proc = FeedItem(
         entity_id=entity.id, anio=2026, source="seace", source_ref=ref,
         nid_proceso=ref, nomenclatura=f"LP-{ref}", status=status,
         auto_reject_exempt=exempt,
@@ -108,7 +108,7 @@ def test_overlay_readers_return_decisions_per_tenant():
 
 def test_overlay_readers_match_legacy_status_fields():
     # Paridad 0.3c-1: con dual-write activo, el overlay refleja exactamente los campos
-    # legacy de `Process` (autorejected ≡ status; exempt ≡ auto_reject_exempt).
+    # legacy de `FeedItem` (autorejected ≡ status; exempt ≡ auto_reject_exempt).
     session = _session()
     entity = _entity(session)
     procs = [
@@ -178,7 +178,7 @@ def test_effective_autorejected_exempt_overlay_supersedes_legacy_status():
 def test_feed_regime_filters_promotion_latch():
     session = _session()
     entity = _entity(session)
-    feed_pure = Process(
+    feed_pure = FeedItem(
         entity_id=entity.id,
         anio=2026,
         source="seace",
@@ -187,7 +187,7 @@ def test_feed_regime_filters_promotion_latch():
         nomenclatura="LP-1",
         status=ProcessStatus.publicada,
     )
-    promoted = Process(
+    promoted = FeedItem(
         entity_id=entity.id,
         anio=2026,
         source="seace",
@@ -197,7 +197,7 @@ def test_feed_regime_filters_promotion_latch():
         status=ProcessStatus.publicada,
         promoted_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
     )
-    pipeline = Process(
+    pipeline = FeedItem(
         entity_id=entity.id,
         anio=2026,
         source="seace",

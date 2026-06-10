@@ -18,7 +18,7 @@ from .auto_reject import (
 )
 from .client import ProcessRow, SeaceClient
 from .config import AppConfig
-from .db.models import Entity, Process, ProcessStatus, utcnow
+from .db.models import Entity, FeedItem, ProcessStatus, utcnow
 from .feed import (
     FeedRepository,
     clear_all_feed_decisions,
@@ -80,7 +80,7 @@ def _nid_advances(current: str | None, new: str | None) -> bool:
 
 
 def is_removable_publicada_duplicate(
-    proc: Process, autorejected_ids: "Collection[int]" = ()
+    proc: FeedItem, autorejected_ids: "Collection[int]" = ()
 ) -> bool:
     """¿`proc` es un duplicado `publicada` sin datos propios (seguro de borrar)?
 
@@ -102,14 +102,14 @@ def is_removable_publicada_duplicate(
     )
 
 
-def build_claimed_nomenclatura_map(processes: list[Process]) -> dict[str, Process]:
+def build_claimed_nomenclatura_map(processes: list[FeedItem]) -> dict[str, FeedItem]:
     """Mapa nomenclatura-normalizada → proceso reclamado preferido.
 
     Ante varios reclamados con la misma nomenclatura (datos legacy / fusión incompleta)
     elige el más avanzado y, a igualdad, el de nid más reciente, y lo registra en logs;
     así la reconciliación no depende del orden no determinístico de la consulta.
     """
-    mapping: dict[str, Process] = {}
+    mapping: dict[str, FeedItem] = {}
     for proc in processes:
         key = normalize_nomenclatura(proc.nomenclatura)
         if not key:
@@ -131,7 +131,7 @@ def build_claimed_nomenclatura_map(processes: list[Process]) -> dict[str, Proces
     return mapping
 
 
-def _claimed_is_preferred(candidate: Process, current: Process) -> bool:
+def _claimed_is_preferred(candidate: FeedItem, current: FeedItem) -> bool:
     """¿`candidate` representa mejor al item que `current`? (más avanzado, luego nid)."""
     cand_rank = _CLAIMED_STATUS_RANK.get(candidate.status, -1)
     cur_rank = _CLAIMED_STATUS_RANK.get(current.status, -1)
@@ -142,8 +142,8 @@ def _claimed_is_preferred(candidate: Process, current: Process) -> bool:
 
 def adopt_republication(
     session,
-    claimed: Process,
-    existing: Process | None,
+    claimed: FeedItem,
+    existing: FeedItem | None,
     row,
     autorejected_ids: "Collection[int]" = (),
 ) -> None:
@@ -380,7 +380,7 @@ class MultiEntityScanner:
 
     def _claimed_nomenclatura_map(
         self, entity: Entity, autorejected_ids: Collection[int] = ()
-    ) -> dict[str, Process]:
+    ) -> dict[str, FeedItem]:
         """Mapa nomenclatura-normalizada → proceso reclamado de la entidad.
 
         Permite contrastar cada fila escaneada por UID de negocio (nomenclatura) contra
@@ -416,7 +416,7 @@ class MultiEntityScanner:
 
     def _publicada_nomenclatura_map(
         self, entity: Entity, autorejected_ids: Collection[int] = ()
-    ) -> dict[str, Process]:
+    ) -> dict[str, FeedItem]:
         """Mapa nomenclatura-normalizada → `publicada` feed-puro preferida (nid más reciente).
 
         Dedupe de re-publicaciones entre filas `publicada` sin promoción. Los promovidos
@@ -424,7 +424,7 @@ class MultiEntityScanner:
         se excluyen aquí y los gestiona el mapa de reclamados.
         """
         rows = self.feed.feed_pure_publicada_for_entity("seace", entity.id)
-        mapping: dict[str, Process] = {}
+        mapping: dict[str, FeedItem] = {}
         for proc in rows:
             if proc.id in autorejected_ids:
                 continue
@@ -436,7 +436,7 @@ class MultiEntityScanner:
                 mapping[key] = proc
         return mapping
 
-    def _needs_ficha_refresh(self, proc: Process) -> bool:
+    def _needs_ficha_refresh(self, proc: FeedItem) -> bool:
         if proc.status not in _FICHA_REFRESH_STATUSES:
             return False
         if not proc.updated_at:
@@ -452,7 +452,7 @@ class MultiEntityScanner:
         entity: Entity,
         client: SeaceClient,
         row: ProcessRow,
-        proc: Process | None,
+        proc: FeedItem | None,
         *,
         options: ScanOptions,
         list_page: int = 0,
@@ -473,7 +473,7 @@ class MultiEntityScanner:
             raise _DateFilterSkip()
 
         if proc is None:
-            proc = Process(
+            proc = FeedItem(
                 entity_id=entity.id,
                 anio=self.config.anio,
                 source="seace",

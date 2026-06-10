@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from .config import AppConfig
-from .db.models import AnalysisResult, Process, ProcessStatus
+from .db.models import AnalysisResult, FeedItem, ProcessStatus
 from .downloader import download_file, filename_from_content_disposition
 from .entity_process_cleanup import apply_removed_entity_policy
 from .process_storage import archive_analyzed_process
@@ -27,8 +27,8 @@ def _proc(
     *,
     data_dir: str | None = None,
     analysis_status: str | None = None,
-) -> Process:
-    proc = Process(
+) -> FeedItem:
+    proc = FeedItem(
         entity_id=1,
         anio=2026,
         nid_proceso="123",

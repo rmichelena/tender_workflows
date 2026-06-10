@@ -21,7 +21,7 @@ from fastapi.responses import RedirectResponse
 from bs4 import BeautifulSoup
 
 from ..config import AppConfig
-from ..db.models import Process
+from ..db.models import FeedItem
 from ..http_util import requests_proxies
 from ..seace_search import log_resolved_row_change, open_ficha_for_process
 
@@ -130,7 +130,7 @@ def seace_view_path(process_id: int) -> str:
     return f"/seace/open/{process_id}"
 
 
-def seace_open_redirect(process: Process, *, sid: str) -> RedirectResponse:
+def seace_open_redirect(process: FeedItem, *, sid: str) -> RedirectResponse:
     params = urlencode(
         {
             "ruc_entidad": process.entity.ruc,
@@ -180,7 +180,7 @@ def _rewrite_text(text: str) -> str:
     return text
 
 
-def _buscador_list_url(process: Process) -> str:
+def _buscador_list_url(process: FeedItem) -> str:
     return (
         f"{SEACE_ORIGIN}{SEACE_APP}/buscadorPublico/ongei/buscadorPublico.xhtml"
         f"?ruc_entidad={process.entity.ruc}&anio={process.anio}"
@@ -203,7 +203,7 @@ def _proxy_location_from_absolute(absolute_url: str) -> str | None:
 
 def _try_server_open_ficha(
     session: requests.Session,
-    process: Process,
+    process: FeedItem,
     list_html: str,
     list_url: str,
     config: AppConfig,
@@ -235,7 +235,7 @@ def _try_server_open_ficha(
     return _proxy_location_from_absolute(ficha_result.url)
 
 
-def _open_failure_notice(process: Process) -> str:
+def _open_failure_notice(process: FeedItem) -> str:
     label = process.nomenclatura or process.nid_proceso
     return (
         '<div class="seace-open-notice" style="background:#fef2f2;border:1px solid #fca5a5;'
@@ -246,7 +246,7 @@ def _open_failure_notice(process: Process) -> str:
     )
 
 
-def _inject_open_failure_notice(html: str, process: Process) -> str:
+def _inject_open_failure_notice(html: str, process: FeedItem) -> str:
     notice = _open_failure_notice(process)
     if re.search(r"</body>", html, re.I):
         return re.sub(r"</body>", notice + "</body>", html, count=1, flags=re.I)
@@ -280,7 +280,7 @@ def _forward_headers(request: Request) -> dict[str, str]:
 def _build_response(
     upstream: requests.Response,
     *,
-    process_for_inject: Process | None = None,
+    process_for_inject: FeedItem | None = None,
 ) -> Response:
     if upstream.status_code in (301, 302, 303, 307, 308):
         location = upstream.headers.get("Location", "")
@@ -329,7 +329,7 @@ def proxy_seace_request(
     request: Request,
     path: str,
     config: AppConfig,
-    process_for_open: Process | None,
+    process_for_open: FeedItem | None,
     *,
     body: bytes | None = None,
 ) -> Response:

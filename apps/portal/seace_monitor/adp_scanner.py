@@ -23,7 +23,7 @@ from .auto_reject import (
     load_auto_reject_rules,
 )
 from .config import AppConfig
-from .db.models import Entity, Process, ProcessStatus, utcnow
+from .db.models import Entity, FeedItem, ProcessStatus, utcnow
 from .feed import FeedRepository, record_autoreject_decision
 
 logger = logging.getLogger(__name__)
@@ -164,7 +164,7 @@ class AdpScanner:
         anio = self._extract_anio(adp_proc.code)
 
         if proc is None:
-            proc = Process(
+            proc = FeedItem(
                 entity_id=entity.id,
                 anio=anio,
                 source=ADP_PORTAL_SOURCE,

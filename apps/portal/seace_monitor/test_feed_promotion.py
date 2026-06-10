@@ -12,7 +12,7 @@ from .db.models import (
     Base,
     Entity,
     InterestStatus,
-    Process,
+    FeedItem,
     ProcessStatus,
 )
 from .db.session import _backfill_promoted_at
@@ -30,7 +30,7 @@ def _setup():
 
 
 def _proc(entity, *, ref, status=ProcessStatus.publicada, **kwargs):
-    return Process(
+    return FeedItem(
         entity_id=entity.id,
         anio=2026,
         source="seace",
@@ -109,11 +109,11 @@ def test_backfill_promoted_at_marks_only_curated_and_is_idempotent():
     n = _backfill_promoted_at(engine)
     session.expire_all()
     assert n == 3
-    assert session.get(Process, feed_pure.id).promoted_at is None
-    assert session.get(Process, autorejected.id).promoted_at is None
-    assert session.get(Process, descargada.id).promoted_at is not None
-    assert session.get(Process, interes.id).promoted_at is not None
-    assert session.get(Process, con_data.id).promoted_at is not None
+    assert session.get(FeedItem, feed_pure.id).promoted_at is None
+    assert session.get(FeedItem, autorejected.id).promoted_at is None
+    assert session.get(FeedItem, descargada.id).promoted_at is not None
+    assert session.get(FeedItem, interes.id).promoted_at is not None
+    assert session.get(FeedItem, con_data.id).promoted_at is not None
 
     # Idempotente: segunda corrida no toca nada.
     assert _backfill_promoted_at(engine) == 0
@@ -130,7 +130,7 @@ def test_backfill_does_not_overwrite_existing_promoted_at():
     assert _backfill_promoted_at(engine) == 0
     session.expire_all()
     # SQLite guarda el datetime sin tzinfo; comparamos el valor naive.
-    assert session.get(Process, proc.id).promoted_at == fixed.replace(tzinfo=None)
+    assert session.get(FeedItem, proc.id).promoted_at == fixed.replace(tzinfo=None)
 
 
 def test_backfill_marks_process_with_analysis():
@@ -143,7 +143,7 @@ def test_backfill_marks_process_with_analysis():
 
     assert _backfill_promoted_at(engine) == 1
     session.expire_all()
-    assert session.get(Process, proc.id).promoted_at is not None
+    assert session.get(FeedItem, proc.id).promoted_at is not None
 
 
 # --- 0.3d-2: promoción en las acciones positivas -----------------------------------
@@ -166,7 +166,7 @@ def test_begin_download_transition_promotes(tmp_path):
         pid = proc.id
 
         begin_download_transition(db, proc)
-        reloaded = db.get(Process, pid)
+        reloaded = db.get(FeedItem, pid)
         assert reloaded.status == ProcessStatus.descargando
         assert reloaded.promoted_at is not None
     finally:
@@ -202,7 +202,7 @@ def test_marking_interest_promotes(tmp_path):
     assert resp.status_code == 303
     db = session_factory()
     try:
-        reloaded = db.get(Process, pid)
+        reloaded = db.get(FeedItem, pid)
         assert reloaded.interest_status == InterestStatus.candidate
         assert reloaded.promoted_at is not None
     finally:

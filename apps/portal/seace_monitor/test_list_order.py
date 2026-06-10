@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from .db.models import Base, Entity, Process, ProcessStatus
+from .db.models import Base, Entity, FeedItem, ProcessStatus
 from .list_order import (
     enter_analizados_list,
     enter_descargados_list,
@@ -35,8 +35,8 @@ def _proc(
     *,
     nid: str,
     status: ProcessStatus,
-) -> Process:
-    proc = Process(
+) -> FeedItem:
+    proc = FeedItem(
         entity_id=entity.id,
         anio=2026,
         nid_proceso=nid,

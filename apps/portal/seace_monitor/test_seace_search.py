@@ -8,7 +8,7 @@ import pytest
 
 from .client import ProcessRow
 from .config import AppConfig
-from .db.models import Entity, Process
+from .db.models import Entity, FeedItem
 from .seace_search import (
     normalize_nomenclatura,
     resolve_process_row,
@@ -117,7 +117,7 @@ def test_search_finds_row_on_later_page_when_not_on_page_zero():
 
 def test_resolve_process_row_uses_process_nomenclatura():
     entity = Entity(ruc="20100000001", nombre="Test", activa=True)
-    proc = Process(
+    proc = FeedItem(
         entity=entity,
         entity_id=1,
         anio=2026,
