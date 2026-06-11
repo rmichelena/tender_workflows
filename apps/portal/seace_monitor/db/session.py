@@ -753,58 +753,7 @@ def _backfill_pipeline_items(engine) -> None:
                 )
 
 
-def _sync_dirty_promoted(session: Session) -> None:
-    """Dual-write (0.3e-2): sincroniza FeedItem promovidos a PipelineItem.
 
-    Se llama antes del commit. Captura objetos sucios/nuevos ANTES de flush,
-    flush para obtener PKs, luego sincroniza y flush de nuevo.
-    """
-    from .models import FeedItem as _FeedItem, AnalysisResult as _AR, PipelineItem as _PI
-    from .pipeline_sync import sync_to_pipeline
-
-    _tenant_id = getattr(session, '_tenant_id', 'default')
-
-    # Capture candidates BEFORE flush (flush moves them to persistent)
-    candidates = [
-        obj for obj in list(session.dirty) + list(session.new)
-        if isinstance(obj, (_FeedItem, _AR))
-    ]
-    if not candidates:
-        return
-
-    # Flush to ensure all PKs are assigned
-    session.flush()
-
-    synced_ids: set[int] = set()
-    needs_flush = False
-
-    for obj in candidates:
-        if isinstance(obj, _FeedItem) and obj.promoted_at is not None and obj.id is not None:
-            sync_to_pipeline(session, obj, tenant_id=_tenant_id)
-            synced_ids.add(obj.id)
-            needs_flush = True
-        elif isinstance(obj, _AR):
-            if obj.process_id is not None:
-                proc = session.get(_FeedItem, obj.process_id)
-                if proc is not None and proc.promoted_at is not None and proc.id not in synced_ids:
-                    pi = sync_to_pipeline(session, proc, tenant_id=_tenant_id)
-                    synced_ids.add(proc.id)
-                    needs_flush = True
-                    # Flush to assign PK to newly created PipelineItem
-                    # (autoflush=False means pi.id is None until flush)
-                    session.flush()
-                else:
-                    pi = (
-                        session.query(_PI)
-                        .filter(_PI.origin_feed_id == obj.process_id)
-                        .one_or_none()
-                    )
-                if obj.pipeline_item_id is None and pi is not None:
-                    obj.pipeline_item_id = pi.id
-                    needs_flush = True
-
-    if needs_flush:
-        session.flush()
 
 
 def commit_session_with_retry(
@@ -837,11 +786,86 @@ def session_factory(*, tenant_id: str = "default") -> Session:
     session._tenant_id = tenant_id  # type: ignore[attr-defined]
     # Wrap commit to ensure dual-write sync (covers ALL commit paths)
     _original_commit = session.commit
+    _original_flush = session.flush
+    def _flush_with_capture(*args, **kwargs):
+        # Capture candidates BEFORE flush clears session.dirty
+        _capture_sync_candidates(session)
+        _original_flush(*args, **kwargs)
     def _commit_with_sync():
-        _sync_dirty_promoted(session)
+        _capture_sync_candidates(session)
+        _original_flush()  # flush to assign PKs before sync
+        _sync_captured(session)
         _original_commit()
     session.commit = _commit_with_sync  # type: ignore[assignment]
+    session.flush = _flush_with_capture  # type: ignore[assignment]
     return session
+
+
+def _capture_sync_candidates(session: Session) -> None:
+    """Append dirty/new FeedItem+AR ids to session._sync_feed_ids."""
+    from .models import FeedItem as _FI, AnalysisResult as _AR
+    if not hasattr(session, '_sync_feed_ids'):
+        session._sync_feed_ids = set()  # type: ignore[attr-defined]
+        session._sync_obj_map = {}  # type: ignore[attr-defined]  # id(obj) → obj for PK-less items
+    for obj in list(session.dirty) + list(session.new):
+        if isinstance(obj, _FI) and obj.promoted_at is not None:
+            if obj.id is not None:
+                session._sync_feed_ids.add(obj.id)
+            else:
+                # Track by object identity; will resolve PK after flush
+                oid = id(obj)
+                session._sync_feed_ids.add(('obj', oid))
+                session._sync_obj_map[oid] = obj
+        elif isinstance(obj, _AR) and obj.process_id is not None:
+            session._sync_feed_ids.add(('ar', obj.process_id))
+
+
+def _sync_captured(session: Session) -> None:
+    """Dual-write: sync captured FeedItem ids to PipelineItem."""
+    from .models import FeedItem as _FeedItem, AnalysisResult as _AR, PipelineItem as _PI
+    from .pipeline_sync import sync_to_pipeline
+
+    _tenant_id = getattr(session, '_tenant_id', 'default')
+    feed_ids = getattr(session, '_sync_feed_ids', set())
+    if not feed_ids:
+        return
+    session._sync_feed_ids = set()  # consume
+
+    needs_flush = False
+    obj_map = getattr(session, '_sync_obj_map', {})
+    for key in feed_ids:
+        if isinstance(key, tuple):
+            tag, val = key
+            if tag == 'ar':
+                # AnalysisResult
+                proc_id = val
+                proc = session.get(_FeedItem, proc_id)
+                if proc is not None and proc.promoted_at is not None:
+                    pi = sync_to_pipeline(session, proc, tenant_id=_tenant_id)
+                    needs_flush = True
+                    if pi is not None:
+                        session.flush()
+                        ar = session.query(_AR).filter(
+                            _AR.process_id == proc_id,
+                            _AR.pipeline_item_id.is_(None),
+                        ).one_or_none()
+                        if ar is not None:
+                            ar.pipeline_item_id = pi.id
+            elif tag == 'obj':
+                # FeedItem tracked by object identity (no PK at capture time)
+                obj = obj_map.get(val)
+                if obj is not None and obj.id is not None and obj.promoted_at is not None:
+                    sync_to_pipeline(session, obj, tenant_id=_tenant_id)
+                    needs_flush = True
+        else:
+            # FeedItem id (int)
+            proc = session.get(_FeedItem, key)
+            if proc is not None and proc.promoted_at is not None:
+                sync_to_pipeline(session, proc, tenant_id=_tenant_id)
+                needs_flush = True
+
+    if needs_flush:
+        session.flush()
 
 
 def get_session() -> Generator[Session, None, None]:
