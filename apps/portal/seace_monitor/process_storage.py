@@ -215,6 +215,7 @@ def restore_archived_process(
     config: AppConfig, process: FeedItem, session: Session
 ) -> None:
     """Restaura desde archivados: devuelve carpeta a procesos/ y estado analizada."""
+    from .db.pipeline_sync import sync_to_pipeline, sync_analysis_to_pipeline
     src = resolve_process_data_dir(config, process.data_dir)
     if src is None or not src.is_dir():
         if process.analysis and process.analysis.status == "done":
@@ -222,6 +223,8 @@ def restore_archived_process(
             enter_analizados_list(session, process)
         else:
             process.status = ProcessStatus.publicada
+        sync_to_pipeline(session, process, tenant_id=getattr(session, '_tenant_id', 'default'))
+        sync_analysis_to_pipeline(session, process)
         return
 
     procesos = procesos_root(config)
@@ -235,6 +238,30 @@ def restore_archived_process(
     else:
         process.status = ProcessStatus.descargada
         enter_descargados_list(session, process)
+    # Sync restored fields (data_dir, status) to PipelineItem (M3 fix)
+    sync_to_pipeline(session, process, tenant_id=getattr(session, '_tenant_id', 'default'))
+    sync_analysis_to_pipeline(session, process)
+
+
+def _sync_pipeline_to_feed_batch(session: Session, feed_ids: set[int] | None = None) -> None:
+    """Sync critical fields from PipelineItem → FeedItem after maintenance (M4 fix).
+
+    Maintenance functions mutate PipelineItem directly; this helper syncs changes
+    back to FeedItem so detail views reading FeedItem stay consistent.
+    Skips mock/fake sessions that don't support full ORM queries.
+    """
+    if not hasattr(session, 'get'):
+        return
+    q = session.query(PipelineItem)
+    if feed_ids is not None:
+        q = q.filter(PipelineItem.origin_feed_id.in_(feed_ids))
+    for pi in q.all():
+        feed = session.get(FeedItem, pi.origin_feed_id)
+        if feed is not None:
+            feed.status = pi.status
+            feed.data_dir = pi.data_dir
+            feed.documentos_json = pi.documentos_json
+            feed.updated_at = pi.updated_at
 
 
 def recover_stale_workflow_transitions(
@@ -286,9 +313,11 @@ def recover_stale_workflow_transitions(
         logger.warning(
             "Transición obsoleta recuperada: proceso id=%s nid=%s status=%s",
             proc.id,
-            proc.nid_proceso,
             proc.status.value,
         )
+    # Sync maintenance changes back to FeedItem (M4 fix)
+    if recovered > 0:
+        _sync_pipeline_to_feed_batch(session)
     return recovered
 
 
@@ -317,6 +346,9 @@ def recover_stale_downloads(
             proc.id,
             proc.nid_proceso,
         )
+    # Sync maintenance changes back to FeedItem (M4 fix)
+    if recovered > 0:
+        _sync_pipeline_to_feed_batch(session)
     return recovered
 
 
@@ -339,6 +371,9 @@ def repair_processes_missing_data(config: AppConfig, session: Session) -> int:
         delete_process_analysis(session, proc)
         proc.status = ProcessStatus.publicada
         repaired += 1
+    # Sync maintenance changes back to FeedItem (M4 fix)
+    if repaired > 0:
+        _sync_pipeline_to_feed_batch(session)
     return repaired
 
 
@@ -356,6 +391,9 @@ def repair_archived_processes(config: AppConfig, session: Session) -> int:
             delete_process_analysis(session, proc)
             proc.status = ProcessStatus.publicada
         repaired += 1
+    # Sync maintenance changes back to FeedItem (M4 fix)
+    if repaired > 0:
+        _sync_pipeline_to_feed_batch(session)
     return repaired
 
 
@@ -373,6 +411,9 @@ def repair_discarded_processes(config: AppConfig, session: Session) -> int:
         clear_process_download_metadata(proc)
         delete_process_analysis(session, proc)
         repaired += 1
+    # Sync maintenance changes back to FeedItem (M4 fix)
+    if repaired > 0:
+        _sync_pipeline_to_feed_batch(session)
     return repaired
 
 
@@ -380,6 +421,8 @@ def purge_all_stale_process_data(config: AppConfig, session: Session) -> tuple[i
     """Retroactivo: procesos descartados/publicados con data_dir + dirs huérfanas."""
     processes = session.query(PipelineItem).all()
     db_cleaned = cleanup_stale_process_data(config, processes)
+    # Sync maintenance changes back to FeedItem (M4 fix)
+    _sync_pipeline_to_feed_batch(session)
 
     keep_paths: set[Path] = set()
     for proc in processes:

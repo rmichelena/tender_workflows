@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 # Campos que se copian de FeedItem → PipelineItem.
 # Excluimos: id, promoted_at (ya seteado en PipelineItem), source/source_ref
 # (van como origin_*), auto_reject_*, promoted_at, list_hash, first_seen_at.
+# Fields synced from FeedItem → PipelineItem.
+# Ranks (list_rank_*) are EXCLUDED: they are owned by PipelineItem via list_order.
+# Syncing NULL ranks from FeedItem would clobber correctly-set PipelineItem ranks.
 SYNC_FIELDS: tuple[str, ...] = (
     "entity_id",
     "anio",
@@ -60,8 +63,6 @@ SYNC_FIELDS: tuple[str, ...] = (
     "watch_cronograma_prev_json",
     "watch_documentos_prev_json",
     "watch_changelog_json",
-    "list_rank_descargados",
-    "list_rank_analizados",
     "updated_at",
 )
 
@@ -104,6 +105,10 @@ def sync_to_pipeline(session: Session, process: FeedItem, *, tenant_id: str = "d
         logger.debug("Created PipelineItem for FeedItem id=%s", process.id)
 
     _copy_fields(process, pi)
+
+    # Link AnalysisResult to PipelineItem if it exists (C1 fix)
+    sync_analysis_to_pipeline(session, process)
+
     return pi
 
 

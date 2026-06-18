@@ -97,6 +97,11 @@ def _seed_workflow_list_process(status: ProcessStatus, *, rank_attr: str) -> int
         db.commit()
         sync_to_pipeline(db, proc)
         db.commit()
+        # Ranks live in PipelineItem (0.3f: excluded from sync to avoid clobbering)
+        from seace_monitor.db.models import PipelineItem
+        pi = db.query(PipelineItem).filter(PipelineItem.origin_feed_id == proc.id).one()
+        setattr(pi, rank_attr, 1)
+        db.commit()
         return proc.id
     finally:
         db.close()

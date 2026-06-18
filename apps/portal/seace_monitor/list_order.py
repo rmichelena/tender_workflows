@@ -23,6 +23,9 @@ def _resolve_pipeline_item(session: Session, proc) -> PipelineItem | None:
     """If proc is a FeedItem, resolve its PipelineItem; if already PipelineItem, return it.
 
     Also syncs status from FeedItem to PipelineItem to handle runner mutations.
+    This status sync is intentional: AnalysisRunner mutates FeedItem.status before
+    calling list_order functions. For maintenance/recovery paths that operate directly
+    on PipelineItem, pass the PipelineItem to avoid stale FeedItem propagation.
     Returns None if session doesn't support queries (e.g. mocks).
     """
     if isinstance(proc, PipelineItem):

@@ -26,7 +26,7 @@ from ..db.maintenance import (
     is_stale_running_analysis,
     recover_stale_analyses,
 )
-from ..db.models import AnalysisResult, Entity, InterestStatus, FeedItem, ProcessStatus
+from ..db.models import AnalysisResult, Entity, InterestStatus, FeedItem, ProcessStatus, utcnow
 from ..db.session import init_db, session_factory
 from ..feed import (
     FeedRepository,
@@ -76,6 +76,7 @@ from .process_queries import get_process_or_404
 from .settings_autoreject import register_autoreject_settings_routes
 from .settings_entities import bootstrap_entities, register_settings_routes
 from .workflow_transitions import (
+    _sync_feed_to_pipeline,
     archive_work,
     begin_archive_transition,
     begin_discard_transition,
@@ -482,6 +483,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # Marcar interés es una acción positiva → promoción feed→pipeline (0.3d).
         if proc.interest_status != InterestStatus.none:
             promote(db, proc)
+        # Sync interest_status to PipelineItem if it exists (M2 fix)
+        from ..feed.pipeline_repository import get_pipeline_item_by_feed_id
+        pi = get_pipeline_item_by_feed_id(db, proc.id)
+        if pi is not None:
+            pi.interest_status = proc.interest_status
         return _workflow_list_redirect(
             _safe_workflow_path(return_to), sort=sort, dir=dir, scroll=scroll
         )
@@ -818,6 +824,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         else:
             AnalysisRunner._mark_analysis_running(analysis, run_id)
         if proc.status == ProcessStatus.analizada:
+            # Leave analizados list on PipelineItem before flipping to descargada (L1 fix)
+            from ..feed.pipeline_repository import get_pipeline_item_by_feed_id
+            pi = get_pipeline_item_by_feed_id(db, proc.id)
+            if pi is not None:
+                from .list_order import leave_analizados_list
+                leave_analizados_list(db, pi)
             proc.status = ProcessStatus.descargada
         db.commit()
         db.expunge_all()
@@ -834,6 +846,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                     run_id=run_id,
                     prior_snapshot=prior_snapshot,
                 )
+                # Explicit sync: FeedItem → PipelineItem (replaces implicit dual-write)
+                _sync_feed_to_pipeline(session, process_id)
+                session.commit()
             except AnalysisBusyError as exc:
                 logger.warning("Análisis concurrente bloqueado para proceso %s", process_id)
                 abandon_stale_analysis_run(
@@ -1025,6 +1040,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if proc.status not in (ProcessStatus.analizada, ProcessStatus.portafolio):
             raise HTTPException(400, "Solo procesos analizados o en portafolio")
         proc.status = ProcessStatus(estado)
+        # Sync status to PipelineItem (M2 fix)
+        from ..feed.pipeline_repository import get_pipeline_item_by_feed_id
+        pi = get_pipeline_item_by_feed_id(db, proc.id)
+        if pi is not None:
+            pi.status = proc.status
+            pi.updated_at = utcnow()
         db.commit()
         return _workflow_list_redirect(
             "/analizados",

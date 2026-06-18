@@ -58,7 +58,9 @@ def run_status_transition_job(
             feed.updated_at = pi.updated_at
             # Copy pipeline fields back
             for attr in ('data_dir', 'documentos_json', 'watch_unread',
-                         'watch_checked_at', 'list_rank_descargados',
+                         'watch_checked_at', 'watch_cronograma_prev_json',
+                         'watch_documentos_prev_json', 'watch_changelog_json',
+                         'list_rank_descargados',
                          'list_rank_analizados'):
                 if hasattr(pi, attr):
                     setattr(feed, attr, getattr(pi, attr))
@@ -104,10 +106,11 @@ def schedule_status_transition(
 
 def _sync_feed_to_pipeline(session: Session, feed_id: int) -> None:
     """Explicit sync after background jobs mutate FeedItem."""
-    from ..db.pipeline_sync import sync_to_pipeline
+    from ..db.pipeline_sync import sync_to_pipeline, sync_analysis_to_pipeline
     feed = session.get(FeedItem, feed_id)
     if feed is not None and feed.promoted_at is not None:
         sync_to_pipeline(session, feed, tenant_id=getattr(session, '_tenant_id', 'default'))
+        sync_analysis_to_pipeline(session, feed)
 
 
 def run_download_job(config: AppConfig, process_id: int) -> None:
@@ -155,6 +158,9 @@ def begin_download_transition(db: Session, proc: FeedItem) -> int:
 
 
 def begin_discard_transition(db: Session, proc: FeedItem) -> tuple[int, ProcessStatus]:
+    # Ensure PipelineItem exists (M6 fix)
+    promote(db, proc)
+    db.flush()
     pi = get_pipeline_item_by_feed_id(db, proc.id)
     if pi is not None:
         pi.status = ProcessStatus.descartando
@@ -169,6 +175,9 @@ def begin_discard_transition(db: Session, proc: FeedItem) -> tuple[int, ProcessS
 def begin_archive_transition(
     db: Session, proc: FeedItem
 ) -> tuple[int, ProcessStatus]:
+    # Ensure PipelineItem exists (M6 fix)
+    promote(db, proc)
+    db.flush()
     pi = get_pipeline_item_by_feed_id(db, proc.id)
     restore_status = proc.status
     if pi is not None:
