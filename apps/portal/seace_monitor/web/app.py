@@ -963,7 +963,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
                 400,
                 "Sin metadatos JSF para abrir SEACE. Vuelve a escanear el proceso.",
             )
-        sid = request.cookies.get("seace_sid") or new_session_id()
+        # Always create a fresh session for /seace/open to avoid stale JSF state
+        # from previous ficha navigation (POST back corrupts ViewState)
+        sid = new_session_id()
         return seace_open_redirect(proc, sid=sid)
 
     @app.api_route("/seace/p/{path:path}", methods=["GET", "POST", "HEAD"])
