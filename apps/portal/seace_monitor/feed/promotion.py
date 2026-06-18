@@ -63,12 +63,21 @@ def should_be_promoted(process: "FeedItem") -> bool:
 
 
 def promote(session, process: "FeedItem") -> bool:
-    """Marca el item como promovido (latch). Idempotente: no re-escribe si ya lo está.
+    """Marca el item como promovido (latch) y crea el PipelineItem si no existe.
 
     Devuelve ``True`` si setea el timestamp (transición feed→pipeline), ``False`` si ya
     estaba promovido. No hace commit (responsabilidad del caller).
     """
-    if process.promoted_at is not None:
-        return False
-    process.promoted_at = utcnow()
-    return True
+    was_promoted = process.promoted_at is not None
+    if not was_promoted:
+        process.promoted_at = utcnow()
+
+    # Ensure PipelineItem exists (explicit, replaces dual-write)
+    if process.id is not None:
+        from ..feed.pipeline_repository import get_pipeline_item_by_feed_id
+        pi = get_pipeline_item_by_feed_id(session, process.id)
+        if pi is None:
+            from ..db.pipeline_sync import sync_to_pipeline
+            sync_to_pipeline(session, process, tenant_id=getattr(session, '_tenant_id', 'default'))
+
+    return not was_promoted

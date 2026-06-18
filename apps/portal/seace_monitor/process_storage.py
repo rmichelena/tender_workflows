@@ -10,7 +10,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from .config import AppConfig
-from .db.models import FeedItem, ProcessStatus, utcnow
+from .db.models import FeedItem, PipelineItem, ProcessStatus, utcnow
 from .list_order import (
     clear_list_ranks,
     enter_analizados_list,
@@ -248,7 +248,7 @@ def recover_stale_workflow_transitions(
     cutoff = utcnow() - timedelta(seconds=stale_seconds)
     recovered = 0
     transitional = (ProcessStatus.archivando, ProcessStatus.descartando)
-    for proc in session.query(FeedItem).filter(FeedItem.status.in_(transitional)):
+    for proc in session.query(PipelineItem).filter(PipelineItem.status.in_(transitional)):
         updated = proc.updated_at
         if updated.tzinfo is None:
             updated = updated.replace(tzinfo=timezone.utc)
@@ -302,7 +302,7 @@ def recover_stale_downloads(
 
     cutoff = utcnow() - timedelta(seconds=stale_seconds)
     recovered = 0
-    for proc in session.query(FeedItem).filter(FeedItem.status == ProcessStatus.descargando):
+    for proc in session.query(PipelineItem).filter(PipelineItem.status == ProcessStatus.descargando):
         updated = proc.updated_at
         if updated.tzinfo is None:
             updated = updated.replace(tzinfo=timezone.utc)
@@ -331,7 +331,7 @@ def repair_processes_missing_data(config: AppConfig, session: Session) -> int:
         ProcessStatus.archivando,
     }
     repaired = 0
-    for proc in session.query(FeedItem).filter(FeedItem.status.in_(needs_data)):
+    for proc in session.query(PipelineItem).filter(PipelineItem.status.in_(needs_data)):
         if process_data_dir_exists(config, proc):
             continue
         clear_process_download_metadata(proc)
@@ -345,7 +345,7 @@ def repair_processes_missing_data(config: AppConfig, session: Session) -> int:
 def repair_archived_processes(config: AppConfig, session: Session) -> int:
     """Archivados sin carpeta en trash → analizada (si hay análisis) o publicada."""
     repaired = 0
-    for proc in session.query(FeedItem).filter(FeedItem.status == ProcessStatus.archivada):
+    for proc in session.query(PipelineItem).filter(PipelineItem.status == ProcessStatus.archivada):
         if process_data_dir_exists(config, proc):
             continue
         clear_process_download_metadata(proc)
@@ -362,7 +362,7 @@ def repair_archived_processes(config: AppConfig, session: Session) -> int:
 def repair_discarded_processes(config: AppConfig, session: Session) -> int:
     """Descartados con restos de descarga/análisis en BD o disco."""
     repaired = 0
-    for proc in session.query(FeedItem).filter(FeedItem.status == ProcessStatus.descartada):
+    for proc in session.query(PipelineItem).filter(PipelineItem.status == ProcessStatus.descartada):
         if (
             proc.data_dir is None
             and proc.documentos_json is None
@@ -378,7 +378,7 @@ def repair_discarded_processes(config: AppConfig, session: Session) -> int:
 
 def purge_all_stale_process_data(config: AppConfig, session: Session) -> tuple[int, int]:
     """Retroactivo: procesos descartados/publicados con data_dir + dirs huérfanas."""
-    processes = session.query(FeedItem).all()
+    processes = session.query(PipelineItem).all()
     db_cleaned = cleanup_stale_process_data(config, processes)
 
     keep_paths: set[Path] = set()

@@ -10,8 +10,9 @@ from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
 from ..analysis.runner import AnalysisRunner
-from ..db.models import FeedItem, ProcessStatus, utcnow
+from ..db.models import FeedItem, PipelineItem, ProcessStatus, utcnow
 from ..db.session import commit_session_with_retry, session_factory
+from ..feed.pipeline_repository import get_pipeline_item_by_feed_id
 from ..feed import promote
 from ..process_storage import (
     archive_analyzed_process,
@@ -26,34 +27,41 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _sync_status(feed: FeedItem, pi: PipelineItem | None) -> None:
+    """Explicit status sync: FeedItem ← PipelineItem (replaces implicit dual-write)."""
+    if pi is not None:
+        feed.status = pi.status
+        feed.updated_at = pi.updated_at
+
+
 def run_status_transition_job(
     config: AppConfig,
     process_id: int,
     *,
     expected_status: ProcessStatus,
-    work: Callable[[Session, FeedItem], None],
-    rollback_status: ProcessStatus | Callable[[FeedItem], ProcessStatus],
+    work: Callable[[Session, PipelineItem], None],
+    rollback_status: ProcessStatus | Callable[[PipelineItem], ProcessStatus],
     log_label: str,
-    on_rollback: Callable[[Session, FeedItem], None] | None = None,
+    on_rollback: Callable[[Session, PipelineItem], None] | None = None,
 ) -> None:
     """Ejecuta work mientras el proceso sigue en expected_status; revierte en error."""
     session = session_factory()
     try:
-        proc = session.get(FeedItem, process_id)
-        if proc is None or proc.status != expected_status:
+        pi = get_pipeline_item_by_feed_id(session, process_id)
+        if pi is None or pi.status != expected_status:
             return
-        work(session, proc)
+        work(session, pi)
         session.commit()
     except Exception:
         session.rollback()
-        proc = session.get(FeedItem, process_id)
-        if proc is not None and proc.status == expected_status:
+        pi = get_pipeline_item_by_feed_id(session, process_id)
+        if pi is not None and pi.status == expected_status:
             if callable(rollback_status):
-                proc.status = rollback_status(proc)
+                pi.status = rollback_status(pi)
             else:
-                proc.status = rollback_status
+                pi.status = rollback_status
             if on_rollback:
-                on_rollback(session, proc)
+                on_rollback(session, pi)
             session.commit()
         logger.exception("%s failed for process %s", log_label, process_id)
     finally:
@@ -66,10 +74,10 @@ def schedule_status_transition(
     process_id: int,
     *,
     expected_status: ProcessStatus,
-    work: Callable[[Session, FeedItem], None],
-    rollback_status: ProcessStatus | Callable[[FeedItem], ProcessStatus],
+    work: Callable[[Session, PipelineItem], None],
+    rollback_status: ProcessStatus | Callable[[PipelineItem], ProcessStatus],
     log_label: str,
-    on_rollback: Callable[[Session, FeedItem], None] | None = None,
+    on_rollback: Callable[[Session, PipelineItem], None] | None = None,
 ) -> None:
     background_tasks.add_task(
         run_status_transition_job,
@@ -89,11 +97,11 @@ def run_download_job(config: AppConfig, process_id: int) -> None:
         runner = AnalysisRunner(config, session)
         runner.download(process_id)
     except Exception:
-        proc = session.get(FeedItem, process_id)
-        if proc is not None:
-            proc.status = ProcessStatus.publicada
-            delete_process_data_dir(config, proc)
-            clear_process_download_metadata(proc)
+        pi = get_pipeline_item_by_feed_id(session, process_id)
+        if pi is not None:
+            pi.status = ProcessStatus.publicada
+            delete_process_data_dir(config, pi)
+            clear_process_download_metadata(pi)
             session.commit()
         logger.exception("Background download failed")
     finally:
@@ -109,9 +117,15 @@ def schedule_download(
 
 
 def begin_download_transition(db: Session, proc: FeedItem) -> int:
-    proc.status = ProcessStatus.descargando
-    # Acción positiva → promoción feed→pipeline (0.3d): el item deja de ser feed puro.
+    # Acción positiva → promoción feed→pipeline
     promote(db, proc)
+    pi = get_pipeline_item_by_feed_id(db, proc.id)
+    if pi is None:
+        # Fallback: sync via pipeline_sync if PipelineItem not yet created
+        from ..db.pipeline_sync import sync_to_pipeline
+        pi = sync_to_pipeline(db, proc)
+    pi.status = ProcessStatus.descargando
+    proc.status = ProcessStatus.descargando  # keep FeedItem in sync for detail views
     commit_session_with_retry(db)
     process_id = proc.id
     db.expunge(proc)
@@ -119,6 +133,10 @@ def begin_download_transition(db: Session, proc: FeedItem) -> int:
 
 
 def begin_discard_transition(db: Session, proc: FeedItem) -> tuple[int, ProcessStatus]:
+    pi = get_pipeline_item_by_feed_id(db, proc.id)
+    if pi is not None:
+        pi.status = ProcessStatus.descartando
+        pi.updated_at = utcnow()
     proc.status = ProcessStatus.descartando
     proc.updated_at = utcnow()
     process_id = proc.id
@@ -129,7 +147,11 @@ def begin_discard_transition(db: Session, proc: FeedItem) -> tuple[int, ProcessS
 def begin_archive_transition(
     db: Session, proc: FeedItem
 ) -> tuple[int, ProcessStatus]:
+    pi = get_pipeline_item_by_feed_id(db, proc.id)
     restore_status = proc.status
+    if pi is not None:
+        pi.status = ProcessStatus.archivando
+        pi.updated_at = utcnow()
     proc.status = ProcessStatus.archivando
     proc.updated_at = utcnow()
     process_id = proc.id
@@ -137,10 +159,10 @@ def begin_archive_transition(
     return process_id, restore_status
 
 
-def discard_work(config: AppConfig, session: Session, proc: FeedItem) -> None:
-    discard_process_downloads(config, proc, session)
-    proc.status = ProcessStatus.descartada
+def discard_work(config: AppConfig, session: Session, pi: PipelineItem) -> None:
+    discard_process_downloads(config, pi, session)
+    pi.status = ProcessStatus.descartada
 
 
-def archive_work(config: AppConfig, session: Session, proc: FeedItem) -> None:
-    archive_analyzed_process(config, proc, session)
+def archive_work(config: AppConfig, session: Session, pi: PipelineItem) -> None:
+    archive_analyzed_process(config, pi, session)

@@ -1,10 +1,9 @@
-"""Acceso al pipeline de trabajo curado (0.3e-3).
+"""Acceso al pipeline de trabajo curado (0.3e-3 + 0.3f).
 
 El pipeline contiene los items que el usuario ha reclamado (descargado, analizado,
-archivado, portafolio). En esta fase del refactor, las lecturas de pipeline cambian
-de `processes`/`FeedItem` a `pipeline_items`/`PipelineItem`.
+archivado, portafolio). Lecturas y escrituras pipeline operan sobre `pipeline_items`.
 
-Este módulo es el equivalente de `feed/repository.py` pero para el pipeline.
+Incluye helper `get_pipeline_item_by_feed_id` para lookup por FeedItem.id.
 """
 
 from __future__ import annotations
@@ -71,3 +70,14 @@ class PipelineRepository:
             ProcessStatus.archivada,
         ]
         return self.query_by_status(pipeline_statuses)
+
+
+def get_pipeline_item_by_feed_id(
+    session: "Session", feed_item_id: int
+) -> PipelineItem | None:
+    """Busca el PipelineItem correspondiente a un FeedItem por origin_feed_id."""
+    return (
+        session.query(PipelineItem)
+        .filter(PipelineItem.origin_feed_id == feed_item_id)
+        .one_or_none()
+    )
