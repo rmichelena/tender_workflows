@@ -51,6 +51,17 @@ def run_status_transition_job(
         if pi is None or pi.status != expected_status:
             return
         work(session, pi)
+        # Sync FeedItem from PipelineItem so detail views stay consistent
+        feed = session.get(FeedItem, process_id)
+        if feed is not None:
+            feed.status = pi.status
+            feed.updated_at = pi.updated_at
+            # Copy pipeline fields back
+            for attr in ('data_dir', 'documentos_json', 'watch_unread',
+                         'watch_checked_at', 'list_rank_descargados',
+                         'list_rank_analizados'):
+                if hasattr(pi, attr):
+                    setattr(feed, attr, getattr(pi, attr))
         session.commit()
     except Exception:
         session.rollback()
@@ -91,17 +102,30 @@ def schedule_status_transition(
     )
 
 
+def _sync_feed_to_pipeline(session: Session, feed_id: int) -> None:
+    """Explicit sync after background jobs mutate FeedItem."""
+    from ..db.pipeline_sync import sync_to_pipeline
+    feed = session.get(FeedItem, feed_id)
+    if feed is not None and feed.promoted_at is not None:
+        sync_to_pipeline(session, feed, tenant_id=getattr(session, '_tenant_id', 'default'))
+
+
 def run_download_job(config: AppConfig, process_id: int) -> None:
     session = session_factory()
     try:
         runner = AnalysisRunner(config, session)
         runner.download(process_id)
+        # Explicit sync: FeedItem → PipelineItem (replaces implicit dual-write)
+        _sync_feed_to_pipeline(session, process_id)
+        session.commit()
     except Exception:
-        pi = get_pipeline_item_by_feed_id(session, process_id)
-        if pi is not None:
-            pi.status = ProcessStatus.publicada
-            delete_process_data_dir(config, pi)
-            clear_process_download_metadata(pi)
+        session.rollback()
+        feed = session.get(FeedItem, process_id)
+        if feed is not None:
+            feed.status = ProcessStatus.publicada
+            delete_process_data_dir(config, feed)
+            clear_process_download_metadata(feed)
+            _sync_feed_to_pipeline(session, process_id)
             session.commit()
         logger.exception("Background download failed")
     finally:
@@ -117,14 +141,12 @@ def schedule_download(
 
 
 def begin_download_transition(db: Session, proc: FeedItem) -> int:
-    # Acción positiva → promoción feed→pipeline
+    # Acción positiva → promoción feed→pipeline (creates PipelineItem if needed)
     promote(db, proc)
+    db.flush()  # ensure PipelineItem has PK
     pi = get_pipeline_item_by_feed_id(db, proc.id)
-    if pi is None:
-        # Fallback: sync via pipeline_sync if PipelineItem not yet created
-        from ..db.pipeline_sync import sync_to_pipeline
-        pi = sync_to_pipeline(db, proc)
-    pi.status = ProcessStatus.descargando
+    if pi is not None:
+        pi.status = ProcessStatus.descargando
     proc.status = ProcessStatus.descargando  # keep FeedItem in sync for detail views
     commit_session_with_retry(db)
     process_id = proc.id

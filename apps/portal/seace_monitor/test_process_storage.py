@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from .config import AppConfig
-from .db.models import AnalysisResult, Base, Entity, FeedItem, ProcessStatus
+from .db.models import AnalysisResult, Base, Entity, FeedItem, PipelineItem, ProcessStatus
 from .document_storage import (
     prefer_canonical_archivo,
     prepare_download_dest,
@@ -47,7 +47,7 @@ def _proc(data_dir: str | None, status: ProcessStatus = ProcessStatus.descartada
 
 
 def _with_analysis(proc: FeedItem, status: str = "done") -> FeedItem:
-    proc.__dict__["analysis"] = AnalysisResult(status=status)
+    proc.__dict__["analysis"] = AnalysisResult(status=status, process_id=proc.id)
     return proc
 
 
@@ -78,11 +78,32 @@ def test_restore_archived_missing_dir_assigns_rank(tmp_path: Path):
     analysis = AnalysisResult(process_id=proc.id, status="done")
     db.add(analysis)
     db.flush()
+    # Create PipelineItem for this FeedItem (0.3f: ranks live in PipelineItem)
+    pi = PipelineItem(
+        origin_feed_id=proc.id,
+        origin_source="seace",
+        tenant_id="default",
+        status=ProcessStatus.archivada,
+        entity_id=proc.entity_id,
+        anio=proc.anio,
+        nid_proceso=proc.nid_proceso,
+        nomenclatura=proc.nomenclatura,
+        data_dir=proc.data_dir,
+    )
+    db.add(pi)
+    db.flush()
+    # Link analysis to PipelineItem
+    analysis.pipeline_item_id = pi.id
+    db.flush()
+
+    # Ensure relationship is loaded
+    assert proc.analysis is not None
+    assert pi.analysis is not None
 
     restore_archived_process(cfg, proc, db)
 
     assert proc.status == ProcessStatus.analizada
-    assert proc.list_rank_analizados == 1
+    assert pi.list_rank_analizados == 1
     db.close()
 
 
@@ -102,12 +123,33 @@ def test_repair_archived_missing_dir_assigns_rank(tmp_path: Path):
     analysis = AnalysisResult(process_id=proc.id, status="done")
     db.add(analysis)
     db.flush()
+    # Create PipelineItem (0.3f)
+    pi = PipelineItem(
+        origin_feed_id=proc.id,
+        origin_source="seace",
+        tenant_id="default",
+        status=ProcessStatus.archivada,
+        entity_id=proc.entity_id,
+        anio=proc.anio,
+        nid_proceso=proc.nid_proceso,
+        nomenclatura=proc.nomenclatura,
+        data_dir=proc.data_dir,
+    )
+    db.add(pi)
+    db.flush()
+    # Link analysis to PipelineItem
+    analysis.pipeline_item_id = pi.id
+    db.flush()
+
+    # Ensure relationship is loaded
+    assert proc.analysis is not None
+    assert pi.analysis is not None
 
     repaired = repair_archived_processes(cfg, db)
 
     assert repaired == 1
-    assert proc.status == ProcessStatus.analizada
-    assert proc.list_rank_analizados == 1
+    assert pi.status == ProcessStatus.analizada
+    assert pi.list_rank_analizados == 1
     db.close()
 
 
@@ -207,18 +249,45 @@ def test_restore_archived_moves_back_to_procesos(tmp_path: Path):
     trash_dir = trash_root(cfg) / proc_dir.name
     trash_dir.mkdir(parents=True)
     (trash_dir / "documentos").mkdir()
-    proc = _proc(str(trash_dir), ProcessStatus.archivada)
+    db, entity = _sqlite_session(tmp_path)
+    proc = FeedItem(
+        entity_id=entity.id,
+        anio=2026,
+        nid_proceso="restore-1",
+        nomenclatura="RESTORE-1",
+        status=ProcessStatus.archivada,
+        data_dir=str(trash_dir),
+    )
+    db.add(proc)
+    db.flush()
     _with_analysis(proc)
+    db.add(proc.analysis)
+    # Create PipelineItem (0.3f)
+    pi = PipelineItem(
+        origin_feed_id=proc.id,
+        origin_source="seace",
+        tenant_id="default",
+        status=ProcessStatus.archivada,
+        entity_id=proc.entity_id,
+        anio=proc.anio,
+        nid_proceso=proc.nid_proceso,
+        nomenclatura=proc.nomenclatura,
+        data_dir=proc.data_dir,
+    )
+    db.add(pi)
+    db.flush()
+    # Link analysis to PipelineItem
+    proc.analysis.pipeline_item_id = pi.id
+    db.flush()
 
-    session = MagicMock()
-    session.query.return_value.filter.return_value.scalar.return_value = None
-    restore_archived_process(cfg, proc, session)
+    restore_archived_process(cfg, proc, db)
 
     assert proc.status == ProcessStatus.analizada
-    assert proc.list_rank_analizados == 1
+    assert pi.list_rank_analizados == 1
     assert proc_dir.is_dir()
     assert not trash_dir.exists()
     assert proc.data_dir == str(proc_dir.resolve())
+    db.close()
 
 
 def test_purge_orphans_and_descartada(tmp_path: Path):

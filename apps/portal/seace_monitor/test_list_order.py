@@ -1,4 +1,4 @@
-"""Tests para correlativos en listas descargados / analizados."""
+"""Tests para correlativos en listas descargados / analizados (0.3f)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from .db.models import Base, Entity, FeedItem, ProcessStatus
+from .db.models import Base, Entity, FeedItem, PipelineItem, ProcessStatus
 from .list_order import (
     enter_analizados_list,
     enter_descargados_list,
@@ -35,17 +35,30 @@ def _proc(
     *,
     nid: str,
     status: ProcessStatus,
-) -> FeedItem:
-    proc = FeedItem(
+) -> PipelineItem:
+    """Crea FeedItem + PipelineItem para tests de list_order."""
+    feed = FeedItem(
         entity_id=entity.id,
         anio=2026,
         nid_proceso=nid,
         nomenclatura=f"N-{nid}",
         status=status,
     )
-    session.add(proc)
+    session.add(feed)
     session.flush()
-    return proc
+    pi = PipelineItem(
+        origin_feed_id=feed.id,
+        origin_source="seace",
+        tenant_id="default",
+        status=status,
+        entity_id=entity.id,
+        anio=2026,
+        nid_proceso=nid,
+        nomenclatura=f"N-{nid}",
+    )
+    session.add(pi)
+    session.flush()
+    return pi
 
 
 def test_enter_descargados_appends_sequential(session: tuple[Session, Entity]):

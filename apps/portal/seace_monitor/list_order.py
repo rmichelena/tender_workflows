@@ -19,17 +19,42 @@ ANALIZADOS_LIST_STATUSES = frozenset(
 )
 
 
+def _resolve_pipeline_item(session: Session, proc) -> PipelineItem | None:
+    """If proc is a FeedItem, resolve its PipelineItem; if already PipelineItem, return it.
+
+    Also syncs status from FeedItem to PipelineItem to handle runner mutations.
+    Returns None if session doesn't support queries (e.g. mocks).
+    """
+    if isinstance(proc, PipelineItem):
+        return proc
+    if not hasattr(session, 'query'):
+        return None
+    # FeedItem: look up by origin_feed_id
+    pi = (
+        session.query(PipelineItem)
+        .filter(PipelineItem.origin_feed_id == proc.id)
+        .one_or_none()
+    )
+    if pi is not None and hasattr(proc, 'status') and proc.status != pi.status:
+        # Sync status: runner mutates FeedItem.status before calling list_order
+        pi.status = proc.status
+    return pi
+
+
 def _append_rank(session: Session, proc, attr: str, statuses: frozenset) -> None:
+    pi = _resolve_pipeline_item(session, proc)
+    if pi is None:
+        return
     session.flush()
     current_max = (
         session.query(func.max(getattr(PipelineItem, attr)))
         .filter(
             PipelineItem.status.in_(tuple(statuses)),
-            PipelineItem.id != proc.id,
+            PipelineItem.id != pi.id,
         )
         .scalar()
     )
-    setattr(proc, attr, int(current_max or 0) + 1)
+    setattr(pi, attr, int(current_max or 0) + 1)
 
 
 def _renumber_list(
@@ -50,34 +75,39 @@ def _renumber_list(
 
 
 def enter_descargados_list(session: Session, proc) -> None:
-    if proc.status not in DESCARGADOS_LIST_STATUSES:
+    pi = _resolve_pipeline_item(session, proc)
+    if pi is None or pi.status not in DESCARGADOS_LIST_STATUSES:
         return
-    _append_rank(session, proc, "list_rank_descargados", DESCARGADOS_LIST_STATUSES)
+    _append_rank(session, pi, "list_rank_descargados", DESCARGADOS_LIST_STATUSES)
 
 
 def leave_descargados_list(session: Session, proc) -> None:
-    if proc.list_rank_descargados is None:
+    pi = _resolve_pipeline_item(session, proc)
+    if pi is None or pi.list_rank_descargados is None:
         return
-    proc.list_rank_descargados = None
+    pi.list_rank_descargados = None
     session.flush()
     _renumber_list(session, DESCARGADOS_LIST_STATUSES, "list_rank_descargados")
 
 
 def enter_analizados_list(session: Session, proc) -> None:
-    if proc.status not in ANALIZADOS_LIST_STATUSES:
+    pi = _resolve_pipeline_item(session, proc)
+    if pi is None or pi.status not in ANALIZADOS_LIST_STATUSES:
         return
-    _append_rank(session, proc, "list_rank_analizados", ANALIZADOS_LIST_STATUSES)
+    _append_rank(session, pi, "list_rank_analizados", ANALIZADOS_LIST_STATUSES)
 
 
 def leave_analizados_list(session: Session, proc) -> None:
-    if proc.list_rank_analizados is None:
+    pi = _resolve_pipeline_item(session, proc)
+    if pi is None or pi.list_rank_analizados is None:
         return
-    proc.list_rank_analizados = None
+    pi.list_rank_analizados = None
     session.flush()
     _renumber_list(session, ANALIZADOS_LIST_STATUSES, "list_rank_analizados")
 
 
 def clear_list_ranks(proc) -> None:
+    """Clear ranks on the object itself (works for both FeedItem and PipelineItem)."""
     proc.list_rank_descargados = None
     proc.list_rank_analizados = None
 

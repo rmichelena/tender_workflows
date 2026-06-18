@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .analysis.runner import AnalysisRunner
 from .client import ProcessRow
 from .config import AppConfig
-from .db.models import AnalysisResult, Base, Entity, FeedItem, ProcessStatus
+from .db.models import AnalysisResult, Base, Entity, FeedItem, PipelineItem, ProcessStatus
 from .parser import CronogramaEtapa, Documento, FichaData
 
 
@@ -121,6 +121,10 @@ def _setup_descargado_process(
     )
     analysis_session.add(proc)
     analysis_session.flush()
+    # Promote to create PipelineItem (0.3f: explicit promotion)
+    from .feed.promotion import promote
+    promote(analysis_session, proc)
+    analysis_session.flush()
     return cfg, proc
 
 
@@ -139,8 +143,9 @@ def test_analyze_success_assigns_analizados_rank(
 
     analysis_session.refresh(proc)
     assert proc.status == ProcessStatus.analizada
-    assert proc.list_rank_analizados == 1
-    assert proc.list_rank_descargados is None
+    pi = analysis_session.query(PipelineItem).filter_by(origin_feed_id=proc.id).one()
+    assert pi.list_rank_analizados == 1
+    assert pi.list_rank_descargados is None
 
 
 def test_rerun_leaves_and_reenters_analizados_without_duplicate_ranks(
@@ -148,10 +153,15 @@ def test_rerun_leaves_and_reenters_analizados_without_duplicate_ranks(
 ):
     cfg, p1 = _setup_descargado_process(analysis_session, tmp_path, nid="p1")
     _, p2 = _setup_descargado_process(analysis_session, tmp_path, nid="p2")
+    # Set analyzed status on PipelineItems (where ranks live now)
+    pi1 = analysis_session.query(PipelineItem).filter_by(origin_feed_id=p1.id).one()
+    pi2 = analysis_session.query(PipelineItem).filter_by(origin_feed_id=p2.id).one()
+    pi1.status = ProcessStatus.analizada
+    pi1.list_rank_analizados = 1
+    pi2.status = ProcessStatus.analizada
+    pi2.list_rank_analizados = 2
     p1.status = ProcessStatus.analizada
-    p1.list_rank_analizados = 1
     p2.status = ProcessStatus.analizada
-    p2.list_rank_analizados = 2
     analysis_session.add(
         AnalysisResult(process_id=p1.id, status="done", alcance="A1")
     )
@@ -169,11 +179,11 @@ def test_rerun_leaves_and_reenters_analizados_without_duplicate_ranks(
         ):
             runner.analyze(p1.id, ["bases.pdf"])
 
-    analysis_session.refresh(p1)
-    analysis_session.refresh(p2)
-    assert p1.list_rank_analizados == 2
-    assert p2.list_rank_analizados == 1
-    assert {p1.list_rank_analizados, p2.list_rank_analizados} == {1, 2}
+    analysis_session.refresh(pi1)
+    analysis_session.refresh(pi2)
+    assert pi1.list_rank_analizados == 2
+    assert pi2.list_rank_analizados == 1
+    assert {pi1.list_rank_analizados, pi2.list_rank_analizados} == {1, 2}
 
 
 def test_analysis_snapshot_includes_run_id_for_rollback():
