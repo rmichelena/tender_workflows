@@ -9,14 +9,24 @@ Merge: PR #2 (`285a50c`, 2026-05-28). Reviews: `review-2.md`, `review-3.md`, com
 - [ ] **Datos perdidos en incidente de migración (may-2026):** reprocesos que interesen no están en descargados/analizados; volver a **descargar** desde Publicaciones. Verificar que no queden procesos atascados en `descargando`.
 - [ ] **Smoke post-deploy (general):** descarga multi-página de documentos (ej. `LP-ABR-1-2025-IGN-EV-1`, 6 docs), triage autoreject en `/descartados?estado=autorejected`, Ver en SEACE.
 
-## 0.3e — Post-split cleanup (post-deploy, pre-merge a main)
+## 0.3f — Drop dual-write (DONE, deployed, pending merge)
 
-- [ ] **Eliminar dual-write:** una vez validado en VPS, las escrituras pipeline van directo a PipelineItem (no via sync desde FeedItem). Eliminar `_sync_dirty_promoted`, el monkey-patch en `session_factory()`, y `pipeline_sync.py`.
-- [ ] **Limpiar columnas pipeline de FeedItem:** eliminar del modelo `promoted_at`, `data_dir`, `watch_*`, `list_rank_*` y otras columnas que solo usa pipeline. Requiere migration SQLite (column rebuild).
-- [ ] **Renombrar tabla física** `processes` → `feed_items` (opcional, bajo riesgo pero requiere migration).
-- [ ] **Eliminar alias `Process = FeedItem`** en models.py.
-- [ ] **Eliminar código legacy `autorejected`:** columnas `auto_reject_*`, status `autorejected`, rutas de compat.
-- [ ] **Merge `0.3e-split-fisico` → `main`** tras validación VPS.
+- [x] **Eliminar dual-write:** monkey-patch removed, explicit sync in transitions.
+- [x] **Multi-review round 2:** 3 reviewers, 10 findings, all fixed.
+- [x] **Deployed to VPS:** smoke test passed.
+
+## 0.3g — Physical cleanup (IN PROGRESS)
+
+- [x] **0.3g-1: Dead code cleanup** — removed commented monkey-patch infra, unused get_session(), cleaned __init__.py exports.
+- [x] **0.3g-2: Remove Process alias** — deleted `Process = FeedItem` alias.
+- [x] **0.3g-3: Remove dead code in runner.py** — deleted `_resolve_document_list()`, `_reset_analysis_for_rerun()`.
+- [ ] **0.3g-4: Flip detail views to PipelineItem** — deferred (high risk, needs careful audit).
+- [ ] **0.3g-5: Drop pipeline-only columns from FeedItem** — deferred (requires detail views flipped first).
+- [ ] **0.3g-6: Rename table `processes` → `feed_items`** — deferred (45 string refs in session.py migrations).
+
+## Post-0.3g cleanup (deferred)
+
+- [ ] **Limpiar columnas pipeline de FeedItem:** requires flipping detail views to PipelineItem first.
 
 ## PR #2 — Low deferidos (performance / limpieza)
 
