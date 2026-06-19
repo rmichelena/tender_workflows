@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
 from pathlib import Path
 import time
 
@@ -588,10 +587,6 @@ def init_db(database_url: str) -> None:
         event.listen(_engine, "connect", _configure_sqlite_connection)
 
     _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
-    # Register dual-write hook as before_commit event (covers ALL commit paths)
-    # before_commit runs after flush (PKs assigned) and triggers an auto-flush
-    # for any new objects we add (the PipelineItems)
-    # event removed — dual-write is handled in commit helpers
     Base.metadata.create_all(_engine)
     _ensure_table_columns(_engine, "entities", _ENTITY_COLUMN_ADDITIONS)
     _ensure_table_columns(_engine, "processes", _PROCESS_COLUMN_ADDITIONS)
@@ -759,11 +754,7 @@ def _backfill_pipeline_items(engine) -> None:
 def commit_session_with_retry(
     session: Session, *, attempts: int = 8, delay: float = 0.25
 ) -> None:
-    """Commit con reintentos ante bloqueos transitorios de SQLite.
-
-    Antes del commit, sincroniza los FeedItem promovidos sucios a PipelineItem
-    (dual-write 0.3e-2). Solo procesa objetos que están en la sesión (new/dirty).
-    """
+    """Commit con reintentos ante bloqueos transitorios de SQLite."""
     for attempt in range(attempts):
         try:
             session.commit()
@@ -785,21 +776,3 @@ def session_factory(*, tenant_id: str = "default") -> Session:
     session = _SessionLocal()
     session._tenant_id = tenant_id  # type: ignore[attr-defined]
     return session
-
-
-# ── Legacy dual-write (removed in 0.3f) ──────────────────────────
-# The following functions were the implicit dual-write mechanism.
-# They are kept temporarily for reference but no longer used.
-# PipelineItem writes are now explicit in workflow_transitions.py.
-
-
-def get_session() -> Generator[Session, None, None]:
-    session = session_factory()
-    try:
-        yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()

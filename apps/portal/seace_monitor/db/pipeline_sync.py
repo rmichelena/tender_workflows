@@ -1,12 +1,9 @@
-"""Dual-write: sincroniza FeedItem promovido → PipelineItem (0.3e-2).
+"""Explicit sync helpers: FeedItem → PipelineItem.
 
-Durante la fase de dual-write, toda escritura a un item promovido debe reflejarse
-en `pipeline_items`. Este módulo centraliza la copia para evitar duplicar lógica
-en cada punto de escritura.
-
-El helper `sync_to_pipeline` se llama tras cualquier modificación a un `FeedItem`
-promovido (antes del commit). Es idempotente y crea/actualiza el `PipelineItem`
-correspondiente.
+Called from:
+- promote() to create PipelineItem on first promotion
+- _sync_feed_to_pipeline() after background jobs mutate FeedItem
+- sync_to_pipeline() is idempotent and creates/updates the PipelineItem
 """
 
 from __future__ import annotations
@@ -23,9 +20,6 @@ if TYPE_CHECKING:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
-# Campos que se copian de FeedItem → PipelineItem.
-# Excluimos: id, promoted_at (ya seteado en PipelineItem), source/source_ref
-# (van como origin_*), auto_reject_*, promoted_at, list_hash, first_seen_at.
 # Fields synced from FeedItem → PipelineItem.
 # Ranks (list_rank_*) are EXCLUDED: they are owned by PipelineItem via list_order.
 # Syncing NULL ranks from FeedItem would clobber correctly-set PipelineItem ranks.
