@@ -311,7 +311,7 @@ def recover_stale_workflow_transitions(
                 proc.status = ProcessStatus.descargada
         recovered += 1
         logger.warning(
-            "Transición obsoleta recuperada: proceso id=%s nid=%s status=%s",
+            "Transición obsoleta recuperada: proceso id=%s status=%s",
             proc.id,
             proc.status.value,
         )

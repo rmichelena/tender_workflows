@@ -591,6 +591,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # item (y su decisión exempt) de ser borrado como duplicado `publicada` en una
         # re-publicación SEACE.
         promote(db, proc)
+        db.flush()  # ensure newly created PipelineItem is queryable
+        # Explicit sync: update existing PipelineItem if present (review finding)
+        from ..db.pipeline_sync import sync_to_pipeline
+        sync_to_pipeline(db, proc, tenant_id=_config.tenant_id)
         return _descartados_redirect(estado)
 
     @app.post("/descartados/{process_id}/descartar")
@@ -830,6 +834,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             if pi is not None:
                 from .list_order import leave_analizados_list
                 leave_analizados_list(db, pi)
+                # Sync status change to PipelineItem before commit (review finding)
+                pi.status = ProcessStatus.descargada
+                pi.updated_at = proc.updated_at
             proc.status = ProcessStatus.descargada
         db.commit()
         db.expunge_all()

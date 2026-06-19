@@ -27,13 +27,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _sync_status(feed: FeedItem, pi: PipelineItem | None) -> None:
-    """Explicit status sync: FeedItem ← PipelineItem (replaces implicit dual-write)."""
-    if pi is not None:
-        feed.status = pi.status
-        feed.updated_at = pi.updated_at
-
-
 def run_status_transition_job(
     config: AppConfig,
     process_id: int,
@@ -75,6 +68,11 @@ def run_status_transition_job(
                 pi.status = rollback_status
             if on_rollback:
                 on_rollback(session, pi)
+            # Sync FeedItem from PipelineItem so detail views stay reachable
+            feed = session.get(FeedItem, process_id)
+            if feed is not None:
+                feed.status = pi.status
+                feed.updated_at = pi.updated_at
             session.commit()
         logger.exception("%s failed for process %s", log_label, process_id)
     finally:
