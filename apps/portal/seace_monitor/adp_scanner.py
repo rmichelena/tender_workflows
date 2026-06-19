@@ -208,6 +208,12 @@ class AdpScanner:
             )
         action = "Nuevo" if is_new else "Actualizado"
         logger.info("ADP %s: %s", action, adp_proc.code)
+
+        # Sync updated fields to PipelineItem if promoted (review finding)
+        if not is_new and proc.promoted_at is not None:
+            from .db.pipeline_sync import sync_to_pipeline
+            sync_to_pipeline(self.session, proc, tenant_id=getattr(self.session, '_tenant_id', 'default'))
+
         return is_new
 
     @staticmethod

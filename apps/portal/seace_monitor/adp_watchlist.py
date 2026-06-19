@@ -201,6 +201,11 @@ def _refresh_process(
     proc.updated_at = datetime.now(timezone.utc)
     proc.watch_unread = True
 
+    # Sync watchlist changes to PipelineItem if promoted (review finding)
+    if proc.promoted_at is not None:
+        from .db.pipeline_sync import sync_to_pipeline
+        sync_to_pipeline(session, proc, tenant_id=getattr(session, '_tenant_id', 'default'))
+
     # Actualizar manifest si existe data_dir
     if proc.data_dir:
         docs_dir = Path(proc.data_dir) / "documentos"

@@ -136,11 +136,17 @@ def _is_effectively_autorejected(request: Request, db: Session, proc: FeedItem) 
     return proc.id in _cached_autorejected_ids(request, db)
 
 
-def _build_analisis_detail_context(proc: FeedItem, *, mark_read: bool) -> dict:
+def _build_analisis_detail_context(proc: FeedItem, *, mark_read: bool, db: Session | None = None) -> dict:
     prev_cron = proc.watch_cronograma_prev_json if proc.watch_unread else None
     prev_docs = proc.watch_documentos_prev_json if proc.watch_unread else None
     if mark_read and proc.watch_unread:
         mark_watchlist_read(proc)
+        # Sync watch_unread clear to PipelineItem (review finding)
+        if db is not None:
+            from ..feed.pipeline_repository import get_pipeline_item_by_feed_id
+            _pi = get_pipeline_item_by_feed_id(db, proc.id)
+            if _pi is not None:
+                _pi.watch_unread = False
     analyzed_paths = None
     if proc.data_dir and proc.analysis and proc.analysis.status == "done":
         analyzed_paths = load_analyzed_files(Path(proc.data_dir))
@@ -653,7 +659,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if proc.status != ProcessStatus.archivada:
             raise HTTPException(404)
-        ctx = _build_analisis_detail_context(proc, mark_read=False)
+        ctx = _build_analisis_detail_context(proc, mark_read=False, db=db)
         return render(
             request,
             "analizado_detalle.html",
@@ -744,6 +750,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         prev_docs = proc.watch_documentos_prev_json if proc.watch_unread else None
         if proc.watch_unread:
             mark_watchlist_read(proc)
+            # Sync watch_unread clear to PipelineItem (review finding)
+            from ..feed.pipeline_repository import get_pipeline_item_by_feed_id
+            _pi = get_pipeline_item_by_feed_id(db, proc.id)
+            if _pi is not None:
+                _pi.watch_unread = False
         checked_paths = None
         if proc.data_dir and proc.analysis and proc.analysis.status in ("running", "error"):
             checked_paths = load_analysis_selection(Path(proc.data_dir))
@@ -823,7 +834,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if analysis is not None and analysis.status == "done":
             prior_snapshot = AnalysisRunner._analysis_snapshot(analysis)
         if analysis is None:
-            analysis = AnalysisResult(process_id=proc.id, status="running", run_id=run_id)
+            # Link to PipelineItem if promoted (review finding)
+            from ..feed.pipeline_repository import get_pipeline_item_by_feed_id
+            _pi = get_pipeline_item_by_feed_id(db, proc.id)
+            analysis = AnalysisResult(
+                process_id=proc.id,
+                pipeline_item_id=_pi.id if _pi is not None else None,
+                status="running",
+                run_id=run_id,
+            )
             db.add(analysis)
         else:
             AnalysisRunner._mark_analysis_running(analysis, run_id)
@@ -832,7 +851,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             from ..feed.pipeline_repository import get_pipeline_item_by_feed_id
             pi = get_pipeline_item_by_feed_id(db, proc.id)
             if pi is not None:
-                from .list_order import leave_analizados_list
+                from ..list_order import leave_analizados_list
                 leave_analizados_list(db, pi)
                 # Sync status change to PipelineItem before commit (review finding)
                 pi.status = ProcessStatus.descargada
@@ -1099,7 +1118,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             ProcessStatus.portafolio,
         ):
             raise HTTPException(404)
-        ctx = _build_analisis_detail_context(proc, mark_read=True)
+        ctx = _build_analisis_detail_context(proc, mark_read=True, db=db)
         return render(
             request,
             "analizado_detalle.html",

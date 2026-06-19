@@ -262,6 +262,11 @@ def _sync_pipeline_to_feed_batch(session: Session, feed_ids: set[int] | None = N
             feed.data_dir = pi.data_dir
             feed.documentos_json = pi.documentos_json
             feed.updated_at = pi.updated_at
+            feed.watch_unread = pi.watch_unread
+            feed.watch_checked_at = pi.watch_checked_at
+            feed.watch_cronograma_prev_json = pi.watch_cronograma_prev_json
+            feed.watch_documentos_prev_json = pi.watch_documentos_prev_json
+            feed.watch_changelog_json = pi.watch_changelog_json
 
 
 def recover_stale_workflow_transitions(
