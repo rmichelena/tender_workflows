@@ -198,7 +198,7 @@ class FeedItem(Base):
 class PipelineItem(Base):
     """Contexto de trabajo curado (pipeline), privado por tenant.
 
-    Se crea por **promoción** desde un `FeedItem` (hoy `Process`) ante una acción
+    Se crea por **promoción** desde un `FeedItem` ante una acción
     positiva del usuario (descargar/analizar/marcar interés). El snapshot del feed
     se copia **sin foreign key** — el feed puede purgarse sin romper el pipeline.
     """
@@ -237,10 +237,10 @@ class PipelineItem(Base):
     def source_ref(self, value: str | None) -> None:
         self.origin_source_ref = value
 
-    # ID del Process original para rutas que operan sobre la tabla processes
+    # ID del FeedItem original para rutas que operan sobre la tabla processes
     @property
     def process_id(self) -> int | None:
-        """ID del FeedItem/Process original — usado por rutas de acciones."""
+        """ID del FeedItem original — usado por rutas de acciones."""
         return self.origin_feed_id
 
     # --- Clasificación ---
@@ -379,5 +379,3 @@ class TenantFeedDecision(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
-
-Process = FeedItem  # TODO: eliminar en cleanup final
