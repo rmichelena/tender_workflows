@@ -634,7 +634,7 @@ def _backfill_pipeline_items(engine) -> None:
 
     Idempotente: solo inserta filas que no existen (por origin_feed_id). También
     backfillea `analysis_results.pipeline_item_id` para los items que ya tienen análisis.
-    No toca la tabla `processes` — el dual-write viene en 0.3e-2.
+    No toca la tabla `processes` — la sincronización FeedItem→PipelineItem es explícita vía pipeline_sync.
     """
     insp = inspect(engine)
     tables = insp.get_table_names()
