@@ -263,13 +263,6 @@ class AnalysisRunner:
             and analysis.status == "running"
         )
 
-    def _resolve_document_list(self, process: FeedItem, ruc: str) -> list[dict]:
-        if not process.nid_convocatoria or not process.link_id:
-            raise RuntimeError(
-                "Sin metadatos SEACE para abrir la ficha. Vuelve a escanear el proceso."
-            )
-        return self._fetch_documentos_from_seace(process, ruc)
-
     def _fetch_documents(self, docs: list[dict], docs_dir: Path) -> None:
         for doc in docs:
             tipo = doc.get("tipo_descarga", "3")
@@ -415,19 +408,6 @@ class AnalysisRunner:
             "requisitos": "",
             "note": "Coloca tus scripts y define analysis_output.json en proc_dir",
         }
-
-    @staticmethod
-    def _reset_analysis_for_rerun(analysis: AnalysisResult) -> None:
-        analysis.status = "running"
-        analysis.run_id = None
-        analysis.error_message = None
-        analysis.alcance = None
-        analysis.incluye = None
-        analysis.requisitos = None
-        analysis.entregables = None
-        analysis.equipos = None
-        analysis.raw_json = None
-        analysis.finished_at = None
 
     def _apply_result(self, analysis: AnalysisResult, data: dict) -> None:
         stage1 = data.get("stage1", data)
