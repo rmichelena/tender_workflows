@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from .config import AppConfig
-from .db.models import Entity, InterestStatus, FeedItem, ProcessStatus
+from .db.models import Entity, InterestStatus, FeedItem, PipelineItem, ProcessStatus
 from .db.session import session_factory
 from .web.app import create_app
 
@@ -232,6 +232,34 @@ def test_analizados_list_cells_match_headers(tmp_path: Path):
     ]
     assert cells[8].startswith("analizada")
     assert "Ver en SEACE" in cells[8]
+
+
+def test_pipeline_list_uses_feed_watch_unread_as_source_of_truth(tmp_path: Path):
+    cfg = AppConfig(data_dir=tmp_path, database_url=f"sqlite:///{tmp_path / 'web_unread.db'}")
+    app = create_app(cfg)
+    process_id = _seed_workflow_list_process(
+        ProcessStatus.analizada,
+        rank_attr="list_rank_analizados",
+    )
+
+    db: Session = session_factory()
+    try:
+        proc = db.get(FeedItem, process_id)
+        assert proc is not None
+        proc.watch_unread = True
+        pi = db.query(PipelineItem).filter(PipelineItem.origin_feed_id == process_id).one()
+        pi.watch_unread = False
+        db.commit()
+    finally:
+        db.close()
+
+    response = TestClient(app).get("/analizados")
+
+    assert response.status_code == 200
+    soup = BeautifulSoup(response.text, "lxml")
+    row = soup.select_one("table.data tbody tr")
+    assert row is not None
+    assert "row-unread" in (row.get("class") or [])
 
 
 def test_cambiar_estado_preserves_sort_and_scroll(tmp_path: Path):

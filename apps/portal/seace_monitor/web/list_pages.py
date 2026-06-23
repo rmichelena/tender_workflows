@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session, joinedload
 
 from ..db.list_views import build_pipeline_list_views
-from ..db.models import PipelineItem, ProcessStatus
+from ..db.models import FeedItem, PipelineItem, ProcessStatus
 from ..feed import FeedRepository
 from ..feed.pipeline_repository import PipelineRepository
 from .sorting import (
@@ -46,8 +46,23 @@ def render_workflow_list(
         .options(joinedload(PipelineItem.entity), joinedload(PipelineItem.analysis))
         .all()
     )
+    origin_ids = [item.origin_feed_id for item in rows if item.origin_feed_id is not None]
+    watch_unread_by_origin_id: dict[int, bool] = {}
+    if origin_ids:
+        watch_unread_by_origin_id = {
+            feed_id: bool(watch_unread)
+            for feed_id, watch_unread in (
+                db.query(FeedItem.id, FeedItem.watch_unread)
+                .filter(FeedItem.id.in_(origin_ids))
+                .all()
+            )
+        }
     processes = sort_process_list_views(
-        build_pipeline_list_views(rows, rank_attr=rank_attr),
+        build_pipeline_list_views(
+            rows,
+            rank_attr=rank_attr,
+            watch_unread_by_origin_id=watch_unread_by_origin_id,
+        ),
         sort_col,
         sort_dir,
         default_sort=WORKFLOW_LIST_DEFAULT_SORT,

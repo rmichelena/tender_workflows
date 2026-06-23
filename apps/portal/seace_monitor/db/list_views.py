@@ -41,7 +41,10 @@ def build_process_list_views(
 
 
 def build_pipeline_list_views(
-    items: list[PipelineItem], *, rank_attr: str | None = None
+    items: list[PipelineItem],
+    *,
+    rank_attr: str | None = None,
+    watch_unread_by_origin_id: dict[int, bool] | None = None,
 ) -> list[ProcessListView]:
     """Idéntico a build_process_list_views pero para PipelineItem."""
     views: list[ProcessListView] = []
@@ -52,12 +55,17 @@ def build_pipeline_list_views(
             fallback_presentacion=item.fecha_presentacion or "",
         )
         correlativo = getattr(item, rank_attr) if rank_attr else None
+        watch_unread = bool(item.watch_unread)
+        if watch_unread_by_origin_id is not None and item.origin_feed_id is not None:
+            watch_unread = bool(
+                watch_unread_by_origin_id.get(item.origin_feed_id, watch_unread)
+            )
         views.append(
             ProcessListView(
                 process=item,
                 fin_consultas=fechas.fecha_consultas or "—",
                 fin_presentacion=fechas.fecha_presentacion or "—",
-                watch_unread=bool(item.watch_unread),
+                watch_unread=watch_unread,
                 correlativo=correlativo,
             )
         )

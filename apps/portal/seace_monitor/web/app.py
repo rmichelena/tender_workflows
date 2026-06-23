@@ -141,12 +141,9 @@ def _build_analisis_detail_context(proc: FeedItem, *, mark_read: bool, db: Sessi
     prev_docs = proc.watch_documentos_prev_json if proc.watch_unread else None
     if mark_read and proc.watch_unread:
         mark_watchlist_read(proc)
-        # Sync watch_unread clear to PipelineItem (review finding)
         if db is not None:
-            from ..feed.pipeline_repository import get_pipeline_item_by_feed_id
-            _pi = get_pipeline_item_by_feed_id(db, proc.id)
-            if _pi is not None:
-                _pi.watch_unread = False
+            from ..db.pipeline_sync import sync_to_pipeline
+            sync_to_pipeline(db, proc, tenant_id=_config.tenant_id)
     analyzed_paths = None
     if proc.data_dir and proc.analysis and proc.analysis.status == "done":
         analyzed_paths = load_analyzed_files(Path(proc.data_dir))
@@ -750,11 +747,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         prev_docs = proc.watch_documentos_prev_json if proc.watch_unread else None
         if proc.watch_unread:
             mark_watchlist_read(proc)
-            # Sync watch_unread clear to PipelineItem (review finding)
-            from ..feed.pipeline_repository import get_pipeline_item_by_feed_id
-            _pi = get_pipeline_item_by_feed_id(db, proc.id)
-            if _pi is not None:
-                _pi.watch_unread = False
+            from ..db.pipeline_sync import sync_to_pipeline
+            sync_to_pipeline(db, proc, tenant_id=_config.tenant_id)
         checked_paths = None
         if proc.data_dir and proc.analysis and proc.analysis.status in ("running", "error"):
             checked_paths = load_analysis_selection(Path(proc.data_dir))
