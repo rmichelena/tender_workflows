@@ -273,6 +273,57 @@ def test_refresh_preserves_prev_baseline_while_unread(
     assert proc.watch_documentos_prev_json == baseline
 
 
+def test_refresh_syncs_unread_flag_to_pipeline_item(
+    watch_session: Session, tmp_path: Path
+):
+    cfg = AppConfig()
+    proc = _sample_process(
+        watch_session,
+        tmp_path=tmp_path,
+        docs=[{"uuid": "u1", "nombre": "a.pdf", "tipo_descarga": "3"}],
+    )
+    proc.promoted_at = proc.first_seen_at
+    watch_session.flush()
+
+    from .db.pipeline_sync import sync_to_pipeline
+
+    pi = sync_to_pipeline(watch_session, proc, tenant_id="default")
+    assert pi is not None
+    assert pi.watch_unread is False
+
+    ficha = _ficha_with_docs(
+        [
+            Documento("u1", "a.pdf", "", "", "", "", "3"),
+            Documento("u2", "b.pdf", "", "", "", "", "3"),
+        ]
+    )
+
+    def _download(docs_dir, doc, **kwargs):
+        path = docs_dir / f"{doc['uuid']}.pdf"
+        path.write_bytes(b"pdf")
+        doc["archivo"] = path.name
+        return doc["uuid"] == "u2"
+
+    with (
+        patch(
+            "seace_monitor.watchlist.open_ficha_for_process",
+            return_value=_open_ficha_result(_row(proc.nid_proceso)),
+        ),
+        patch("seace_monitor.watchlist.parse_ficha", return_value=ficha),
+        patch(
+            "seace_monitor.watchlist.download_and_store_document",
+            side_effect=_download,
+        ),
+    ):
+        assert _refresh_watchlist_process(cfg, watch_session, proc) is True
+
+    watch_session.flush()
+    watch_session.refresh(proc)
+    watch_session.refresh(pi)
+    assert proc.watch_unread is True
+    assert pi.watch_unread is True
+
+
 def test_refresh_uses_current_row_when_process_moved_to_later_page(
     watch_session: Session, tmp_path: Path
 ):

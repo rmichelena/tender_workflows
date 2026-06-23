@@ -436,6 +436,12 @@ def _refresh_watchlist_process(
     process.updated_at = datetime.now(timezone.utc)
     process.watch_unread = True
 
+    # Mantener PipelineItem alineado con el watchlist SEACE para que las
+    # listas pipeline (descargados/analizados) y sus badges usen el mismo flag.
+    if process.promoted_at is not None:
+        from .db.pipeline_sync import sync_to_pipeline
+        sync_to_pipeline(session, process, tenant_id=getattr(session, "_tenant_id", "default"))
+
     session.flush()
     logger.info(
         "Watchlist: cambios id=%s nid=%s cron=%s docs=%s",
